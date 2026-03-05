@@ -1,0 +1,22 @@
+# Secrets
+.env
+config.json
+
+# Virtual environment
+venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# IDE / tools
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db

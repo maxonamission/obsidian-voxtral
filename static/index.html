@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxtral Transcribe</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="status">
+                <label class="toggle" title="Realtime of opname modus">
+                    <input type="checkbox" id="mode-toggle" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+                <span id="status-text">Realtime</span>
+            </div>
+            <div class="header-right">
+                <select id="delay-select" class="delay-select" title="Streaming delay">
+                    <option value="240">240ms (snel)</option>
+                    <option value="480">480ms (balans)</option>
+                    <option value="1000" selected>1000ms (nauwkeurig)</option>
+                    <option value="2400">2400ms (zeer nauwkeurig)</option>
+                </select>
+                <button id="btn-copy" class="btn" title="Kopieer tekst">Kopieer</button>
+                <button id="btn-clear" class="btn" title="Wis tekst">Wis</button>
+                <button id="btn-settings" class="btn" title="Instellingen">&#9881;</button>
+            </div>
+        </header>
+
+        <main>
+            <div id="transcript" class="transcript" contenteditable="false">
+                <span class="placeholder">Druk op opnemen om te beginnen...</span>
+            </div>
+        </main>
+
+        <footer>
+            <div id="replace-hint" class="replace-hint hidden">Selectie wordt vervangen</div>
+            <button id="btn-record" class="btn btn-record">Opnemen</button>
+            <div id="queue-info" class="queue-info hidden">
+                <span id="queue-count">0</span> opname(s) in wachtrij
+            </div>
+        </footer>
+    </div>
+
+    <!-- Settings modal -->
+    <div id="settings-overlay" class="modal-overlay hidden">
+        <div class="modal">
+            <h2>Instellingen</h2>
+            <label class="modal-label" for="input-apikey">Mistral API Key</label>
+            <div class="modal-key-row">
+                <input type="password" id="input-apikey" class="modal-input" placeholder="Plak je API key hier..." autocomplete="off">
+                <button id="btn-toggle-key" class="btn btn-small" title="Toon/verberg key">&#128065;</button>
+            </div>
+            <p id="settings-status" class="modal-status"></p>
+            <p class="modal-hint">Maak een key aan op <a href="https://console.mistral.ai/api-keys" target="_blank">console.mistral.ai</a></p>
+            <div class="modal-buttons">
+                <button id="btn-save-key" class="btn btn-primary">Opslaan</button>
+                <button id="btn-close-settings" class="btn">Sluiten</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden">Gekopieerd</div>
+
+    <script src="app.js"></script>
+</body>
+</html>
