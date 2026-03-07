@@ -63,3 +63,9 @@
 	font-size: 0.85em;
 	color: var(--text-muted);
 }
+
+/* ── Send button (tap-to-send during batch recording) ── */
+
+.voxtral-send-button {
+	color: var(--text-accent) !important;
+}

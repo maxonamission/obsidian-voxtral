@@ -113,6 +113,44 @@ export class AudioRecorder {
 		requestAnimationFrame(tick);
 	}
 
+	/**
+	 * Flush current audio as a blob WITHOUT stopping the recording.
+	 * Uses MediaRecorder.requestData() to get the audio so far,
+	 * then resets the chunk buffer for the next flush.
+	 */
+	async flushChunk(): Promise<Blob> {
+		return new Promise((resolve) => {
+			if (!this.mediaRecorder || this.mediaRecorder.state !== "recording") {
+				resolve(new Blob([]));
+				return;
+			}
+
+			// Temporarily override ondataavailable to capture the flush
+			const existingChunks = [...this.chunks];
+			this.chunks = [];
+
+			const originalHandler = this.mediaRecorder.ondataavailable;
+			this.mediaRecorder.ondataavailable = (e) => {
+				if (e.data.size > 0) {
+					this.chunks.push(e.data);
+				}
+				// Restore original handler
+				if (this.mediaRecorder) {
+					this.mediaRecorder.ondataavailable = originalHandler;
+				}
+
+				const blob = new Blob(
+					[...existingChunks, ...this.chunks],
+					{ type: this.getSupportedMimeType() }
+				);
+				this.chunks = [];
+				resolve(blob);
+			};
+
+			this.mediaRecorder.requestData();
+		});
+	}
+
 	async stop(): Promise<Blob> {
 		return new Promise((resolve) => {
 			if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {

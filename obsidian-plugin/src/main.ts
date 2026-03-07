@@ -2,6 +2,7 @@ import {
 	Editor,
 	MarkdownView,
 	Notice,
+	Platform,
 	Plugin,
 } from "obsidian";
 import { VoxtralSettings, DEFAULT_SETTINGS } from "./types";
@@ -16,7 +17,17 @@ import {
 	transcribeBatch,
 	correctText,
 } from "./mistral-api";
-import { processText, matchCommand } from "./voice-commands";
+import { processText } from "./voice-commands";
+
+/** Check if Node.js APIs are available (desktop Electron only) */
+function hasNodeJs(): boolean {
+	try {
+		require("https");
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 export default class VoxtralPlugin extends Plugin {
 	settings: VoxtralSettings;
@@ -24,7 +35,22 @@ export default class VoxtralPlugin extends Plugin {
 	private realtimeTranscriber: RealtimeTranscriber | null = null;
 	private isRecording = false;
 	private statusBarEl: HTMLElement | null = null;
-	private pendingText = ""; // Buffer for realtime partial text
+	private sendRibbonEl: HTMLElement | null = null;
+	private pendingText = "";
+	private chunkIndex = 0; // Track chunk number for "sending chunk N"
+
+	/** Whether realtime mode is available on this platform */
+	get canRealtime(): boolean {
+		return !Platform.isMobile && hasNodeJs();
+	}
+
+	/** Effective mode: fall back to batch on mobile */
+	get effectiveMode(): "realtime" | "batch" {
+		if (this.settings.mode === "realtime" && this.canRealtime) {
+			return "realtime";
+		}
+		return "batch";
+	}
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -42,9 +68,11 @@ export default class VoxtralPlugin extends Plugin {
 			this.toggleRecording();
 		});
 
-		// Status bar
-		this.statusBarEl = this.addStatusBarItem();
-		this.updateStatusBar("idle");
+		// Status bar (desktop only)
+		if (!Platform.isMobile) {
+			this.statusBarEl = this.addStatusBarItem();
+			this.updateStatusBar("idle");
+		}
 
 		// Commands
 		this.addCommand({
@@ -52,6 +80,12 @@ export default class VoxtralPlugin extends Plugin {
 			name: "Start/stop opname",
 			callback: () => this.toggleRecording(),
 			hotkeys: [{ modifiers: ["Ctrl"], key: " " }],
+		});
+
+		this.addCommand({
+			id: "send-chunk",
+			name: "Verzend audio chunk (tap-to-send)",
+			callback: () => this.sendChunk(),
 		});
 
 		this.addCommand({
@@ -74,12 +108,22 @@ export default class VoxtralPlugin extends Plugin {
 
 		// Settings tab
 		this.addSettingTab(new VoxtralSettingTab(this.app, this));
+
+		// Show mobile notice on first load
+		if (Platform.isMobile && this.settings.mode === "realtime") {
+			new Notice(
+				"Voxtral: Realtime modus is niet beschikbaar op mobiel. " +
+					"Batch modus wordt gebruikt. Tik op ▶ om audio te verzenden.",
+				8000
+			);
+		}
 	}
 
 	onunload(): void {
 		if (this.isRecording) {
 			this.stopRecording();
 		}
+		this.removeSendButton();
 	}
 
 	async loadSettings(): Promise<void> {
@@ -92,6 +136,25 @@ export default class VoxtralPlugin extends Plugin {
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
+	}
+
+	// ── Send button (shown during batch recording) ──
+
+	private addSendButton(): void {
+		this.removeSendButton();
+		this.sendRibbonEl = this.addRibbonIcon(
+			"send",
+			"Voxtral: Verzend chunk",
+			() => this.sendChunk()
+		);
+		this.sendRibbonEl.addClass("voxtral-send-button");
+	}
+
+	private removeSendButton(): void {
+		if (this.sendRibbonEl) {
+			this.sendRibbonEl.remove();
+			this.sendRibbonEl = null;
+		}
 	}
 
 	// ── Recording toggle ──
@@ -121,12 +184,15 @@ export default class VoxtralPlugin extends Plugin {
 		const editor = view.editor;
 
 		try {
-			if (this.settings.mode === "realtime") {
+			if (this.effectiveMode === "realtime") {
 				await this.startRealtimeRecording(editor);
 			} else {
 				await this.startBatchRecording();
+				// Show the send button during batch recording
+				this.addSendButton();
 			}
 			this.isRecording = true;
+			this.chunkIndex = 0;
 			this.updateStatusBar("recording");
 			new Notice("Voxtral: Opname gestart");
 		} catch (e) {
@@ -139,9 +205,10 @@ export default class VoxtralPlugin extends Plugin {
 	private async stopRecording(): Promise<void> {
 		this.isRecording = false;
 		this.updateStatusBar("processing");
+		this.removeSendButton();
 
 		try {
-			if (this.settings.mode === "realtime") {
+			if (this.effectiveMode === "realtime") {
 				await this.stopRealtimeRecording();
 			} else {
 				await this.stopBatchRecording();
@@ -153,6 +220,45 @@ export default class VoxtralPlugin extends Plugin {
 
 		this.updateStatusBar("idle");
 		new Notice("Voxtral: Opname gestopt");
+	}
+
+	// ── Tap-to-send: flush current audio chunk without stopping ──
+
+	private async sendChunk(): Promise<void> {
+		if (!this.isRecording || this.effectiveMode !== "batch") {
+			return;
+		}
+
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view) return;
+
+		const editor = view.editor;
+		this.chunkIndex++;
+
+		try {
+			new Notice(`Voxtral: Chunk ${this.chunkIndex} verzenden...`);
+			const blob = await this.recorder.flushChunk();
+
+			if (blob.size === 0) {
+				new Notice("Voxtral: Geen audio in chunk");
+				return;
+			}
+
+			// Transcribe in the background while recording continues
+			let text = await transcribeBatch(blob, this.settings);
+
+			if (this.settings.autoCorrect && text) {
+				text = await correctText(text, this.settings);
+			}
+
+			if (text) {
+				processText(editor, text);
+				new Notice(`Voxtral: Chunk ${this.chunkIndex} verwerkt`);
+			}
+		} catch (e) {
+			console.error("Voxtral: Chunk transcription failed", e);
+			new Notice(`Voxtral: Chunk mislukt: ${e}`);
+		}
 	}
 
 	// ── Realtime recording ──
@@ -168,7 +274,6 @@ export default class VoxtralPlugin extends Plugin {
 				this.handleRealtimeDelta(editor, text);
 			},
 			onDone: (text) => {
-				// Final transcript for this segment
 				this.handleRealtimeDone(editor, text);
 			},
 			onError: (message) => {
@@ -179,7 +284,6 @@ export default class VoxtralPlugin extends Plugin {
 
 		await this.realtimeTranscriber.connect();
 
-		// Start audio capture, sending PCM chunks to WebSocket
 		await this.recorder.start(
 			undefined,
 			(pcmData) => {
@@ -192,16 +296,13 @@ export default class VoxtralPlugin extends Plugin {
 	}
 
 	private handleRealtimeDelta(editor: Editor, text: string): void {
-		// Accumulate text in the pending buffer
 		this.pendingText += text;
 
-		// Check for sentence-ending punctuation to process commands
 		const sentenceEnd = /[.!?]\s*$/;
 		if (sentenceEnd.test(this.pendingText)) {
 			const sentence = this.pendingText.trim();
 			this.pendingText = "";
 
-			// Check for "stop recording" command
 			const normalized = sentence.toLowerCase();
 			if (
 				normalized.includes("beeindig opname") ||
@@ -216,7 +317,6 @@ export default class VoxtralPlugin extends Plugin {
 	}
 
 	private handleRealtimeDone(editor: Editor, _text: string): void {
-		// Flush any remaining pending text
 		if (this.pendingText.trim()) {
 			processText(editor, this.pendingText.trim() + " ");
 			this.pendingText = "";
@@ -224,13 +324,10 @@ export default class VoxtralPlugin extends Plugin {
 	}
 
 	private async stopRealtimeRecording(): Promise<void> {
-		// Signal end of audio
 		this.realtimeTranscriber?.endAudio();
 
-		// Wait a moment for final transcription to arrive
 		await new Promise((resolve) => setTimeout(resolve, 1000));
 
-		// Flush remaining text
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (view && this.pendingText.trim()) {
 			processText(view.editor, this.pendingText.trim());
@@ -241,7 +338,6 @@ export default class VoxtralPlugin extends Plugin {
 		this.realtimeTranscriber = null;
 		await this.recorder.stop();
 
-		// Auto-correct if enabled
 		if (this.settings.autoCorrect && view) {
 			await this.autoCorrectAfterStop(view.editor);
 		}
@@ -292,7 +388,6 @@ export default class VoxtralPlugin extends Plugin {
 	// ── Text correction ──
 
 	private async autoCorrectAfterStop(editor: Editor): Promise<void> {
-		// Get the full note content and correct it
 		const text = editor.getValue();
 		if (!text.trim()) return;
 
@@ -408,7 +503,6 @@ export default class VoxtralPlugin extends Plugin {
 
 	private updateLevelIndicator(level: number): void {
 		if (!this.statusBarEl || !this.isRecording) return;
-		// Simple text-based level indicator
 		const bars = Math.round(level * 5);
 		const indicator = "█".repeat(bars) + "░".repeat(5 - bars);
 		this.statusBarEl.setText(`● Opname ${indicator}`);
