@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Platform, PluginSettingTab, Setting } from "obsidian";
 import type VoxtralPlugin from "./main";
 
 export class VoxtralSettingTab extends PluginSettingTab {
@@ -32,12 +32,23 @@ export class VoxtralSettingTab extends PluginSettingTab {
 				if (input) input.type = "password";
 			});
 
-		new Setting(containerEl)
+		const modeDesc = Platform.isMobile
+			? "Op mobiel is alleen batch modus beschikbaar. Gebruik tap-to-send (▶ knop) om chunks te verzenden terwijl je praat."
+			: "Realtime: tekst verschijnt terwijl je praat. Batch: opname wordt achteraf getranscribeerd.";
+
+		const modeSetting = new Setting(containerEl)
 			.setName("Modus")
-			.setDesc(
-				"Realtime: tekst verschijnt terwijl je praat. Batch: opname wordt achteraf getranscribeerd."
-			)
-			.addDropdown((drop) =>
+			.setDesc(modeDesc);
+
+		if (Platform.isMobile) {
+			modeSetting.addDropdown((drop) =>
+				drop
+					.addOption("batch", "Batch (na opname)")
+					.setValue("batch")
+					.setDisabled(true)
+			);
+		} else {
+			modeSetting.addDropdown((drop) =>
 				drop
 					.addOption("realtime", "Realtime (streaming)")
 					.addOption("batch", "Batch (na opname)")
@@ -49,6 +60,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+		}
 
 		new Setting(containerEl)
 			.setName("Taal")
