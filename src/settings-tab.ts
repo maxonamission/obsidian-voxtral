@@ -105,6 +105,20 @@ export class VoxtralSettingTab extends PluginSettingTab {
 					})
 			);
 
+		// Support
+		containerEl.createEl("h3", { text: "Steun dit project" });
+
+		new Setting(containerEl)
+			.setName("Buy Me a Coffee")
+			.setDesc("Vind je deze plugin handig? Overweeg een donatie!")
+			.addButton((btn) =>
+				btn
+					.setButtonText("☕ Buy Me a Coffee")
+					.onClick(() => {
+						window.open("https://buymeacoffee.com/maxonamission");
+					})
+			);
+
 		// Advanced settings
 		containerEl.createEl("h3", { text: "Geavanceerd" });
 

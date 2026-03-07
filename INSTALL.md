@@ -4,6 +4,8 @@ Spraak-naar-tekst dictatie voor Obsidian met Mistral Voxtral.
 Ondersteunt realtime streaming (desktop), batch transcriptie (desktop + mobiel),
 stemcommando's, en automatische tekstcorrectie.
 
+<a href="https://buymeacoffee.com/maxonamission" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
+
 ---
 
 ## Vereisten
