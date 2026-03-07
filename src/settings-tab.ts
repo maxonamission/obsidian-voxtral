@@ -1,0 +1,152 @@
+import { App, PluginSettingTab, Setting } from "obsidian";
+import type VoxtralPlugin from "./main";
+
+export class VoxtralSettingTab extends PluginSettingTab {
+	plugin: VoxtralPlugin;
+
+	constructor(app: App, plugin: VoxtralPlugin) {
+		super(app, plugin);
+		this.plugin = plugin;
+	}
+
+	display(): void {
+		const { containerEl } = this;
+		containerEl.empty();
+
+		containerEl.createEl("h2", { text: "Voxtral Transcribe" });
+
+		new Setting(containerEl)
+			.setName("Mistral API key")
+			.setDesc("Je API key van platform.mistral.ai")
+			.addText((text) =>
+				text
+					.setPlaceholder("sk-...")
+					.setValue(this.plugin.settings.apiKey)
+					.onChange(async (value) => {
+						this.plugin.settings.apiKey = value.trim();
+						await this.plugin.saveSettings();
+					})
+			)
+			.then((setting) => {
+				const input = setting.controlEl.querySelector("input");
+				if (input) input.type = "password";
+			});
+
+		new Setting(containerEl)
+			.setName("Modus")
+			.setDesc(
+				"Realtime: tekst verschijnt terwijl je praat. Batch: opname wordt achteraf getranscribeerd."
+			)
+			.addDropdown((drop) =>
+				drop
+					.addOption("realtime", "Realtime (streaming)")
+					.addOption("batch", "Batch (na opname)")
+					.setValue(this.plugin.settings.mode)
+					.onChange(async (value) => {
+						this.plugin.settings.mode = value as
+							| "realtime"
+							| "batch";
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Taal")
+			.setDesc("Taal voor batch-transcriptie (ISO 639-1)")
+			.addText((text) =>
+				text
+					.setPlaceholder("nl")
+					.setValue(this.plugin.settings.language)
+					.onChange(async (value) => {
+						this.plugin.settings.language = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Automatische correctie")
+			.setDesc(
+				"Corrigeer spelling, hoofdletters en leestekens na het stoppen van de opname"
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.autoCorrect)
+					.onChange(async (value) => {
+						this.plugin.settings.autoCorrect = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Streaming vertraging")
+			.setDesc(
+				"Vertraging in ms voor realtime modus (240-2400). Lager = sneller maar minder nauwkeurig."
+			)
+			.addSlider((slider) =>
+				slider
+					.setLimits(240, 2400, 80)
+					.setValue(this.plugin.settings.streamingDelayMs)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.plugin.settings.streamingDelayMs = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		// Advanced settings
+		containerEl.createEl("h3", { text: "Geavanceerd" });
+
+		new Setting(containerEl)
+			.setName("Realtime model")
+			.addText((text) =>
+				text
+					.setValue(this.plugin.settings.realtimeModel)
+					.onChange(async (value) => {
+						this.plugin.settings.realtimeModel = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Batch model")
+			.addText((text) =>
+				text
+					.setValue(this.plugin.settings.batchModel)
+					.onChange(async (value) => {
+						this.plugin.settings.batchModel = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Correctie model")
+			.addText((text) =>
+				text
+					.setValue(this.plugin.settings.correctModel)
+					.onChange(async (value) => {
+						this.plugin.settings.correctModel = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Correctie systeemprompt")
+			.setDesc("Laat leeg voor de standaardprompt")
+			.addTextArea((text) =>
+				text
+					.setPlaceholder("Standaard correctieprompt wordt gebruikt...")
+					.setValue(this.plugin.settings.systemPrompt)
+					.onChange(async (value) => {
+						this.plugin.settings.systemPrompt = value;
+						await this.plugin.saveSettings();
+					})
+			)
+			.then((setting) => {
+				const textarea = setting.controlEl.querySelector("textarea");
+				if (textarea) {
+					textarea.rows = 6;
+					textarea.style.width = "100%";
+				}
+			});
+	}
+}

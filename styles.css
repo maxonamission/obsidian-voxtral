@@ -1,0 +1,65 @@
+/* ── Status bar ── */
+
+.voxtral-recording {
+	color: var(--text-error);
+	font-weight: 600;
+}
+
+.voxtral-processing {
+	color: var(--text-warning);
+}
+
+/* ── Help panel (side view) ── */
+
+.voxtral-help-view {
+	padding: 12px;
+}
+
+.voxtral-help-view h3 {
+	margin-top: 0;
+	margin-bottom: 12px;
+}
+
+.voxtral-help-view h4 {
+	margin-top: 16px;
+	margin-bottom: 8px;
+}
+
+.voxtral-help-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.85em;
+}
+
+.voxtral-help-table th {
+	text-align: left;
+	border-bottom: 2px solid var(--background-modifier-border);
+	padding: 6px 8px;
+	font-weight: 600;
+}
+
+.voxtral-help-table td {
+	border-bottom: 1px solid var(--background-modifier-border);
+	padding: 5px 8px;
+	vertical-align: top;
+}
+
+.voxtral-help-label {
+	font-weight: 500;
+	white-space: nowrap;
+}
+
+.voxtral-help-patterns {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.voxtral-help-tips {
+	padding-left: 20px;
+}
+
+.voxtral-help-tips li {
+	margin-bottom: 4px;
+	font-size: 0.85em;
+	color: var(--text-muted);
+}

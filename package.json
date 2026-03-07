@@ -1,0 +1,20 @@
+{
+	"name": "obsidian-voxtral-transcribe",
+	"version": "0.1.0",
+	"description": "Speech-to-text dictation for Obsidian using Mistral Voxtral",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+	},
+	"keywords": [],
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"builtin-modules": "^4.0.0",
+		"esbuild": "^0.24.0",
+		"obsidian": "latest",
+		"tslib": "2.8.1",
+		"typescript": "5.7.2"
+	}
+}
