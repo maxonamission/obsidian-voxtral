@@ -89,7 +89,7 @@ De app is volledig functioneel voor dagelijks gebruik. Alle kernfuncties werken 
 - [x] **GitHub repo aanmaken** en code pushen
 - [x] **Build testen** — PyInstaller windowed mode fix (sys.stdout/stderr None)
 - [x] **`.gitignore` bijgewerkt** — `*.spec` verwijderd zodat spec files mee worden gecommit
-- [ ] **LICENSE bestand** toevoegen (MIT)
+- [x] **LICENSE bestand** toevoegen (MIT)
 
 ### Opschoning
 
