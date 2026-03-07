@@ -81,8 +81,17 @@ echo.
 :: Open browser after short delay
 start "" /b cmd /c "timeout /t 2 /nobreak >nul && start http://127.0.0.1:8000"
 
+:: Tell server.py not to open a second browser tab
+set VOXTRAL_NO_BROWSER=1
+
 :: Run server
 python server.py
 
 :: Deactivate venv on exit
 call venv\Scripts\deactivate.bat 2>nul
+
+:: Keep window open so user can read output
+echo.
+echo  Server is gestopt.
+echo.
+pause

@@ -10,7 +10,7 @@
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon-192.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icon-192.svg">
-    <link rel="stylesheet" href="style.css?v=18">
+    <link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
     <div class="container">
@@ -22,6 +22,10 @@
                     <span class="toggle-slider"></span>
                 </label>
                 <span id="status-text">Realtime</span>
+                <div id="mic-level" class="mic-level hidden">
+                    <div id="mic-level-bar" class="mic-level-bar"></div>
+                </div>
+                <span id="mic-level-label" class="mic-level-label hidden"></span>
                 <label class="toggle diarize-toggle" title="Sprekerherkenning (alleen opname)">
                     <input type="checkbox" id="diarize-toggle">
                     <span class="toggle-slider diarize-slider"></span>
@@ -137,6 +141,6 @@
 
     <div id="toast" class="toast hidden">Gekopieerd</div>
 
-    <script src="app.js?v=18"></script>
+    <script src="app.js?v=20"></script>
 </body>
 </html>

@@ -43,6 +43,7 @@ echo.
 pyinstaller ^
     --name VoxtralTranscribe ^
     --onedir ^
+    --windowed ^
     --noconfirm ^
     --clean ^
     --add-data "static;static" ^
@@ -67,8 +68,18 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: Copy .env.example to dist folder
+:: Copy .env.example and launcher to dist folder
 copy .env.example "dist\VoxtralTranscribe\" >nul 2>&1
+
+:: Create launcher .bat
+(
+echo @echo off
+echo cd /d "%%~dp0"
+echo set VOXTRAL_NO_BROWSER=1
+echo start "" VoxtralTranscribe.exe
+echo timeout /t 2 /nobreak ^>nul
+echo start "" http://127.0.0.1:8000
+) > "dist\VoxtralTranscribe\Start Voxtral Transcribe.bat"
 
 echo.
 echo  ╔══════════════════════════════════════╗

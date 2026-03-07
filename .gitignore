@@ -16,6 +16,9 @@ dist/
 # IDE / tools
 .claude/
 
+# Runtime logs
+error.log
+
 # OS
 .DS_Store
 Thumbs.db

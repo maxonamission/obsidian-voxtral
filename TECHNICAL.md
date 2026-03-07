@@ -10,7 +10,7 @@ Lokale spraak-naar-tekst webapplicatie met realtime streaming transcriptie via d
 
 ---
 
-## Backend — `server.py` (~280 regels)
+## Backend — `server.py` (~400 regels)
 
 ### Endpoints
 
@@ -21,6 +21,17 @@ Lokale spraak-naar-tekst webapplicatie met realtime streaming transcriptie via d
 | `/api/correct` | POST | Tekstcorrectie via Mistral Small |
 | `/api/settings` | GET/POST | API key opslag en validatie |
 | `/api/health` | GET | Status check |
+
+### Rate Limiting
+
+In-memory sliding window rate limiter voorkomt misbruik van de API:
+
+| Endpoint | Limiet | Venster |
+|---|---|---|
+| `/api/correct` | 10 requests | 60 seconden |
+| `/api/transcribe` | 10 requests | 60 seconden |
+| `/api/settings` (POST) | 5 requests | 60 seconden |
+| `/ws/transcribe` | Max 2 gelijktijdige verbindingen |
 
 ### Realtime WebSocket Flow
 
@@ -50,7 +61,7 @@ Lokale spraak-naar-tekst webapplicatie met realtime streaming transcriptie via d
 
 ---
 
-## Frontend — `app.js` (~1240 regels)
+## Frontend — `app.js` (~1350 regels)
 
 ### 1. Active Insert Point
 
@@ -112,6 +123,17 @@ Kernconcept: één `<span class="partial">` element dat alle binnenkomende tekst
 - **Bovenste helft (0–50%):** niet scrollen — positie is goed
 - **Onderste helft (>50%) of buiten beeld:** scrolt naar ~35% van de bovenkant
 - De 50vh CSS `padding-bottom` op `.transcript` zorgt voor visuele ruimte onder de actieve tekst
+
+**Slim scrollen:** de gebruiker kan omhoog scrollen om eerder gedicteerde tekst terug te lezen zonder teruggetrokken te worden. Auto-scroll pauzeert zodra de gebruiker handmatig omhoog scrollt, en hervat automatisch wanneer de gebruiker terug naar beneden scrollt. Programmatische scroll-events (van `scrollToInsertPoint` zelf) worden onderscheiden van handmatige events via een guard flag.
+
+### 6b. Microfoon statuslampje
+
+Een gekleurd bolletje (8px dot) met label dat een stabiel gemiddelde geeft van het spraakniveau:
+
+- **Meting:** RMS van `AnalyserNode` (fftSize 256, `getByteTimeDomainData`)
+- **Gemiddelde:** zeer trage EMA (0.98/0.02) alleen over spraakperiodes (boven `SILENCE_FLOOR`), zodat het label niet bij elke lettergreep flipt
+- **Tijdens stilte:** het label behoudt de laatste beoordeling — geen geflicker
+- **Zones:** grijs (stilte), rood (te zacht / te hard), geel (hard), groen (in orde)
 
 ### 7. Undo-stack
 
@@ -218,10 +240,10 @@ POST /api/transcribe mislukt
 
 ```
 voxtral-app/
-├── server.py              # FastAPI backend (~280 regels)
+├── server.py              # FastAPI backend (~400 regels)
 ├── static/
 │   ├── index.html         # UI layout + help panel + settings modal
-│   ├── app.js             # Frontend logica (~1240 regels)
+│   ├── app.js             # Frontend logica (~1350 regels)
 │   ├── style.css          # Dark mode styling (~600 regels)
 │   ├── sw.js              # Service worker (PWA offline cache)
 │   ├── manifest.json      # PWA manifest

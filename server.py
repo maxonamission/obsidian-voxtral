@@ -352,7 +352,45 @@ async def ws_transcribe(websocket: WebSocket):
 app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")
 
 if __name__ == "__main__":
+    import threading
+    import webbrowser
+
     import uvicorn
 
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="127.0.0.1", port=port)
+    # In windowed mode (PyInstaller --windowed), sys.stdout/stderr are None.
+    # Uvicorn's logger calls sys.stderr.isatty() which crashes on None.
+    # Redirect to devnull so logging works silently.
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+
+    # In windowed mode (no console), redirect crash logs to a file
+    _LOG_FILE = os.path.join(_SCRIPT_DIR, "error.log")
+
+    try:
+        port = int(os.environ.get("PORT", 8000))
+        url = f"http://127.0.0.1:{port}"
+
+        # Open browser after a short delay (gives uvicorn time to start)
+        # Skip if VOXTRAL_NO_BROWSER is set (e.g. launcher .bat handles it)
+        if os.environ.get("VOXTRAL_NO_BROWSER") != "1":
+            threading.Timer(1.5, webbrowser.open, args=[url]).start()
+            logger.info(f"Opening browser at {url}")
+
+        uvicorn.run(app, host="127.0.0.1", port=port)
+    except Exception:
+        traceback.print_exc()
+        # Also write to error.log for windowed mode (no console visible)
+        try:
+            with open(_LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                traceback.print_exc(file=f)
+        except Exception:
+            pass
+        # If console is available, pause so user can read the error
+        try:
+            input("\nDruk op Enter om te sluiten...")
+        except (EOFError, RuntimeError):
+            pass  # no console (windowed mode)

@@ -14,6 +14,8 @@ Lokale spraak-naar-tekst applicatie met realtime streaming via de [Mistral](http
 - **PWA** — installeerbaar als standalone app
 - **Auto-reconnect** — bij verbindingsproblemen wordt automatisch opnieuw verbonden
 - **Sprekerherkenning** — optionele diarization in batch modus
+- **Microfoon status** — statuslampje met stabiele beoordeling van je microfoonniveau
+- **Slim scrollen** — scroll omhoog om terug te lezen terwijl je dicteert, auto-scroll hervat als je terug naar beneden scrollt
 
 ## Vereisten
 

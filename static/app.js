@@ -8,6 +8,11 @@ let useRealtime = true;
 let useDiarize = false;
 let activeInsert = null; // span where incoming text is inserted
 let isMidSentenceInsert = false; // true when inserting inside a sentence (not after . ! ?)
+let analyserNode = null;
+let micLevelAnimId = null;
+let smoothLevel = 0; // smoothed mic level (0–1)
+let lastLabel = ""; // current displayed label text
+let userScrolledAway = false; // true when user manually scrolled up
 
 // ── Correction settings ──
 let autoCorrect = JSON.parse(localStorage.getItem("voxtral-autocorrect") || "false");
@@ -74,6 +79,36 @@ delaySelect.addEventListener("change", () => {
     localStorage.setItem("voxtral-delay", delaySelect.value);
 });
 const replaceHint = document.getElementById("replace-hint");
+const micLevel = document.getElementById("mic-level");
+const micLevelBar = document.getElementById("mic-level-bar");
+const micLevelLabel = document.getElementById("mic-level-label");
+
+// ── Auto-scroll: pause when user scrolls up, resume when they scroll back down ──
+(function initScrollTracking() {
+    const main = transcript.closest("main");
+    if (!main) return;
+    let programmaticScroll = false;
+
+    // Intercept programmatic scrollTo to distinguish from user scrolls
+    const origScrollTo = main.scrollTo.bind(main);
+    main.scrollTo = function (...args) {
+        programmaticScroll = true;
+        origScrollTo(...args);
+        // smooth scroll takes time; reset flag after it settles
+        setTimeout(() => { programmaticScroll = false; }, 600);
+    };
+
+    main.addEventListener("scroll", () => {
+        if (programmaticScroll) return;
+        // User is scrolling manually. Check if they're near the bottom.
+        const distFromBottom = main.scrollHeight - main.scrollTop - main.clientHeight;
+        if (distFromBottom > 80) {
+            userScrolledAway = true;
+        } else {
+            userScrolledAway = false;
+        }
+    });
+})();
 const queueInfo = document.getElementById("queue-info");
 const queueCount = document.getElementById("queue-count");
 const toast = document.getElementById("toast");
@@ -683,6 +718,9 @@ function appendDiarizedText(segments) {
 }
 
 function scrollToInsertPoint() {
+    // Don't auto-scroll if user has scrolled away to read earlier text
+    if (userScrolledAway) return;
+
     const main = transcript.closest("main");
     if (!main) return;
 
@@ -706,6 +744,77 @@ function scrollToInsertPoint() {
         // Fallback: scroll to bottom (e.g. when appending without active insert)
         main.scrollTop = main.scrollHeight;
     }
+}
+
+// ── Mic level indicator ──
+function startMicLevel(source) {
+    analyserNode = audioContext.createAnalyser();
+    analyserNode.fftSize = 256;
+    source.connect(analyserNode);
+    micLevel.classList.remove("hidden");
+    micLevelLabel.classList.remove("hidden");
+    updateMicLevel();
+}
+
+function updateMicLevel() {
+    if (!analyserNode) return;
+    const data = new Uint8Array(analyserNode.fftSize);
+    analyserNode.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+        const v = (data[i] - 128) / 128;
+        sum += v * v;
+    }
+    const rms = Math.sqrt(sum / data.length);
+    const rawLevel = Math.min(1, rms * 3); // amplify for visibility
+
+    // Only update the speech average when there's actual speech (above silence floor).
+    // This gives a stable overall assessment instead of a jumpy real-time meter.
+    const SILENCE_FLOOR = 0.06;
+    if (rawLevel > SILENCE_FLOOR) {
+        // Very slow EMA: assessment changes gradually over ~3-5 seconds of speech
+        smoothLevel = smoothLevel === 0
+            ? rawLevel
+            : smoothLevel * 0.98 + rawLevel * 0.02;
+    }
+    // During silence: keep previous smoothLevel (= last speech assessment)
+
+    // Determine status: one stable assessment based on average speech level
+    let newLabel, dotColor;
+    if (smoothLevel < SILENCE_FLOOR) {
+        // Not spoken yet or only silence
+        newLabel = ""; dotColor = "#555";
+    } else if (smoothLevel < 0.12) {
+        newLabel = "te zacht"; dotColor = "#ef4444";
+    } else if (smoothLevel > 0.75) {
+        newLabel = "te hard"; dotColor = "#ef4444";
+    } else if (smoothLevel > 0.45) {
+        newLabel = "hard"; dotColor = "#eab308";
+    } else {
+        newLabel = "in orde"; dotColor = "#4ade80";
+    }
+
+    // Update dot color
+    micLevel.style.background = dotColor;
+
+    // Update label (only when it actually changes)
+    if (newLabel !== lastLabel) {
+        micLevelLabel.textContent = newLabel;
+        micLevelLabel.style.color = dotColor;
+        lastLabel = newLabel;
+    }
+    micLevelAnimId = requestAnimationFrame(updateMicLevel);
+}
+
+function stopMicLevel() {
+    if (micLevelAnimId) { cancelAnimationFrame(micLevelAnimId); micLevelAnimId = null; }
+    if (analyserNode) { analyserNode.disconnect(); analyserNode = null; }
+    smoothLevel = 0;
+    lastLabel = "";
+    micLevel.classList.add("hidden");
+    micLevelLabel.classList.add("hidden");
+    micLevel.style.background = "#555";
+    micLevelLabel.textContent = "";
 }
 
 // ── Audio: PCM s16le 16kHz mono ──
@@ -802,6 +911,8 @@ async function startRealtime() {
 
     source.connect(processorNode);
     processorNode.connect(audioContext.destination);
+
+    startMicLevel(source);
 }
 
 function stopRealtime() {
@@ -820,6 +931,11 @@ async function startOffline() {
     const audioConstraints = { channelCount: 1 };
     if (selectedMicId) audioConstraints.deviceId = { exact: selectedMicId };
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+
+    // Create AudioContext for mic level monitoring
+    audioContext = new AudioContext();
+    const monitorSource = audioContext.createMediaStreamSource(mediaStream);
+    startMicLevel(monitorSource);
 
     offlineChunks = [];
     mediaRecorder = new MediaRecorder(mediaStream, { mimeType: "audio/webm;codecs=opus" });
@@ -871,6 +987,7 @@ function stopOffline() {
 }
 
 function stopAudioCapture() {
+    stopMicLevel();
     if (processorNode) { processorNode.disconnect(); processorNode = null; }
     if (audioContext) { audioContext.close(); audioContext = null; }
     if (mediaStream) { mediaStream.getTracks().forEach((t) => t.stop()); mediaStream = null; }

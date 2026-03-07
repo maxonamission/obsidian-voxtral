@@ -1,8 +1,8 @@
 # Project Status — Voxtral Transcribe
 
-**Laatste update:** 2026-03-06
+**Laatste update:** 2026-03-07
 
-## Huidige staat: Werkende app (v18)
+## Huidige staat: Werkende app (v20)
 
 De app is volledig functioneel voor dagelijks gebruik. Alle kernfuncties werken betrouwbaar.
 
@@ -39,6 +39,8 @@ De app is volledig functioneel voor dagelijks gebruik. Alle kernfuncties werken 
 - [x] Mid-text editing (klik om invoegpunt te verplaatsen)
 - [x] Tekst selecteren en vervangen
 - [x] Scroll volgt invoegpunt (35% van bovenkant)
+- [x] Slim scrollen: auto-scroll pauzeert bij handmatig omhoog scrollen
+- [x] Microfoon statuslampje (stabiel gemiddelde, geen flicker)
 - [x] 50vh padding voor visuele ruimte onder tekst
 - [x] Help panel met stemcommando-overzicht
 - [x] Configureerbare sneltoets (standaard Ctrl+Space)
@@ -85,7 +87,7 @@ De app is volledig functioneel voor dagelijks gebruik. Alle kernfuncties werken 
 ### Prioriteit: GitHub & Build
 
 - [x] **GitHub repo aanmaken** en code pushen
-- [ ] **Build testen** — `build.bat` draaien en verifiëren dat de executable werkt
+- [x] **Build testen** — PyInstaller windowed mode fix (sys.stdout/stderr None)
 - [x] **`.gitignore` bijgewerkt** — `*.spec` verwijderd zodat spec files mee worden gecommit
 - [ ] **LICENSE bestand** toevoegen (MIT)
 
@@ -120,6 +122,7 @@ De undo stack bewaart maximaal 20 snapshots van `transcript.innerHTML`. Voor typ
 
 | Versie | Datum | Wijzigingen |
 |---|---|---|
+| v20 | 2026-03-07 | Microfoon statuslampje, slim scrollen, PyInstaller windowed mode fix, start.bat verbeteringen |
 | v18 | 2026-03-06 | Auto-reconnect, gebruiksvriendelijke foutmeldingen, rate limiting, WebSocket limiet |
 | v17 | 2026-03-06 | Scroll padding fix (35%/50% thresholds) |
 | v16 | 2026-03-05 | `scrollToInsertPoint()` vervangt `scrollToBottom()` |

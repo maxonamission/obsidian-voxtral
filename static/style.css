@@ -602,6 +602,25 @@ footer {
     animation: correct-flash 1.5s ease-out;
 }
 
+/* Mic level indicator (header) — status dot */
+.mic-level {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #555;
+    transition: background 0.5s ease;
+}
+
+.mic-level-bar {
+    display: none;
+}
+
+.mic-level-label {
+    font-size: 0.75rem;
+    color: #888;
+    transition: color 0.5s ease;
+}
+
 .hidden {
     display: none;
 }
