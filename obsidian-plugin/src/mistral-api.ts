@@ -75,6 +75,11 @@ export async function correctText(
 }
 
 // ── Realtime streaming transcription via WebSocket ──
+//
+// The Mistral API requires Authorization headers on WebSocket connections.
+// The browser WebSocket API does NOT support custom headers.
+// Obsidian runs in Electron, so we use Node.js `http`/`https` modules
+// to do a raw WebSocket upgrade with custom headers.
 
 export interface RealtimeCallbacks {
 	onSessionCreated: () => void;
@@ -83,8 +88,202 @@ export interface RealtimeCallbacks {
 	onError: (message: string) => void;
 }
 
+// Minimal WebSocket-like interface for our Node.js implementation
+interface WsConnection {
+	send: (data: string) => void;
+	close: () => void;
+	readyState: number;
+}
+
+const WS_OPEN = 1;
+
+/**
+ * Create a WebSocket connection using Node.js https module.
+ * This allows us to send Authorization headers, which the browser
+ * WebSocket API does not support.
+ */
+function createNodeWebSocket(
+	url: string,
+	headers: Record<string, string>,
+	callbacks: {
+		onOpen: () => void;
+		onMessage: (data: string) => void;
+		onError: (err: Error) => void;
+		onClose: () => void;
+	}
+): WsConnection {
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	const https = require("https") as typeof import("https");
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	const crypto = require("crypto") as typeof import("crypto");
+
+	const parsed = new URL(url);
+	const wsKey = crypto.randomBytes(16).toString("base64");
+
+	const conn: WsConnection = {
+		readyState: 0, // CONNECTING
+		send: () => {},
+		close: () => {},
+	};
+
+	const req = https.request(
+		{
+			hostname: parsed.hostname,
+			port: parsed.port || 443,
+			path: parsed.pathname + parsed.search,
+			method: "GET",
+			headers: {
+				...headers,
+				Connection: "Upgrade",
+				Upgrade: "websocket",
+				"Sec-WebSocket-Version": "13",
+				"Sec-WebSocket-Key": wsKey,
+			},
+		},
+		(res) => {
+			// If we get a normal HTTP response, it means upgrade failed
+			callbacks.onError(
+				new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
+			);
+		}
+	);
+
+	req.on("upgrade", (res, socket) => {
+		conn.readyState = WS_OPEN;
+
+		// WebSocket frame sender (text frames only)
+		conn.send = (data: string) => {
+			const payload = Buffer.from(data, "utf-8");
+			const mask = crypto.randomBytes(4);
+			let header: Buffer;
+
+			if (payload.length < 126) {
+				header = Buffer.alloc(6);
+				header[0] = 0x81; // FIN + text opcode
+				header[1] = 0x80 | payload.length; // MASK + length
+				mask.copy(header, 2);
+			} else if (payload.length < 65536) {
+				header = Buffer.alloc(8);
+				header[0] = 0x81;
+				header[1] = 0x80 | 126;
+				header.writeUInt16BE(payload.length, 2);
+				mask.copy(header, 4);
+			} else {
+				header = Buffer.alloc(14);
+				header[0] = 0x81;
+				header[1] = 0x80 | 127;
+				header.writeBigUInt64BE(BigInt(payload.length), 2);
+				mask.copy(header, 10);
+			}
+
+			// Mask payload
+			const masked = Buffer.alloc(payload.length);
+			for (let i = 0; i < payload.length; i++) {
+				masked[i] = payload[i] ^ mask[i % 4];
+			}
+
+			socket.write(Buffer.concat([header, masked]));
+		};
+
+		conn.close = () => {
+			conn.readyState = 3; // CLOSED
+			// Send close frame
+			const closeFrame = Buffer.alloc(6);
+			closeFrame[0] = 0x88; // FIN + close opcode
+			closeFrame[1] = 0x80; // MASK + 0 length
+			const mask = crypto.randomBytes(4);
+			mask.copy(closeFrame, 2);
+			try {
+				socket.write(closeFrame);
+			} catch {
+				// Socket may already be closed
+			}
+			socket.end();
+		};
+
+		callbacks.onOpen();
+
+		// WebSocket frame reader
+		let buffer = Buffer.alloc(0);
+
+		socket.on("data", (chunk: Buffer) => {
+			buffer = Buffer.concat([buffer, chunk]);
+
+			while (buffer.length >= 2) {
+				const firstByte = buffer[0];
+				const secondByte = buffer[1];
+				const opcode = firstByte & 0x0f;
+				const isMasked = (secondByte & 0x80) !== 0;
+				let payloadLength = secondByte & 0x7f;
+				let offset = 2;
+
+				if (payloadLength === 126) {
+					if (buffer.length < 4) return;
+					payloadLength = buffer.readUInt16BE(2);
+					offset = 4;
+				} else if (payloadLength === 127) {
+					if (buffer.length < 10) return;
+					payloadLength = Number(buffer.readBigUInt64BE(2));
+					offset = 10;
+				}
+
+				if (isMasked) offset += 4;
+
+				if (buffer.length < offset + payloadLength) return;
+
+				let payload = buffer.subarray(offset, offset + payloadLength);
+
+				if (isMasked) {
+					const maskKey = buffer.subarray(offset - 4, offset);
+					payload = Buffer.from(payload);
+					for (let i = 0; i < payload.length; i++) {
+						payload[i] ^= maskKey[i % 4];
+					}
+				}
+
+				buffer = buffer.subarray(offset + payloadLength);
+
+				if (opcode === 0x01) {
+					// Text frame
+					callbacks.onMessage(payload.toString("utf-8"));
+				} else if (opcode === 0x08) {
+					// Close frame
+					conn.readyState = 3;
+					socket.end();
+					callbacks.onClose();
+					return;
+				} else if (opcode === 0x09) {
+					// Ping — send pong
+					const pong = Buffer.alloc(2);
+					pong[0] = 0x8a; // FIN + pong
+					pong[1] = 0x00;
+					socket.write(pong);
+				}
+				// Ignore other opcodes (pong, continuation, binary)
+			}
+		});
+
+		socket.on("close", () => {
+			conn.readyState = 3;
+			callbacks.onClose();
+		});
+
+		socket.on("error", (err: Error) => {
+			callbacks.onError(err);
+		});
+	});
+
+	req.on("error", (err) => {
+		callbacks.onError(err);
+	});
+
+	req.end();
+
+	return conn;
+}
+
 export class RealtimeTranscriber {
-	private ws: WebSocket | null = null;
+	private ws: WsConnection | null = null;
 	private settings: VoxtralSettings;
 	private callbacks: RealtimeCallbacks;
 
@@ -96,63 +295,70 @@ export class RealtimeTranscriber {
 	async connect(): Promise<void> {
 		const params = new URLSearchParams({
 			model: this.settings.realtimeModel,
-			api_key: this.settings.apiKey,
 		});
 
-		const url = `wss://api.mistral.ai/v1/audio/transcriptions/realtime?${params}`;
+		const url = `https://api.mistral.ai/v1/audio/transcriptions/realtime?${params}`;
 
 		return new Promise((resolve, reject) => {
-			this.ws = new WebSocket(url);
-
-			this.ws.onopen = () => {
-				// Wait for session.created before resolving
-			};
-
-			this.ws.onmessage = (event) => {
-				try {
-					const msg = JSON.parse(event.data);
-					switch (msg.type) {
-						case "session.created":
-							this.sendSessionUpdate();
-							this.callbacks.onSessionCreated();
-							resolve();
-							break;
-						case "session.updated":
-							// Session config confirmed
-							break;
-						case "transcription.text.delta":
-							this.callbacks.onDelta(msg.text || "");
-							break;
-						case "transcription.done":
-							this.callbacks.onDone(msg.text || "");
-							break;
-						case "error":
-							this.callbacks.onError(
-								msg.error?.message || "Unknown error"
-							);
-							break;
-					}
-				} catch (e) {
-					console.error("Voxtral: failed to parse WS message", e);
-				}
-			};
-
-			this.ws.onerror = (event) => {
-				console.error("Voxtral: WebSocket error", event);
-				reject(new Error("WebSocket connection failed"));
-			};
-
-			this.ws.onclose = () => {
-				this.ws = null;
-			};
-
-			// Timeout after 10s
-			setTimeout(() => {
-				if (this.ws?.readyState !== WebSocket.OPEN) {
-					this.ws?.close();
-					reject(new Error("WebSocket connection timeout"));
-				}
+			const timeout = setTimeout(() => {
+				this.ws?.close();
+				reject(new Error("WebSocket connection timeout"));
 			}, 10000);
+
+			this.ws = createNodeWebSocket(
+				url,
+				{
+					Authorization: `Bearer ${this.settings.apiKey}`,
+				},
+				{
+					onOpen: () => {
+						// Wait for session.created
+					},
+					onMessage: (data: string) => {
+						try {
+							const msg = JSON.parse(data);
+							switch (msg.type) {
+								case "session.created":
+									clearTimeout(timeout);
+									this.sendSessionUpdate();
+									this.callbacks.onSessionCreated();
+									resolve();
+									break;
+								case "session.updated":
+									break;
+								case "transcription.text.delta":
+									this.callbacks.onDelta(msg.text || "");
+									break;
+								case "transcription.done":
+									this.callbacks.onDone(msg.text || "");
+									break;
+								case "error":
+									this.callbacks.onError(
+										msg.error?.message || "Unknown error"
+									);
+									break;
+							}
+						} catch (e) {
+							console.error(
+								"Voxtral: failed to parse WS message",
+								e
+							);
+						}
+					},
+					onError: (err: Error) => {
+						clearTimeout(timeout);
+						console.error("Voxtral: WebSocket error", err);
+						reject(
+							new Error(
+								`WebSocket connection failed: ${err.message}`
+							)
+						);
+					},
+					onClose: () => {
+						this.ws = null;
+					},
+				}
+			);
 		});
 	}
 
@@ -172,7 +378,7 @@ export class RealtimeTranscriber {
 	}
 
 	sendAudio(pcmBytes: ArrayBuffer): void {
-		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+		if (!this.ws || this.ws.readyState !== WS_OPEN) return;
 
 		const base64 = arrayBufferToBase64(pcmBytes);
 		const msg = {
@@ -183,12 +389,12 @@ export class RealtimeTranscriber {
 	}
 
 	flush(): void {
-		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+		if (!this.ws || this.ws.readyState !== WS_OPEN) return;
 		this.ws.send(JSON.stringify({ type: "input_audio_buffer.flush" }));
 	}
 
 	endAudio(): void {
-		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+		if (!this.ws || this.ws.readyState !== WS_OPEN) return;
 		this.ws.send(JSON.stringify({ type: "input_audio_buffer.end" }));
 	}
 
@@ -200,7 +406,7 @@ export class RealtimeTranscriber {
 	}
 
 	get isConnected(): boolean {
-		return this.ws?.readyState === WebSocket.OPEN;
+		return this.ws?.readyState === WS_OPEN;
 	}
 }
 
