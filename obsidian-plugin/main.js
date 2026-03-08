@@ -972,8 +972,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.isRecording = false;
     this.statusBarEl = null;
     this.sendRibbonEl = null;
-    this.floatingEl = null;
-    this.viewportHandler = null;
+    this.mobileActionEl = null;
     this.pendingText = "";
     this.chunkIndex = 0;
     this.consecutiveFailures = 0;
@@ -1070,33 +1069,14 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     );
     this.sendRibbonEl.addClass("voxtral-send-button");
     if (import_obsidian4.Platform.isMobile) {
-      this.floatingEl = document.createElement("div");
-      this.floatingEl.addClass("voxtral-floating-send");
-      this.floatingEl.innerHTML = '<div class="voxtral-fab-send">\u25B6</div><div class="voxtral-fab-stop">\u25FC</div>';
-      const sendBtn = this.floatingEl.querySelector(
-        ".voxtral-fab-send"
-      );
-      const stopBtn = this.floatingEl.querySelector(
-        ".voxtral-fab-stop"
-      );
-      sendBtn.addEventListener("click", () => this.sendChunk());
-      stopBtn.addEventListener("click", () => this.stopRecording());
-      document.body.appendChild(this.floatingEl);
-      if (window.visualViewport) {
-        this.viewportHandler = () => {
-          if (!this.floatingEl || !window.visualViewport) return;
-          const vv = window.visualViewport;
-          const keyboardHeight = window.innerHeight - vv.height - vv.offsetTop;
-          this.floatingEl.style.bottom = keyboardHeight > 50 ? `${keyboardHeight + 12}px` : "72px";
-        };
-        window.visualViewport.addEventListener(
-          "resize",
-          this.viewportHandler
+      const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+      if (view) {
+        this.mobileActionEl = view.addAction(
+          "send",
+          "Voxtral: Verzend chunk",
+          () => this.sendChunk()
         );
-        window.visualViewport.addEventListener(
-          "scroll",
-          this.viewportHandler
-        );
+        this.mobileActionEl.addClass("voxtral-mobile-send");
       }
     }
   }
@@ -1105,20 +1085,9 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       this.sendRibbonEl.remove();
       this.sendRibbonEl = null;
     }
-    if (this.viewportHandler && window.visualViewport) {
-      window.visualViewport.removeEventListener(
-        "resize",
-        this.viewportHandler
-      );
-      window.visualViewport.removeEventListener(
-        "scroll",
-        this.viewportHandler
-      );
-      this.viewportHandler = null;
-    }
-    if (this.floatingEl) {
-      this.floatingEl.remove();
-      this.floatingEl = null;
+    if (this.mobileActionEl) {
+      this.mobileActionEl.remove();
+      this.mobileActionEl = null;
     }
   }
   // ── Recording toggle ──

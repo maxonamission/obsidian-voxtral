@@ -36,8 +36,7 @@ export default class VoxtralPlugin extends Plugin {
 	private isRecording = false;
 	private statusBarEl: HTMLElement | null = null;
 	private sendRibbonEl: HTMLElement | null = null;
-	private floatingEl: HTMLElement | null = null;
-	private viewportHandler: (() => void) | null = null;
+	private mobileActionEl: HTMLElement | null = null;
 	private pendingText = "";
 	private chunkIndex = 0;
 	private consecutiveFailures = 0;
@@ -161,54 +160,18 @@ export default class VoxtralPlugin extends Plugin {
 		);
 		this.sendRibbonEl.addClass("voxtral-send-button");
 
-		// Floating button (mobile) — large, always visible
+		// On mobile, add a send action to the active MarkdownView's
+		// header bar.  This is always visible above the keyboard.
 		if (Platform.isMobile) {
-			this.floatingEl = document.createElement("div");
-			this.floatingEl.addClass("voxtral-floating-send");
-			this.floatingEl.innerHTML =
-				'<div class="voxtral-fab-send">▶</div>' +
-				'<div class="voxtral-fab-stop">◼</div>';
-
-			const sendBtn = this.floatingEl.querySelector(
-				".voxtral-fab-send"
-			) as HTMLElement;
-			const stopBtn = this.floatingEl.querySelector(
-				".voxtral-fab-stop"
-			) as HTMLElement;
-
-			sendBtn.addEventListener("click", () => this.sendChunk());
-			stopBtn.addEventListener("click", () => this.stopRecording());
-
-			document.body.appendChild(this.floatingEl);
-
-			// Move buttons above keyboard when it appears.
-			// Mobile browsers fire "resize" and/or "scroll" on
-			// visualViewport when the soft keyboard opens/closes.
-			// We listen to both to cover all platforms.
-			if (window.visualViewport) {
-				this.viewportHandler = () => {
-					if (!this.floatingEl || !window.visualViewport) return;
-					const vv = window.visualViewport;
-					// The keyboard height is the difference between the
-					// full layout viewport and the visual viewport,
-					// accounting for any scroll offset of the viewport.
-					const keyboardHeight =
-						window.innerHeight -
-						vv.height -
-						vv.offsetTop;
-					this.floatingEl.style.bottom =
-						keyboardHeight > 50
-							? `${keyboardHeight + 12}px`
-							: "72px";
-				};
-				window.visualViewport.addEventListener(
-					"resize",
-					this.viewportHandler
+			const view =
+				this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (view) {
+				this.mobileActionEl = view.addAction(
+					"send",
+					"Voxtral: Verzend chunk",
+					() => this.sendChunk()
 				);
-				window.visualViewport.addEventListener(
-					"scroll",
-					this.viewportHandler
-				);
+				this.mobileActionEl.addClass("voxtral-mobile-send");
 			}
 		}
 	}
@@ -218,20 +181,9 @@ export default class VoxtralPlugin extends Plugin {
 			this.sendRibbonEl.remove();
 			this.sendRibbonEl = null;
 		}
-		if (this.viewportHandler && window.visualViewport) {
-			window.visualViewport.removeEventListener(
-				"resize",
-				this.viewportHandler
-			);
-			window.visualViewport.removeEventListener(
-				"scroll",
-				this.viewportHandler
-			);
-			this.viewportHandler = null;
-		}
-		if (this.floatingEl) {
-			this.floatingEl.remove();
-			this.floatingEl = null;
+		if (this.mobileActionEl) {
+			this.mobileActionEl.remove();
+			this.mobileActionEl = null;
 		}
 	}
 
