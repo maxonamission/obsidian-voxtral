@@ -109,9 +109,8 @@ chunks verzenden zonder het dicteren te stoppen.
 1. Open een notitie
 2. Tik op het **microfoon-icoon** in de ribbon → opname start
 3. Begin te praten
-4. Tik op het **verzend-icoon** (▶) dat verschijnt → huidige audio wordt getranscribeerd
-   terwijl de opname doorloopt!
-5. Blijf praten, tik opnieuw op ▶ voor de volgende chunk
+4. Tik op het **verzend-icoon** (📤) in de **view header** (bovenin het scherm, naast de notitie-titel) → huidige audio wordt getranscribeerd terwijl de opname doorloopt!
+5. Blijf praten, tik opnieuw op 📤 voor de volgende chunk
 6. Tik op 🎙 om definitief te stoppen → laatste stuk wordt verwerkt
 
 ### Tips voor mobiel
@@ -119,6 +118,7 @@ chunks verzenden zonder het dicteren te stoppen.
 - Chunks van 10-30 seconden werken het best
 - Stemcommando's ("nieuwe alinea", "kop twee", etc.) werken ook in batch modus
 - Je kunt ook via Command palette → "Voxtral: Verzend audio chunk" de chunk versturen
+- Het stemcommando-zijpaneel opent **niet** automatisch op mobiel (om je scherm niet te blokkeren). Open het handmatig via Command palette → "Voxtral: Toon stemcommando's (zijpaneel)"
 
 ---
 
