@@ -17,7 +17,7 @@ import {
 	transcribeBatch,
 	correctText,
 } from "./mistral-api";
-import { processText } from "./voice-commands";
+import { normalizeCommand, processText } from "./voice-commands";
 
 /** Check if Node.js APIs are available (desktop Electron only) */
 function hasNodeJs(): boolean {
@@ -372,11 +372,20 @@ export default class VoxtralPlugin extends Plugin {
 			const sentence = this.pendingText.trim();
 			this.pendingText = "";
 
-			const normalized = sentence.toLowerCase();
-			if (
-				normalized.includes("beeindig opname") ||
-				normalized.includes("stop opname")
-			) {
+			const normalized = normalizeCommand(sentence);
+			const stopPatterns = [
+				"beeindig opname",
+				"beeindig de opname",
+				"beeindigt opname",
+				"beeindigt de opname",
+				"beeindigde opname",
+				"beeindigde de opname",
+				"stop opname",
+				"stopopname",
+				"stop de opname",
+				"stop recording",
+			];
+			if (stopPatterns.some((p) => normalized.includes(p))) {
 				this.stopRecording();
 				return;
 			}

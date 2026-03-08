@@ -13,7 +13,7 @@ interface VoiceCommand {
 }
 
 // Normalize text for command matching: remove diacritics, hyphens, punctuation
-function normalizeCommand(text: string): string {
+export function normalizeCommand(text: string): string {
 	return text
 		.normalize("NFD")
 		.replace(/[\u0300-\u036f]/g, "") // strip diacritics
@@ -91,17 +91,24 @@ function deleteLastSentence(editor: Editor): void {
 const COMMANDS: VoiceCommand[] = [
 	{
 		label: "Nieuwe alinea",
-		patterns: ["nieuwe alinea", "nieuwe paragraaf", "nieuw paragraaf"],
+		patterns: [
+			"nieuwe alinea",
+			"nieuw alinea",
+			"nieuwe paragraaf",
+			"nieuw paragraaf",
+			"nieuwe linie",
+			"new paragraph",
+		],
 		action: (editor) => insertAtCursor(editor, "\n\n"),
 	},
 	{
 		label: "Nieuwe regel",
-		patterns: ["nieuwe regel", "nieuwe lijn"],
+		patterns: ["nieuwe regel", "nieuwe lijn", "new line", "volgende regel"],
 		action: (editor) => insertAtCursor(editor, "\n"),
 	},
 	{
 		label: "Kop 1",
-		patterns: ["kop een", "kop 1", "heading one", "heading 1"],
+		patterns: ["kop een", "kop 1", "kop een", "heading one", "heading 1"],
 		action: (editor) => insertAtCursor(editor, "\n\n# "),
 	},
 	{
@@ -116,7 +123,16 @@ const COMMANDS: VoiceCommand[] = [
 	},
 	{
 		label: "Nieuw punt",
-		patterns: ["nieuw punt", "nieuw lijstpunt", "nieuw bullet"],
+		patterns: [
+			"nieuw punt",
+			"nieuw lijstpunt",
+			"nieuw lijstitem",
+			"lijst punt",
+			"nieuw bullet",
+			"bullet",
+			"bullet point",
+			"volgend punt",
+		],
 		action: (editor) => insertAtCursor(editor, "\n- "),
 	},
 	{
@@ -124,21 +140,36 @@ const COMMANDS: VoiceCommand[] = [
 		patterns: [
 			"nieuw to do item",
 			"nieuw todo item",
+			"nieuw todo",
 			"nieuwe to do",
 			"nieuwe todo",
 			"nieuw taak",
 			"nieuwe taak",
+			"new todo",
+			"to do item",
+			"todo item",
 		],
 		action: (editor) => insertAtCursor(editor, "\n- [ ] "),
 	},
 	{
 		label: "Verwijder laatste alinea",
-		patterns: ["verwijder laatste alinea", "verwijder laatste paragraaf"],
+		patterns: [
+			"verwijder laatste alinea",
+			"verwijder laatste paragraaf",
+			"wis laatste alinea",
+			"delete last paragraph",
+		],
 		action: (editor) => deleteLastParagraph(editor),
 	},
 	{
 		label: "Verwijder laatste regel",
-		patterns: ["verwijder laatste regel", "verwijder laatste zin"],
+		patterns: [
+			"verwijder laatste regel",
+			"verwijder laatste zin",
+			"wis laatste regel",
+			"wist laatste regel",
+			"delete last line",
+		],
 		action: (editor) => deleteLastSentence(editor),
 	},
 	{
