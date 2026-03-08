@@ -217,6 +217,16 @@ var AudioRecorder = class {
       this.mediaRecorder.resume();
     }
   }
+  /** Silence the mic input without pausing the recorder */
+  mute() {
+    var _a;
+    (_a = this.stream) == null ? void 0 : _a.getAudioTracks().forEach((t) => t.enabled = false);
+  }
+  /** Re-enable the mic input */
+  unmute() {
+    var _a;
+    (_a = this.stream) == null ? void 0 : _a.getAudioTracks().forEach((t) => t.enabled = true);
+  }
   getSupportedMimeType() {
     const types = [
       "audio/webm;codecs=opus",
@@ -1127,6 +1137,8 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.realtimeTranscriber = null;
     this.isRecording = false;
     this.isPaused = false;
+    this.isTypingMuted = false;
+    this.typingResumeTimer = null;
     this.focusPauseTimer = null;
     this.statusBarEl = null;
     this.sendRibbonEl = null;
@@ -1196,6 +1208,9 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.addSettingTab(new VoxtralSettingTab(this.app, this));
     this.registerDomEvent(document, "visibilitychange", () => {
       this.handleVisibilityChange();
+    });
+    this.registerDomEvent(document, "keydown", (e) => {
+      this.handleTypingMute(e);
     });
     if (import_obsidian4.Platform.isMobile && this.settings.mode === "realtime") {
       new import_obsidian4.Notice(
@@ -1298,6 +1313,29 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       this.focusPauseTimer = null;
     }
   }
+  // ── Typing mute (prevent keyboard noise from being transcribed) ──
+  handleTypingMute(e) {
+    if (!this.isRecording || this.isPaused) return;
+    if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta" || e.ctrlKey || e.metaKey) {
+      return;
+    }
+    if (e.key === "Escape" || e.key === "Tab" || e.key === "F1" || e.key === "F2" || e.key === "F3" || e.key === "F4" || e.key === "F5" || e.key === "F6" || e.key === "F7" || e.key === "F8" || e.key === "F9" || e.key === "F10" || e.key === "F11" || e.key === "F12") {
+      return;
+    }
+    if (!this.isTypingMuted) {
+      this.isTypingMuted = true;
+      this.recorder.mute();
+    }
+    if (this.typingResumeTimer) {
+      clearTimeout(this.typingResumeTimer);
+    }
+    this.typingResumeTimer = setTimeout(() => {
+      if (this.isRecording && this.isTypingMuted && !this.isPaused) {
+        this.isTypingMuted = false;
+        this.recorder.unmute();
+      }
+    }, 1500);
+  }
   // ── Recording toggle ──
   async toggleRecording() {
     if (this.isRecording) {
@@ -1353,6 +1391,11 @@ Tap the send button to transcribe while you keep talking.`,
   async stopRecording() {
     this.isRecording = false;
     this.isPaused = false;
+    this.isTypingMuted = false;
+    if (this.typingResumeTimer) {
+      clearTimeout(this.typingResumeTimer);
+      this.typingResumeTimer = null;
+    }
     this.clearFocusPauseTimer();
     this.updateStatusBar("processing");
     this.removeSendButton();

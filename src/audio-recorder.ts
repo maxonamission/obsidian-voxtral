@@ -216,6 +216,16 @@ export class AudioRecorder {
 		}
 	}
 
+	/** Silence the mic input without pausing the recorder */
+	mute(): void {
+		this.stream?.getAudioTracks().forEach((t) => (t.enabled = false));
+	}
+
+	/** Re-enable the mic input */
+	unmute(): void {
+		this.stream?.getAudioTracks().forEach((t) => (t.enabled = true));
+	}
+
 	private getSupportedMimeType(): string {
 		const types = [
 			"audio/webm;codecs=opus",

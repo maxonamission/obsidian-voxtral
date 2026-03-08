@@ -36,6 +36,8 @@ export default class VoxtralPlugin extends Plugin {
 	private realtimeTranscriber: RealtimeTranscriber | null = null;
 	private isRecording = false;
 	private isPaused = false;
+	private isTypingMuted = false;
+	private typingResumeTimer: ReturnType<typeof setTimeout> | null = null;
 	private focusPauseTimer: ReturnType<typeof setTimeout> | null = null;
 	private statusBarEl: HTMLElement | null = null;
 	private sendRibbonEl: HTMLElement | null = null;
@@ -124,6 +126,12 @@ export default class VoxtralPlugin extends Plugin {
 		// Auto-pause recording when app loses focus (mobile background)
 		this.registerDomEvent(document, "visibilitychange", () => {
 			this.handleVisibilityChange();
+		});
+
+		// Auto-mute microphone while typing to prevent keyboard noise
+		// from being transcribed as hallucinated text
+		this.registerDomEvent(document, "keydown", (e: KeyboardEvent) => {
+			this.handleTypingMute(e);
 		});
 
 		// Show mobile notice on first load
@@ -254,6 +262,63 @@ export default class VoxtralPlugin extends Plugin {
 		}
 	}
 
+	// ── Typing mute (prevent keyboard noise from being transcribed) ──
+
+	private handleTypingMute(e: KeyboardEvent): void {
+		if (!this.isRecording || this.isPaused) return;
+
+		// Ignore modifier-only keys and shortcuts
+		if (
+			e.key === "Control" ||
+			e.key === "Alt" ||
+			e.key === "Shift" ||
+			e.key === "Meta" ||
+			e.ctrlKey ||
+			e.metaKey
+		) {
+			return;
+		}
+
+		// Ignore single special keys that aren't "typing"
+		if (
+			e.key === "Escape" ||
+			e.key === "Tab" ||
+			e.key === "F1" ||
+			e.key === "F2" ||
+			e.key === "F3" ||
+			e.key === "F4" ||
+			e.key === "F5" ||
+			e.key === "F6" ||
+			e.key === "F7" ||
+			e.key === "F8" ||
+			e.key === "F9" ||
+			e.key === "F10" ||
+			e.key === "F11" ||
+			e.key === "F12"
+		) {
+			return;
+		}
+
+		// Mute the microphone track (silences input without stopping recorder)
+		if (!this.isTypingMuted) {
+			this.isTypingMuted = true;
+			this.recorder.mute();
+		}
+
+		// Reset the resume timer on every keystroke
+		if (this.typingResumeTimer) {
+			clearTimeout(this.typingResumeTimer);
+		}
+
+		// Unmute after 1.5s of no typing
+		this.typingResumeTimer = setTimeout(() => {
+			if (this.isRecording && this.isTypingMuted && !this.isPaused) {
+				this.isTypingMuted = false;
+				this.recorder.unmute();
+			}
+		}, 1500);
+	}
+
 	// ── Recording toggle ──
 
 	private async toggleRecording(): Promise<void> {
@@ -319,6 +384,11 @@ export default class VoxtralPlugin extends Plugin {
 	private async stopRecording(): Promise<void> {
 		this.isRecording = false;
 		this.isPaused = false;
+		this.isTypingMuted = false;
+		if (this.typingResumeTimer) {
+			clearTimeout(this.typingResumeTimer);
+			this.typingResumeTimer = null;
+		}
 		this.clearFocusPauseTimer();
 		this.updateStatusBar("processing");
 		this.removeSendButton();
