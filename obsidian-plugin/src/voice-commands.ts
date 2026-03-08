@@ -90,7 +90,7 @@ function deleteLastSentence(editor: Editor): void {
 
 const COMMANDS: VoiceCommand[] = [
 	{
-		label: "Nieuwe alinea",
+		label: "New paragraph",
 		patterns: [
 			"nieuwe alinea",
 			"nieuw alinea",
@@ -102,27 +102,27 @@ const COMMANDS: VoiceCommand[] = [
 		action: (editor) => insertAtCursor(editor, "\n\n"),
 	},
 	{
-		label: "Nieuwe regel",
+		label: "New line",
 		patterns: ["nieuwe regel", "nieuwe lijn", "new line", "volgende regel"],
 		action: (editor) => insertAtCursor(editor, "\n"),
 	},
 	{
-		label: "Kop 1",
+		label: "Heading 1",
 		patterns: ["kop een", "kop 1", "kop een", "heading one", "heading 1"],
 		action: (editor) => insertAtCursor(editor, "\n\n# "),
 	},
 	{
-		label: "Kop 2",
+		label: "Heading 2",
 		patterns: ["kop twee", "kop 2", "heading two", "heading 2"],
 		action: (editor) => insertAtCursor(editor, "\n\n## "),
 	},
 	{
-		label: "Kop 3",
+		label: "Heading 3",
 		patterns: ["kop drie", "kop 3", "heading three", "heading 3"],
 		action: (editor) => insertAtCursor(editor, "\n\n### "),
 	},
 	{
-		label: "Nieuw punt",
+		label: "Bullet point",
 		patterns: [
 			"nieuw punt",
 			"nieuw lijstpunt",
@@ -136,7 +136,7 @@ const COMMANDS: VoiceCommand[] = [
 		action: (editor) => insertAtCursor(editor, "\n- "),
 	},
 	{
-		label: "Nieuw to-do item",
+		label: "To-do item",
 		patterns: [
 			"nieuw to do item",
 			"nieuw todo item",
@@ -152,7 +152,7 @@ const COMMANDS: VoiceCommand[] = [
 		action: (editor) => insertAtCursor(editor, "\n- [ ] "),
 	},
 	{
-		label: "Genummerd item",
+		label: "Numbered item",
 		patterns: [
 			"nieuw genummerd item",
 			"nieuw genummerd punt",
@@ -172,7 +172,7 @@ const COMMANDS: VoiceCommand[] = [
 		},
 	},
 	{
-		label: "Verwijder laatste alinea",
+		label: "Delete last paragraph",
 		patterns: [
 			"verwijder laatste alinea",
 			"verwijder laatste paragraaf",
@@ -182,7 +182,7 @@ const COMMANDS: VoiceCommand[] = [
 		action: (editor) => deleteLastParagraph(editor),
 	},
 	{
-		label: "Verwijder laatste regel",
+		label: "Delete last line",
 		patterns: [
 			"verwijder laatste regel",
 			"verwijder laatste zin",
@@ -193,7 +193,7 @@ const COMMANDS: VoiceCommand[] = [
 		action: (editor) => deleteLastSentence(editor),
 	},
 	{
-		label: "Herstel",
+		label: "Undo",
 		patterns: ["herstel", "ongedaan maken", "undo"],
 		action: (editor) => {
 			// Trigger Obsidian's built-in undo

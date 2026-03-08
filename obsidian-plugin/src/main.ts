@@ -70,7 +70,7 @@ export default class VoxtralPlugin extends Plugin {
 		);
 
 		// Ribbon icon: toggle recording
-		this.addRibbonIcon("mic", "Voxtral: Start/stop opname", () => {
+		this.addRibbonIcon("mic", "Voxtral: Start/stop recording", () => {
 			this.toggleRecording();
 		});
 
@@ -83,7 +83,7 @@ export default class VoxtralPlugin extends Plugin {
 		// Commands
 		this.addCommand({
 			id: "toggle-recording",
-			name: "Start/stop opname",
+			name: "Start/stop recording",
 			icon: "mic",
 			callback: () => this.toggleRecording(),
 			hotkeys: [{ modifiers: ["Ctrl"], key: " " }],
@@ -91,28 +91,28 @@ export default class VoxtralPlugin extends Plugin {
 
 		this.addCommand({
 			id: "send-chunk",
-			name: "Verzend audio chunk (tap-to-send)",
+			name: "Send audio chunk (tap-to-send)",
 			icon: "send",
 			callback: () => this.sendChunk(),
 		});
 
 		this.addCommand({
 			id: "open-help-panel",
-			name: "Toon stemcommando's (zijpaneel)",
+			name: "Show voice commands (side panel)",
 			icon: "help-circle",
 			callback: () => this.openHelpPanel(),
 		});
 
 		this.addCommand({
 			id: "correct-selection",
-			name: "Corrigeer geselecteerde tekst",
+			name: "Correct selected text",
 			icon: "spell-check",
 			editorCallback: (editor: Editor) => this.correctSelection(editor),
 		});
 
 		this.addCommand({
 			id: "correct-all",
-			name: "Corrigeer hele notitie",
+			name: "Correct entire note",
 			icon: "file-check",
 			editorCallback: (editor: Editor) => this.correctAll(editor),
 		});
@@ -128,8 +128,8 @@ export default class VoxtralPlugin extends Plugin {
 		// Show mobile notice on first load
 		if (Platform.isMobile && this.settings.mode === "realtime") {
 			new Notice(
-				"Voxtral: Realtime modus is niet beschikbaar op mobiel. " +
-					"Batch modus wordt gebruikt. Tik op ▶ om audio te verzenden.",
+				"Voxtral: Realtime mode is not available on mobile. " +
+					"Using batch mode instead. Tap the send button to submit audio.",
 				8000
 			);
 		}
@@ -162,7 +162,7 @@ export default class VoxtralPlugin extends Plugin {
 		// Ribbon icon (desktop)
 		this.sendRibbonEl = this.addRibbonIcon(
 			"send",
-			"Voxtral: Verzend chunk",
+			"Voxtral: Send chunk",
 			() => this.sendChunk()
 		);
 		this.sendRibbonEl.addClass("voxtral-send-button");
@@ -175,7 +175,7 @@ export default class VoxtralPlugin extends Plugin {
 			if (view) {
 				this.mobileActionEl = view.addAction(
 					"send",
-					"Voxtral: Verzend chunk",
+					"Voxtral: Send chunk",
 					() => this.sendChunk()
 				);
 				this.mobileActionEl.addClass("voxtral-mobile-send");
@@ -207,11 +207,11 @@ export default class VoxtralPlugin extends Plugin {
 
 			if (behavior === "keep-recording") {
 				// Do nothing — keep recording in background
-				console.log("Voxtral: App op achtergrond, opname loopt door");
+				console.log("Voxtral: App backgrounded, recording continues");
 			} else if (behavior === "pause-after-delay") {
 				const delaySec = this.settings.focusPauseDelaySec;
 				console.log(
-					`Voxtral: App op achtergrond, pauze over ${delaySec}s`
+					`Voxtral: App backgrounded, pausing in ${delaySec}s`
 				);
 				this.focusPauseTimer = setTimeout(() => {
 					if (this.isRecording && document.hidden) {
@@ -235,15 +235,15 @@ export default class VoxtralPlugin extends Plugin {
 		this.isPaused = true;
 		this.recorder.pause();
 		this.updateStatusBar("paused");
-		console.log("Voxtral: Opname gepauzeerd (app op achtergrond)");
+		console.log("Voxtral: Recording paused (app backgrounded)");
 	}
 
 	private resumeRecording(): void {
 		this.isPaused = false;
 		this.recorder.resume();
 		this.updateStatusBar("recording");
-		new Notice("Voxtral: Opname hervat");
-		console.log("Voxtral: Opname hervat (app op voorgrond)");
+		new Notice("Voxtral: Recording resumed");
+		console.log("Voxtral: Recording resumed (app foregrounded)");
 	}
 
 	private clearFocusPauseTimer(): void {
@@ -266,14 +266,14 @@ export default class VoxtralPlugin extends Plugin {
 	private async startRecording(): Promise<void> {
 		if (!this.settings.apiKey) {
 			new Notice(
-				"Voxtral: Stel eerst je Mistral API key in via de instellingen."
+				"Voxtral: Please set your Mistral API key in the plugin settings."
 			);
 			return;
 		}
 
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) {
-			new Notice("Voxtral: Open eerst een notitie om in te dicteren.");
+			new Notice("Voxtral: Open a note first to start dictating.");
 			return;
 		}
 
@@ -301,16 +301,16 @@ export default class VoxtralPlugin extends Plugin {
 			const micName = this.recorder.activeMicLabel;
 			if (this.effectiveMode === "batch") {
 				new Notice(
-					`Voxtral: Opname gestart (${micName})\n` +
-						"Tik op ▶ (send) om tekst te verzenden terwijl je blijft praten.",
+					`Voxtral: Recording started (${micName})\n` +
+						"Tap the send button to transcribe while you keep talking.",
 					6000
 				);
 			} else {
-				new Notice(`Voxtral: Opname gestart (${micName})`);
+				new Notice(`Voxtral: Recording started (${micName})`);
 			}
 		} catch (e) {
 			console.error("Voxtral: Failed to start recording", e);
-			new Notice(`Voxtral: Kon opname niet starten: ${e}`);
+			new Notice(`Voxtral: Could not start recording: ${e}`);
 			this.updateStatusBar("idle");
 		}
 	}
@@ -330,12 +330,12 @@ export default class VoxtralPlugin extends Plugin {
 			}
 		} catch (e) {
 			console.error("Voxtral: Failed to stop recording", e);
-			new Notice(`Voxtral: Fout bij stoppen: ${e}`);
+			new Notice(`Voxtral: Error stopping recording: ${e}`);
 		}
 
 		this.currentEditor = null;
 		this.updateStatusBar("idle");
-		new Notice("Voxtral: Opname gestopt");
+		new Notice("Voxtral: Recording stopped");
 	}
 
 	// ── Tap-to-send: flush current audio chunk without stopping ──
@@ -352,11 +352,11 @@ export default class VoxtralPlugin extends Plugin {
 		this.chunkIndex++;
 
 		try {
-			new Notice(`Voxtral: Chunk ${this.chunkIndex} verzenden...`);
+			new Notice(`Voxtral: Sending chunk ${this.chunkIndex}...`);
 			const blob = await this.recorder.flushChunk();
 
 			if (blob.size === 0) {
-				new Notice("Voxtral: Geen audio in chunk");
+				new Notice("Voxtral: No audio in chunk");
 				return;
 			}
 
@@ -368,11 +368,11 @@ export default class VoxtralPlugin extends Plugin {
 
 			if (text) {
 				processText(editor, text);
-				new Notice(`Voxtral: Chunk ${this.chunkIndex} verwerkt`);
+				new Notice(`Voxtral: Chunk ${this.chunkIndex} processed`);
 			}
 		} catch (e) {
 			console.error("Voxtral: Chunk transcription failed", e);
-			new Notice(`Voxtral: Chunk mislukt: ${e}`);
+			new Notice(`Voxtral: Chunk failed: ${e}`);
 		}
 	}
 
@@ -402,7 +402,7 @@ export default class VoxtralPlugin extends Plugin {
 			},
 			onError: (message) => {
 				console.error("Voxtral: Realtime error:", message);
-				new Notice(`Voxtral: Streaming fout: ${message}`);
+				new Notice(`Voxtral: Streaming error: ${message}`);
 			},
 			onDisconnect: () => {
 				this.handleRealtimeDisconnect();
@@ -449,7 +449,7 @@ export default class VoxtralPlugin extends Plugin {
 
 			if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
 				new Notice(
-					"Voxtral: Kan geen verbinding maken met de API. Opname gestopt.",
+					"Voxtral: Cannot connect to the API. Recording stopped.",
 					6000
 				);
 				this.stopRecording();
@@ -540,24 +540,24 @@ export default class VoxtralPlugin extends Plugin {
 		const blob = await this.recorder.stop();
 
 		if (blob.size === 0) {
-			new Notice("Voxtral: Geen audio opgenomen");
+			new Notice("Voxtral: No audio recorded");
 			return;
 		}
 
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) {
-			new Notice("Voxtral: Geen actieve notitie gevonden");
+			new Notice("Voxtral: No active note found");
 			return;
 		}
 
 		const editor = view.editor;
 
-		new Notice("Voxtral: Transcriptie bezig...");
+		new Notice("Voxtral: Transcribing...");
 		try {
 			let text = await transcribeBatch(blob, this.settings);
 
 			if (this.settings.autoCorrect && text) {
-				new Notice("Voxtral: Correctie bezig...");
+				new Notice("Voxtral: Correcting...");
 				text = await correctText(text, this.settings);
 			}
 
@@ -566,7 +566,7 @@ export default class VoxtralPlugin extends Plugin {
 			}
 		} catch (e) {
 			console.error("Voxtral: Batch transcription failed", e);
-			new Notice(`Voxtral: Transcriptie mislukt: ${e}`);
+			new Notice(`Voxtral: Transcription failed: ${e}`);
 		}
 	}
 
@@ -577,11 +577,11 @@ export default class VoxtralPlugin extends Plugin {
 		if (!text.trim()) return;
 
 		try {
-			new Notice("Voxtral: Correctie bezig...");
+			new Notice("Voxtral: Correcting...");
 			const corrected = await correctText(text, this.settings);
 			if (corrected && corrected !== text) {
 				editor.setValue(corrected);
-				new Notice("Voxtral: Tekst gecorrigeerd");
+				new Notice("Voxtral: Text corrected");
 			}
 		} catch (e) {
 			console.error("Voxtral: Auto-correct failed", e);
@@ -591,50 +591,50 @@ export default class VoxtralPlugin extends Plugin {
 	private async correctSelection(editor: Editor): Promise<void> {
 		const selection = editor.getSelection();
 		if (!selection) {
-			new Notice("Voxtral: Selecteer eerst tekst om te corrigeren");
+			new Notice("Voxtral: Select text first to correct it");
 			return;
 		}
 
 		if (!this.settings.apiKey) {
-			new Notice("Voxtral: Stel eerst je API key in");
+			new Notice("Voxtral: Please set your API key first");
 			return;
 		}
 
 		try {
-			new Notice("Voxtral: Correctie bezig...");
+			new Notice("Voxtral: Correcting...");
 			const corrected = await correctText(selection, this.settings);
 			if (corrected) {
 				editor.replaceSelection(corrected);
-				new Notice("Voxtral: Selectie gecorrigeerd");
+				new Notice("Voxtral: Selection corrected");
 			}
 		} catch (e) {
-			new Notice(`Voxtral: Correctie mislukt: ${e}`);
+			new Notice(`Voxtral: Correction failed: ${e}`);
 		}
 	}
 
 	private async correctAll(editor: Editor): Promise<void> {
 		const text = editor.getValue();
 		if (!text.trim()) {
-			new Notice("Voxtral: Notitie is leeg");
+			new Notice("Voxtral: Note is empty");
 			return;
 		}
 
 		if (!this.settings.apiKey) {
-			new Notice("Voxtral: Stel eerst je API key in");
+			new Notice("Voxtral: Please set your API key first");
 			return;
 		}
 
 		try {
-			new Notice("Voxtral: Correctie bezig...");
+			new Notice("Voxtral: Correcting...");
 			const corrected = await correctText(text, this.settings);
 			if (corrected && corrected !== text) {
 				editor.setValue(corrected);
-				new Notice("Voxtral: Notitie gecorrigeerd");
+				new Notice("Voxtral: Note corrected");
 			} else {
-				new Notice("Voxtral: Geen correcties nodig");
+				new Notice("Voxtral: No corrections needed");
 			}
 		} catch (e) {
-			new Notice(`Voxtral: Correctie mislukt: ${e}`);
+			new Notice(`Voxtral: Correction failed: ${e}`);
 		}
 	}
 
@@ -684,12 +684,12 @@ export default class VoxtralPlugin extends Plugin {
 				break;
 			}
 			case "paused":
-				this.statusBarEl.setText("⏸ Gepauzeerd");
+				this.statusBarEl.setText("⏸ Paused");
 				this.statusBarEl.addClass("voxtral-paused");
 				this.statusBarEl.removeClass("voxtral-recording", "voxtral-processing");
 				break;
 			case "processing":
-				this.statusBarEl.setText("⏳ Verwerken...");
+				this.statusBarEl.setText("⏳ Processing...");
 				this.statusBarEl.addClass("voxtral-processing");
 				this.statusBarEl.removeClass("voxtral-recording", "voxtral-paused");
 				break;

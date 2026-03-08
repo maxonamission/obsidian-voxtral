@@ -233,7 +233,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Voxtral Transcribe" });
-    new import_obsidian.Setting(containerEl).setName("Mistral API key").setDesc("Je API key van platform.mistral.ai").addText(
+    new import_obsidian.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai").addText(
       (text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value.trim();
         await this.plugin.saveSettings();
@@ -242,9 +242,9 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       const input = setting.controlEl.querySelector("input");
       if (input) input.type = "password";
     });
-    const micSetting = new import_obsidian.Setting(containerEl).setName("Microfoon").setDesc("Selecteer welke microfoon je wilt gebruiken");
+    const micSetting = new import_obsidian.Setting(containerEl).setName("Microphone").setDesc("Select which microphone to use");
     micSetting.addDropdown((drop) => {
-      drop.addOption("", "Standaard systeemmicrofoon");
+      drop.addOption("", "System default");
       drop.setValue(this.plugin.settings.microphoneDeviceId);
       AudioRecorder.enumerateMicrophones().then((mics) => {
         for (const mic of mics) {
@@ -257,29 +257,29 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    const modeDesc = import_obsidian.Platform.isMobile ? "Op mobiel is alleen batch modus beschikbaar. Gebruik tap-to-send (\u25B6 knop) om chunks te verzenden terwijl je praat." : "Realtime: tekst verschijnt terwijl je praat. Batch: opname wordt achteraf getranscribeerd.";
-    const modeSetting = new import_obsidian.Setting(containerEl).setName("Modus").setDesc(modeDesc);
+    const modeDesc = import_obsidian.Platform.isMobile ? "Only batch mode is available on mobile. Use tap-to-send to submit chunks while you keep talking." : "Realtime: text appears as you speak. Batch: audio is transcribed after you stop recording.";
+    const modeSetting = new import_obsidian.Setting(containerEl).setName("Mode").setDesc(modeDesc);
     if (import_obsidian.Platform.isMobile) {
       modeSetting.addDropdown(
-        (drop) => drop.addOption("batch", "Batch (na opname)").setValue("batch").setDisabled(true)
+        (drop) => drop.addOption("batch", "Batch (after recording)").setValue("batch").setDisabled(true)
       );
     } else {
       modeSetting.addDropdown(
-        (drop) => drop.addOption("realtime", "Realtime (streaming)").addOption("batch", "Batch (na opname)").setValue(this.plugin.settings.mode).onChange(async (value) => {
+        (drop) => drop.addOption("realtime", "Realtime (streaming)").addOption("batch", "Batch (after recording)").setValue(this.plugin.settings.mode).onChange(async (value) => {
           this.plugin.settings.mode = value;
           await this.plugin.saveSettings();
         })
       );
     }
-    const focusSetting = new import_obsidian.Setting(containerEl).setName("Bij focus-verlies").setDesc(
-      "Wat moet er gebeuren als je van app wisselt terwijl je opneemt?"
+    new import_obsidian.Setting(containerEl).setName("On focus loss").setDesc(
+      "What should happen when you switch apps while recording?"
     ).addDropdown((drop) => {
-      drop.addOption("pause", "Direct pauzeren");
+      drop.addOption("pause", "Pause immediately");
       drop.addOption(
         "pause-after-delay",
-        "Pauzeren na vertraging"
+        "Pause after delay"
       );
-      drop.addOption("keep-recording", "Doorlopen");
+      drop.addOption("keep-recording", "Keep recording");
       drop.setValue(this.plugin.settings.focusBehavior).onChange(
         async (value) => {
           this.plugin.settings.focusBehavior = value;
@@ -289,15 +289,15 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       );
     });
     if (this.plugin.settings.focusBehavior === "pause-after-delay") {
-      new import_obsidian.Setting(containerEl).setName("Pauze-vertraging (seconden)").setDesc(
-        "Na zoveel seconden op de achtergrond wordt de opname gepauzeerd"
+      new import_obsidian.Setting(containerEl).setName("Pause delay (seconds)").setDesc(
+        "How long to wait in the background before pausing the recording"
       ).addDropdown((drop) => {
         const options = {
           "10": "10 sec",
-          "30": "30 sec (standaard)",
-          "60": "1 minuut",
-          "120": "2 minuten",
-          "300": "5 minuten"
+          "30": "30 sec (default)",
+          "60": "1 minute",
+          "120": "2 minutes",
+          "300": "5 minutes"
         };
         for (const [value, label] of Object.entries(options)) {
           drop.addOption(value, label);
@@ -310,31 +310,31 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         });
       });
     }
-    new import_obsidian.Setting(containerEl).setName("Taal").setDesc("Taal voor batch-transcriptie (ISO 639-1)").addText(
+    new import_obsidian.Setting(containerEl).setName("Language").setDesc("Language for transcription (ISO 639-1 code, e.g. 'en', 'nl', 'de')").addText(
       (text) => text.setPlaceholder("nl").setValue(this.plugin.settings.language).onChange(async (value) => {
         this.plugin.settings.language = value.trim();
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Automatische correctie").setDesc(
-      "Corrigeer spelling, hoofdletters en leestekens na het stoppen van de opname"
+    new import_obsidian.Setting(containerEl).setName("Auto-correct").setDesc(
+      "Automatically correct spelling, capitalization, and punctuation after recording"
     ).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.autoCorrect).onChange(async (value) => {
         this.plugin.settings.autoCorrect = value;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Streaming vertraging").setDesc(
-      "Vertraging in ms voor realtime modus. Lager = sneller maar minder nauwkeurig."
+    new import_obsidian.Setting(containerEl).setName("Streaming delay").setDesc(
+      "Delay in ms for realtime mode. Lower = faster but less accurate."
     ).addDropdown((drop) => {
       const options = {
-        "240": "240 ms (snelst)",
-        "480": "480 ms (standaard)",
+        "240": "240 ms (fastest)",
+        "480": "480 ms (default)",
         "640": "640 ms",
         "800": "800 ms",
         "1200": "1200 ms",
         "1600": "1600 ms",
-        "2400": "2400 ms (nauwkeurigst)"
+        "2400": "2400 ms (most accurate)"
       };
       for (const [value, label] of Object.entries(options)) {
         drop.addOption(value, label);
@@ -346,13 +346,13 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    containerEl.createEl("h3", { text: "Steun dit project" });
-    new import_obsidian.Setting(containerEl).setName("Buy Me a Coffee").setDesc("Vind je deze plugin handig? Overweeg een donatie!").addButton(
-      (btn) => btn.setButtonText("\u2615 Buy Me a Coffee").onClick(() => {
+    containerEl.createEl("h3", { text: "Support this project" });
+    new import_obsidian.Setting(containerEl).setName("Buy Me a Coffee").setDesc("Find this plugin useful? Consider a donation!").addButton(
+      (btn) => btn.setButtonText("Buy Me a Coffee").onClick(() => {
         window.open("https://buymeacoffee.com/maxonamission");
       })
     );
-    containerEl.createEl("h3", { text: "Geavanceerd" });
+    containerEl.createEl("h3", { text: "Advanced" });
     new import_obsidian.Setting(containerEl).setName("Realtime model").addText(
       (text) => text.setValue(this.plugin.settings.realtimeModel).onChange(async (value) => {
         this.plugin.settings.realtimeModel = value.trim();
@@ -365,14 +365,14 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Correctie model").addText(
+    new import_obsidian.Setting(containerEl).setName("Correction model").addText(
       (text) => text.setValue(this.plugin.settings.correctModel).onChange(async (value) => {
         this.plugin.settings.correctModel = value.trim();
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Correctie systeemprompt").setDesc("Laat leeg voor de standaardprompt").addTextArea(
-      (text) => text.setPlaceholder("Standaard correctieprompt wordt gebruikt...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
+    new import_obsidian.Setting(containerEl).setName("Correction system prompt").setDesc("Leave empty to use the default prompt").addTextArea(
+      (text) => text.setPlaceholder("Default correction prompt will be used...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
         this.plugin.settings.systemPrompt = value;
         await this.plugin.saveSettings();
       })
@@ -440,7 +440,7 @@ function deleteLastSentence(editor) {
 }
 var COMMANDS = [
   {
-    label: "Nieuwe alinea",
+    label: "New paragraph",
     patterns: [
       "nieuwe alinea",
       "nieuw alinea",
@@ -452,27 +452,27 @@ var COMMANDS = [
     action: (editor) => insertAtCursor(editor, "\n\n")
   },
   {
-    label: "Nieuwe regel",
+    label: "New line",
     patterns: ["nieuwe regel", "nieuwe lijn", "new line", "volgende regel"],
     action: (editor) => insertAtCursor(editor, "\n")
   },
   {
-    label: "Kop 1",
+    label: "Heading 1",
     patterns: ["kop een", "kop 1", "kop een", "heading one", "heading 1"],
     action: (editor) => insertAtCursor(editor, "\n\n# ")
   },
   {
-    label: "Kop 2",
+    label: "Heading 2",
     patterns: ["kop twee", "kop 2", "heading two", "heading 2"],
     action: (editor) => insertAtCursor(editor, "\n\n## ")
   },
   {
-    label: "Kop 3",
+    label: "Heading 3",
     patterns: ["kop drie", "kop 3", "heading three", "heading 3"],
     action: (editor) => insertAtCursor(editor, "\n\n### ")
   },
   {
-    label: "Nieuw punt",
+    label: "Bullet point",
     patterns: [
       "nieuw punt",
       "nieuw lijstpunt",
@@ -486,7 +486,7 @@ var COMMANDS = [
     action: (editor) => insertAtCursor(editor, "\n- ")
   },
   {
-    label: "Nieuw to-do item",
+    label: "To-do item",
     patterns: [
       "nieuw to do item",
       "nieuw todo item",
@@ -502,7 +502,7 @@ var COMMANDS = [
     action: (editor) => insertAtCursor(editor, "\n- [ ] ")
   },
   {
-    label: "Genummerd item",
+    label: "Numbered item",
     patterns: [
       "nieuw genummerd item",
       "nieuw genummerd punt",
@@ -523,7 +523,7 @@ ${nextNum}. `);
     }
   },
   {
-    label: "Verwijder laatste alinea",
+    label: "Delete last paragraph",
     patterns: [
       "verwijder laatste alinea",
       "verwijder laatste paragraaf",
@@ -533,7 +533,7 @@ ${nextNum}. `);
     action: (editor) => deleteLastParagraph(editor)
   },
   {
-    label: "Verwijder laatste regel",
+    label: "Delete last line",
     patterns: [
       "verwijder laatste regel",
       "verwijder laatste zin",
@@ -544,7 +544,7 @@ ${nextNum}. `);
     action: (editor) => deleteLastSentence(editor)
   },
   {
-    label: "Herstel",
+    label: "Undo",
     patterns: ["herstel", "ongedaan maken", "undo"],
     action: (editor) => {
       editor.undo();
@@ -592,7 +592,7 @@ var VoxtralHelpView = class extends import_obsidian2.ItemView {
     return VIEW_TYPE_VOXTRAL_HELP;
   }
   getDisplayText() {
-    return "Stemcommando's";
+    return "Voice Commands";
   }
   getIcon() {
     return "mic";
@@ -601,15 +601,15 @@ var VoxtralHelpView = class extends import_obsidian2.ItemView {
     const container = this.contentEl;
     container.empty();
     container.addClass("voxtral-help-view");
-    container.createEl("h3", { text: "Voxtral Stemcommando's" });
+    container.createEl("h3", { text: "Voxtral Voice Commands" });
     const commands = getCommandList();
     const table = container.createEl("table", {
       cls: "voxtral-help-table"
     });
     const thead = table.createEl("thead");
     const headerRow = thead.createEl("tr");
-    headerRow.createEl("th", { text: "Commando" });
-    headerRow.createEl("th", { text: "Zeg..." });
+    headerRow.createEl("th", { text: "Command" });
+    headerRow.createEl("th", { text: "Say..." });
     const tbody = table.createEl("tbody");
     for (const cmd of commands) {
       const row = tbody.createEl("tr");
@@ -618,23 +618,23 @@ var VoxtralHelpView = class extends import_obsidian2.ItemView {
         cls: "voxtral-help-label"
       });
       row.createEl("td", {
-        text: cmd.patterns.slice(0, 2).map((p) => `"${p}"`).join(" of "),
+        text: cmd.patterns.slice(0, 2).map((p) => `"${p}"`).join(" or "),
         cls: "voxtral-help-patterns"
       });
     }
     container.createEl("h4", { text: "Tips" });
     const tips = container.createEl("ul", { cls: "voxtral-help-tips" });
     tips.createEl("li", {
-      text: "Commando's worden herkend aan het einde van een zin."
+      text: "Commands are recognized at the end of a sentence."
     });
     tips.createEl("li", {
-      text: 'Zeg "voor de correctie: ..." om inline instructies mee te geven.'
+      text: 'Say "for the correction: ..." to give inline instructions to the corrector.'
     });
     tips.createEl("li", {
-      text: "Gespelde woorden (V-O-X-T-R-A-L) worden samengevoegd."
+      text: "Spelled-out words (V-O-X-T-R-A-L) are merged automatically."
     });
     tips.createEl("li", {
-      text: 'Zelfcorrecties ("nee niet X maar Y") worden herkend.'
+      text: 'Self-corrections ("no not X but Y") are recognized.'
     });
   }
   async onClose() {
@@ -1079,7 +1079,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       VIEW_TYPE_VOXTRAL_HELP,
       (leaf) => new VoxtralHelpView(leaf)
     );
-    this.addRibbonIcon("mic", "Voxtral: Start/stop opname", () => {
+    this.addRibbonIcon("mic", "Voxtral: Start/stop recording", () => {
       this.toggleRecording();
     });
     if (!import_obsidian4.Platform.isMobile) {
@@ -1088,32 +1088,32 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     }
     this.addCommand({
       id: "toggle-recording",
-      name: "Start/stop opname",
+      name: "Start/stop recording",
       icon: "mic",
       callback: () => this.toggleRecording(),
       hotkeys: [{ modifiers: ["Ctrl"], key: " " }]
     });
     this.addCommand({
       id: "send-chunk",
-      name: "Verzend audio chunk (tap-to-send)",
+      name: "Send audio chunk (tap-to-send)",
       icon: "send",
       callback: () => this.sendChunk()
     });
     this.addCommand({
       id: "open-help-panel",
-      name: "Toon stemcommando's (zijpaneel)",
+      name: "Show voice commands (side panel)",
       icon: "help-circle",
       callback: () => this.openHelpPanel()
     });
     this.addCommand({
       id: "correct-selection",
-      name: "Corrigeer geselecteerde tekst",
+      name: "Correct selected text",
       icon: "spell-check",
       editorCallback: (editor) => this.correctSelection(editor)
     });
     this.addCommand({
       id: "correct-all",
-      name: "Corrigeer hele notitie",
+      name: "Correct entire note",
       icon: "file-check",
       editorCallback: (editor) => this.correctAll(editor)
     });
@@ -1123,7 +1123,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     });
     if (import_obsidian4.Platform.isMobile && this.settings.mode === "realtime") {
       new import_obsidian4.Notice(
-        "Voxtral: Realtime modus is niet beschikbaar op mobiel. Batch modus wordt gebruikt. Tik op \u25B6 om audio te verzenden.",
+        "Voxtral: Realtime mode is not available on mobile. Using batch mode instead. Tap the send button to submit audio.",
         8e3
       );
     }
@@ -1149,7 +1149,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.removeSendButton();
     this.sendRibbonEl = this.addRibbonIcon(
       "send",
-      "Voxtral: Verzend chunk",
+      "Voxtral: Send chunk",
       () => this.sendChunk()
     );
     this.sendRibbonEl.addClass("voxtral-send-button");
@@ -1158,7 +1158,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       if (view) {
         this.mobileActionEl = view.addAction(
           "send",
-          "Voxtral: Verzend chunk",
+          "Voxtral: Send chunk",
           () => this.sendChunk()
         );
         this.mobileActionEl.addClass("voxtral-mobile-send");
@@ -1182,11 +1182,11 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     if (document.hidden) {
       this.clearFocusPauseTimer();
       if (behavior === "keep-recording") {
-        console.log("Voxtral: App op achtergrond, opname loopt door");
+        console.log("Voxtral: App backgrounded, recording continues");
       } else if (behavior === "pause-after-delay") {
         const delaySec = this.settings.focusPauseDelaySec;
         console.log(
-          `Voxtral: App op achtergrond, pauze over ${delaySec}s`
+          `Voxtral: App backgrounded, pausing in ${delaySec}s`
         );
         this.focusPauseTimer = setTimeout(() => {
           if (this.isRecording && document.hidden) {
@@ -1207,14 +1207,14 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.isPaused = true;
     this.recorder.pause();
     this.updateStatusBar("paused");
-    console.log("Voxtral: Opname gepauzeerd (app op achtergrond)");
+    console.log("Voxtral: Recording paused (app backgrounded)");
   }
   resumeRecording() {
     this.isPaused = false;
     this.recorder.resume();
     this.updateStatusBar("recording");
-    new import_obsidian4.Notice("Voxtral: Opname hervat");
-    console.log("Voxtral: Opname hervat (app op voorgrond)");
+    new import_obsidian4.Notice("Voxtral: Recording resumed");
+    console.log("Voxtral: Recording resumed (app foregrounded)");
   }
   clearFocusPauseTimer() {
     if (this.focusPauseTimer) {
@@ -1233,13 +1233,13 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
   async startRecording() {
     if (!this.settings.apiKey) {
       new import_obsidian4.Notice(
-        "Voxtral: Stel eerst je Mistral API key in via de instellingen."
+        "Voxtral: Please set your Mistral API key in the plugin settings."
       );
       return;
     }
     const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
     if (!view) {
-      new import_obsidian4.Notice("Voxtral: Open eerst een notitie om in te dicteren.");
+      new import_obsidian4.Notice("Voxtral: Open a note first to start dictating.");
       return;
     }
     const editor = view.editor;
@@ -1261,16 +1261,16 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       const micName = this.recorder.activeMicLabel;
       if (this.effectiveMode === "batch") {
         new import_obsidian4.Notice(
-          `Voxtral: Opname gestart (${micName})
-Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
+          `Voxtral: Recording started (${micName})
+Tap the send button to transcribe while you keep talking.`,
           6e3
         );
       } else {
-        new import_obsidian4.Notice(`Voxtral: Opname gestart (${micName})`);
+        new import_obsidian4.Notice(`Voxtral: Recording started (${micName})`);
       }
     } catch (e) {
       console.error("Voxtral: Failed to start recording", e);
-      new import_obsidian4.Notice(`Voxtral: Kon opname niet starten: ${e}`);
+      new import_obsidian4.Notice(`Voxtral: Could not start recording: ${e}`);
       this.updateStatusBar("idle");
     }
   }
@@ -1288,11 +1288,11 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
       }
     } catch (e) {
       console.error("Voxtral: Failed to stop recording", e);
-      new import_obsidian4.Notice(`Voxtral: Fout bij stoppen: ${e}`);
+      new import_obsidian4.Notice(`Voxtral: Error stopping recording: ${e}`);
     }
     this.currentEditor = null;
     this.updateStatusBar("idle");
-    new import_obsidian4.Notice("Voxtral: Opname gestopt");
+    new import_obsidian4.Notice("Voxtral: Recording stopped");
   }
   // ── Tap-to-send: flush current audio chunk without stopping ──
   async sendChunk() {
@@ -1304,10 +1304,10 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
     const editor = view.editor;
     this.chunkIndex++;
     try {
-      new import_obsidian4.Notice(`Voxtral: Chunk ${this.chunkIndex} verzenden...`);
+      new import_obsidian4.Notice(`Voxtral: Sending chunk ${this.chunkIndex}...`);
       const blob = await this.recorder.flushChunk();
       if (blob.size === 0) {
-        new import_obsidian4.Notice("Voxtral: Geen audio in chunk");
+        new import_obsidian4.Notice("Voxtral: No audio in chunk");
         return;
       }
       let text = await transcribeBatch(blob, this.settings);
@@ -1316,11 +1316,11 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
       }
       if (text) {
         processText(editor, text);
-        new import_obsidian4.Notice(`Voxtral: Chunk ${this.chunkIndex} verwerkt`);
+        new import_obsidian4.Notice(`Voxtral: Chunk ${this.chunkIndex} processed`);
       }
     } catch (e) {
       console.error("Voxtral: Chunk transcription failed", e);
-      new import_obsidian4.Notice(`Voxtral: Chunk mislukt: ${e}`);
+      new import_obsidian4.Notice(`Voxtral: Chunk failed: ${e}`);
     }
   }
   // ── Realtime recording ──
@@ -1346,7 +1346,7 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
       },
       onError: (message) => {
         console.error("Voxtral: Realtime error:", message);
-        new import_obsidian4.Notice(`Voxtral: Streaming fout: ${message}`);
+        new import_obsidian4.Notice(`Voxtral: Streaming error: ${message}`);
       },
       onDisconnect: () => {
         this.handleRealtimeDisconnect();
@@ -1385,7 +1385,7 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
       );
       if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
         new import_obsidian4.Notice(
-          "Voxtral: Kan geen verbinding maken met de API. Opname gestopt.",
+          "Voxtral: Cannot connect to the API. Recording stopped.",
           6e3
         );
         this.stopRecording();
@@ -1458,20 +1458,20 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
   async stopBatchRecording() {
     const blob = await this.recorder.stop();
     if (blob.size === 0) {
-      new import_obsidian4.Notice("Voxtral: Geen audio opgenomen");
+      new import_obsidian4.Notice("Voxtral: No audio recorded");
       return;
     }
     const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
     if (!view) {
-      new import_obsidian4.Notice("Voxtral: Geen actieve notitie gevonden");
+      new import_obsidian4.Notice("Voxtral: No active note found");
       return;
     }
     const editor = view.editor;
-    new import_obsidian4.Notice("Voxtral: Transcriptie bezig...");
+    new import_obsidian4.Notice("Voxtral: Transcribing...");
     try {
       let text = await transcribeBatch(blob, this.settings);
       if (this.settings.autoCorrect && text) {
-        new import_obsidian4.Notice("Voxtral: Correctie bezig...");
+        new import_obsidian4.Notice("Voxtral: Correcting...");
         text = await correctText(text, this.settings);
       }
       if (text) {
@@ -1479,7 +1479,7 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
       }
     } catch (e) {
       console.error("Voxtral: Batch transcription failed", e);
-      new import_obsidian4.Notice(`Voxtral: Transcriptie mislukt: ${e}`);
+      new import_obsidian4.Notice(`Voxtral: Transcription failed: ${e}`);
     }
   }
   // ── Text correction ──
@@ -1487,11 +1487,11 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
     const text = editor.getValue();
     if (!text.trim()) return;
     try {
-      new import_obsidian4.Notice("Voxtral: Correctie bezig...");
+      new import_obsidian4.Notice("Voxtral: Correcting...");
       const corrected = await correctText(text, this.settings);
       if (corrected && corrected !== text) {
         editor.setValue(corrected);
-        new import_obsidian4.Notice("Voxtral: Tekst gecorrigeerd");
+        new import_obsidian4.Notice("Voxtral: Text corrected");
       }
     } catch (e) {
       console.error("Voxtral: Auto-correct failed", e);
@@ -1500,45 +1500,45 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
   async correctSelection(editor) {
     const selection = editor.getSelection();
     if (!selection) {
-      new import_obsidian4.Notice("Voxtral: Selecteer eerst tekst om te corrigeren");
+      new import_obsidian4.Notice("Voxtral: Select text first to correct it");
       return;
     }
     if (!this.settings.apiKey) {
-      new import_obsidian4.Notice("Voxtral: Stel eerst je API key in");
+      new import_obsidian4.Notice("Voxtral: Please set your API key first");
       return;
     }
     try {
-      new import_obsidian4.Notice("Voxtral: Correctie bezig...");
+      new import_obsidian4.Notice("Voxtral: Correcting...");
       const corrected = await correctText(selection, this.settings);
       if (corrected) {
         editor.replaceSelection(corrected);
-        new import_obsidian4.Notice("Voxtral: Selectie gecorrigeerd");
+        new import_obsidian4.Notice("Voxtral: Selection corrected");
       }
     } catch (e) {
-      new import_obsidian4.Notice(`Voxtral: Correctie mislukt: ${e}`);
+      new import_obsidian4.Notice(`Voxtral: Correction failed: ${e}`);
     }
   }
   async correctAll(editor) {
     const text = editor.getValue();
     if (!text.trim()) {
-      new import_obsidian4.Notice("Voxtral: Notitie is leeg");
+      new import_obsidian4.Notice("Voxtral: Note is empty");
       return;
     }
     if (!this.settings.apiKey) {
-      new import_obsidian4.Notice("Voxtral: Stel eerst je API key in");
+      new import_obsidian4.Notice("Voxtral: Please set your API key first");
       return;
     }
     try {
-      new import_obsidian4.Notice("Voxtral: Correctie bezig...");
+      new import_obsidian4.Notice("Voxtral: Correcting...");
       const corrected = await correctText(text, this.settings);
       if (corrected && corrected !== text) {
         editor.setValue(corrected);
-        new import_obsidian4.Notice("Voxtral: Notitie gecorrigeerd");
+        new import_obsidian4.Notice("Voxtral: Note corrected");
       } else {
-        new import_obsidian4.Notice("Voxtral: Geen correcties nodig");
+        new import_obsidian4.Notice("Voxtral: No corrections needed");
       }
     } catch (e) {
-      new import_obsidian4.Notice(`Voxtral: Correctie mislukt: ${e}`);
+      new import_obsidian4.Notice(`Voxtral: Correction failed: ${e}`);
     }
   }
   // ── Help panel ──
@@ -1580,12 +1580,12 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
         break;
       }
       case "paused":
-        this.statusBarEl.setText("\u23F8 Gepauzeerd");
+        this.statusBarEl.setText("\u23F8 Paused");
         this.statusBarEl.addClass("voxtral-paused");
         this.statusBarEl.removeClass("voxtral-recording", "voxtral-processing");
         break;
       case "processing":
-        this.statusBarEl.setText("\u23F3 Verwerken...");
+        this.statusBarEl.setText("\u23F3 Processing...");
         this.statusBarEl.addClass("voxtral-processing");
         this.statusBarEl.removeClass("voxtral-recording", "voxtral-paused");
         break;

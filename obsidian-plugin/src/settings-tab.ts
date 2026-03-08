@@ -19,7 +19,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Mistral API key")
-			.setDesc("Je API key van platform.mistral.ai")
+			.setDesc("Your API key from platform.mistral.ai")
 			.addText((text) =>
 				text
 					.setPlaceholder("sk-...")
@@ -36,11 +36,11 @@ export class VoxtralSettingTab extends PluginSettingTab {
 
 		// Microphone selection
 		const micSetting = new Setting(containerEl)
-			.setName("Microfoon")
-			.setDesc("Selecteer welke microfoon je wilt gebruiken");
+			.setName("Microphone")
+			.setDesc("Select which microphone to use");
 
 		micSetting.addDropdown((drop) => {
-			drop.addOption("", "Standaard systeemmicrofoon");
+			drop.addOption("", "System default");
 			drop.setValue(this.plugin.settings.microphoneDeviceId);
 
 			// Populate async
@@ -58,17 +58,17 @@ export class VoxtralSettingTab extends PluginSettingTab {
 		});
 
 		const modeDesc = Platform.isMobile
-			? "Op mobiel is alleen batch modus beschikbaar. Gebruik tap-to-send (▶ knop) om chunks te verzenden terwijl je praat."
-			: "Realtime: tekst verschijnt terwijl je praat. Batch: opname wordt achteraf getranscribeerd.";
+			? "Only batch mode is available on mobile. Use tap-to-send to submit chunks while you keep talking."
+			: "Realtime: text appears as you speak. Batch: audio is transcribed after you stop recording.";
 
 		const modeSetting = new Setting(containerEl)
-			.setName("Modus")
+			.setName("Mode")
 			.setDesc(modeDesc);
 
 		if (Platform.isMobile) {
 			modeSetting.addDropdown((drop) =>
 				drop
-					.addOption("batch", "Batch (na opname)")
+					.addOption("batch", "Batch (after recording)")
 					.setValue("batch")
 					.setDisabled(true)
 			);
@@ -76,7 +76,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			modeSetting.addDropdown((drop) =>
 				drop
 					.addOption("realtime", "Realtime (streaming)")
-					.addOption("batch", "Batch (na opname)")
+					.addOption("batch", "Batch (after recording)")
 					.setValue(this.plugin.settings.mode)
 					.onChange(async (value) => {
 						this.plugin.settings.mode = value as
@@ -88,18 +88,18 @@ export class VoxtralSettingTab extends PluginSettingTab {
 		}
 
 		// Focus behavior
-		const focusSetting = new Setting(containerEl)
-			.setName("Bij focus-verlies")
+		new Setting(containerEl)
+			.setName("On focus loss")
 			.setDesc(
-				"Wat moet er gebeuren als je van app wisselt terwijl je opneemt?"
+				"What should happen when you switch apps while recording?"
 			)
 			.addDropdown((drop) => {
-				drop.addOption("pause", "Direct pauzeren");
+				drop.addOption("pause", "Pause immediately");
 				drop.addOption(
 					"pause-after-delay",
-					"Pauzeren na vertraging"
+					"Pause after delay"
 				);
-				drop.addOption("keep-recording", "Doorlopen");
+				drop.addOption("keep-recording", "Keep recording");
 				drop.setValue(this.plugin.settings.focusBehavior).onChange(
 					async (value) => {
 						this.plugin.settings.focusBehavior =
@@ -113,17 +113,17 @@ export class VoxtralSettingTab extends PluginSettingTab {
 
 		if (this.plugin.settings.focusBehavior === "pause-after-delay") {
 			new Setting(containerEl)
-				.setName("Pauze-vertraging (seconden)")
+				.setName("Pause delay (seconds)")
 				.setDesc(
-					"Na zoveel seconden op de achtergrond wordt de opname gepauzeerd"
+					"How long to wait in the background before pausing the recording"
 				)
 				.addDropdown((drop) => {
 					const options: Record<string, string> = {
 						"10": "10 sec",
-						"30": "30 sec (standaard)",
-						"60": "1 minuut",
-						"120": "2 minuten",
-						"300": "5 minuten",
+						"30": "30 sec (default)",
+						"60": "1 minute",
+						"120": "2 minutes",
+						"300": "5 minutes",
 					};
 					for (const [value, label] of Object.entries(options)) {
 						drop.addOption(value, label);
@@ -139,8 +139,8 @@ export class VoxtralSettingTab extends PluginSettingTab {
 		}
 
 		new Setting(containerEl)
-			.setName("Taal")
-			.setDesc("Taal voor batch-transcriptie (ISO 639-1)")
+			.setName("Language")
+			.setDesc("Language for transcription (ISO 639-1 code, e.g. 'en', 'nl', 'de')")
 			.addText((text) =>
 				text
 					.setPlaceholder("nl")
@@ -152,9 +152,9 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Automatische correctie")
+			.setName("Auto-correct")
 			.setDesc(
-				"Corrigeer spelling, hoofdletters en leestekens na het stoppen van de opname"
+				"Automatically correct spelling, capitalization, and punctuation after recording"
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -166,19 +166,19 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Streaming vertraging")
+			.setName("Streaming delay")
 			.setDesc(
-				"Vertraging in ms voor realtime modus. Lager = sneller maar minder nauwkeurig."
+				"Delay in ms for realtime mode. Lower = faster but less accurate."
 			)
 			.addDropdown((drop) => {
 				const options: Record<string, string> = {
-					"240": "240 ms (snelst)",
-					"480": "480 ms (standaard)",
+					"240": "240 ms (fastest)",
+					"480": "480 ms (default)",
 					"640": "640 ms",
 					"800": "800 ms",
 					"1200": "1200 ms",
 					"1600": "1600 ms",
-					"2400": "2400 ms (nauwkeurigst)",
+					"2400": "2400 ms (most accurate)",
 				};
 				for (const [value, label] of Object.entries(options)) {
 					drop.addOption(value, label);
@@ -192,21 +192,21 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			});
 
 		// Support
-		containerEl.createEl("h3", { text: "Steun dit project" });
+		containerEl.createEl("h3", { text: "Support this project" });
 
 		new Setting(containerEl)
 			.setName("Buy Me a Coffee")
-			.setDesc("Vind je deze plugin handig? Overweeg een donatie!")
+			.setDesc("Find this plugin useful? Consider a donation!")
 			.addButton((btn) =>
 				btn
-					.setButtonText("☕ Buy Me a Coffee")
+					.setButtonText("Buy Me a Coffee")
 					.onClick(() => {
 						window.open("https://buymeacoffee.com/maxonamission");
 					})
 			);
 
 		// Advanced settings
-		containerEl.createEl("h3", { text: "Geavanceerd" });
+		containerEl.createEl("h3", { text: "Advanced" });
 
 		new Setting(containerEl)
 			.setName("Realtime model")
@@ -231,7 +231,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Correctie model")
+			.setName("Correction model")
 			.addText((text) =>
 				text
 					.setValue(this.plugin.settings.correctModel)
@@ -242,11 +242,11 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Correctie systeemprompt")
-			.setDesc("Laat leeg voor de standaardprompt")
+			.setName("Correction system prompt")
+			.setDesc("Leave empty to use the default prompt")
 			.addTextArea((text) =>
 				text
-					.setPlaceholder("Standaard correctieprompt wordt gebruikt...")
+					.setPlaceholder("Default correction prompt will be used...")
 					.setValue(this.plugin.settings.systemPrompt)
 					.onChange(async (value) => {
 						this.plugin.settings.systemPrompt = value;
