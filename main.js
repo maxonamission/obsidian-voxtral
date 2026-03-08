@@ -1313,7 +1313,6 @@ Tap the send button to transcribe while you keep talking.`,
     const editor = view.editor;
     this.chunkIndex++;
     try {
-      new import_obsidian4.Notice(`Voxtral: Sending chunk ${this.chunkIndex}...`);
       const blob = await this.recorder.flushChunk();
       if (blob.size === 0) {
         new import_obsidian4.Notice("Voxtral: No audio in chunk");
@@ -1325,7 +1324,6 @@ Tap the send button to transcribe while you keep talking.`,
       }
       if (text) {
         processText(editor, text);
-        new import_obsidian4.Notice(`Voxtral: Chunk ${this.chunkIndex} processed`);
       }
     } catch (e) {
       console.error("Voxtral: Chunk transcription failed", e);
@@ -1476,11 +1474,9 @@ Tap the send button to transcribe while you keep talking.`,
       return;
     }
     const editor = view.editor;
-    new import_obsidian4.Notice("Voxtral: Transcribing...");
     try {
       let text = await transcribeBatch(blob, this.settings);
       if (this.settings.autoCorrect && text) {
-        new import_obsidian4.Notice("Voxtral: Correcting...");
         text = await correctText(text, this.settings);
       }
       if (text) {
@@ -1496,11 +1492,9 @@ Tap the send button to transcribe while you keep talking.`,
     const text = editor.getValue();
     if (!text.trim()) return;
     try {
-      new import_obsidian4.Notice("Voxtral: Correcting...");
       const corrected = await correctText(text, this.settings);
       if (corrected && corrected !== text) {
         editor.setValue(corrected);
-        new import_obsidian4.Notice("Voxtral: Text corrected");
       }
     } catch (e) {
       console.error("Voxtral: Auto-correct failed", e);

@@ -352,7 +352,6 @@ export default class VoxtralPlugin extends Plugin {
 		this.chunkIndex++;
 
 		try {
-			new Notice(`Voxtral: Sending chunk ${this.chunkIndex}...`);
 			const blob = await this.recorder.flushChunk();
 
 			if (blob.size === 0) {
@@ -368,7 +367,6 @@ export default class VoxtralPlugin extends Plugin {
 
 			if (text) {
 				processText(editor, text);
-				new Notice(`Voxtral: Chunk ${this.chunkIndex} processed`);
 			}
 		} catch (e) {
 			console.error("Voxtral: Chunk transcription failed", e);
@@ -552,12 +550,10 @@ export default class VoxtralPlugin extends Plugin {
 
 		const editor = view.editor;
 
-		new Notice("Voxtral: Transcribing...");
 		try {
 			let text = await transcribeBatch(blob, this.settings);
 
 			if (this.settings.autoCorrect && text) {
-				new Notice("Voxtral: Correcting...");
 				text = await correctText(text, this.settings);
 			}
 
@@ -577,11 +573,9 @@ export default class VoxtralPlugin extends Plugin {
 		if (!text.trim()) return;
 
 		try {
-			new Notice("Voxtral: Correcting...");
 			const corrected = await correctText(text, this.settings);
 			if (corrected && corrected !== text) {
 				editor.setValue(corrected);
-				new Notice("Voxtral: Text corrected");
 			}
 		} catch (e) {
 			console.error("Voxtral: Auto-correct failed", e);
