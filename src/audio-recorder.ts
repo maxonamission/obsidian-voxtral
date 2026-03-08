@@ -4,8 +4,9 @@
  * 2. WebM/Opus blob (for batch transcription)
  */
 
-export interface AudioLevelCallback {
-	(level: number): void; // 0.0 - 1.0
+export interface MicrophoneInfo {
+	deviceId: string;
+	label: string;
 }
 
 export class AudioRecorder {
@@ -13,36 +14,57 @@ export class AudioRecorder {
 	private audioContext: AudioContext | null = null;
 	private sourceNode: MediaStreamAudioSourceNode | null = null;
 	private processorNode: ScriptProcessorNode | null = null;
-	private analyserNode: AnalyserNode | null = null;
 	private mediaRecorder: MediaRecorder | null = null;
 	private chunks: Blob[] = [];
 
 	private onPcmChunk: ((pcmData: ArrayBuffer) => void) | null = null;
-	private onLevelChange: AudioLevelCallback | null = null;
-	private smoothLevel = 0;
+
+	/** The label of the currently active microphone */
+	activeMicLabel = "";
+
+	/**
+	 * Enumerate available audio input devices.
+	 * Requires a prior getUserMedia call for labels to be populated.
+	 */
+	static async enumerateMicrophones(): Promise<MicrophoneInfo[]> {
+		// Request permission first so labels are available
+		try {
+			const tempStream = await navigator.mediaDevices.getUserMedia({
+				audio: true,
+			});
+			tempStream.getTracks().forEach((t) => t.stop());
+		} catch {
+			// Permission denied or no mic
+			return [];
+		}
+
+		const devices = await navigator.mediaDevices.enumerateDevices();
+		return devices
+			.filter((d) => d.kind === "audioinput")
+			.map((d) => ({
+				deviceId: d.deviceId,
+				label: d.label || `Microfoon (${d.deviceId.slice(0, 8)}...)`,
+			}));
+	}
 
 	async start(
 		deviceId?: string,
-		onPcmChunk?: (pcmData: ArrayBuffer) => void,
-		onLevelChange?: AudioLevelCallback
+		onPcmChunk?: (pcmData: ArrayBuffer) => void
 	): Promise<void> {
 		this.onPcmChunk = onPcmChunk || null;
-		this.onLevelChange = onLevelChange || null;
 
 		const constraints: MediaStreamConstraints = {
-			audio: deviceId
-				? { deviceId: { exact: deviceId } }
-				: true,
+			audio: deviceId ? { deviceId: { exact: deviceId } } : true,
 		};
 
 		this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+		// Determine active mic label from stream track
+		const audioTrack = this.stream.getAudioTracks()[0];
+		this.activeMicLabel = audioTrack?.label || "Onbekende microfoon";
+
 		this.audioContext = new AudioContext({ sampleRate: 16000 });
 		this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
-
-		// Analyser for level metering
-		this.analyserNode = this.audioContext.createAnalyser();
-		this.analyserNode.fftSize = 256;
-		this.sourceNode.connect(this.analyserNode);
 
 		// ScriptProcessor for PCM capture (realtime mode)
 		if (this.onPcmChunk) {
@@ -69,9 +91,6 @@ export class AudioRecorder {
 			}
 		};
 		this.mediaRecorder.start(1000); // Collect in 1s chunks
-
-		// Start level monitoring
-		this.monitorLevel();
 	}
 
 	private processAudio(e: AudioProcessingEvent): void {
@@ -84,39 +103,8 @@ export class AudioRecorder {
 		this.onPcmChunk?.(pcm16.buffer);
 	}
 
-	private monitorLevel(): void {
-		if (!this.analyserNode) return;
-
-		const dataArray = new Uint8Array(this.analyserNode.frequencyBinCount);
-
-		const tick = () => {
-			if (!this.analyserNode) return;
-			this.analyserNode.getByteTimeDomainData(dataArray);
-
-			// Calculate RMS
-			let sum = 0;
-			for (let i = 0; i < dataArray.length; i++) {
-				const v = (dataArray[i] - 128) / 128;
-				sum += v * v;
-			}
-			const rms = Math.sqrt(sum / dataArray.length);
-			const level = Math.min(1, rms * 4); // Scale up for visibility
-
-			// Smooth with EMA
-			this.smoothLevel = this.smoothLevel * 0.9 + level * 0.1;
-			this.onLevelChange?.(this.smoothLevel);
-
-			if (this.stream) {
-				requestAnimationFrame(tick);
-			}
-		};
-		requestAnimationFrame(tick);
-	}
-
 	/**
 	 * Flush current audio as a blob WITHOUT stopping the recording.
-	 * Uses MediaRecorder.requestData() to get the audio so far,
-	 * then resets the chunk buffer for the next flush.
 	 */
 	async flushChunk(): Promise<Blob> {
 		return new Promise((resolve) => {
@@ -125,7 +113,6 @@ export class AudioRecorder {
 				return;
 			}
 
-			// Temporarily override ondataavailable to capture the flush
 			const existingChunks = [...this.chunks];
 			this.chunks = [];
 
@@ -134,15 +121,13 @@ export class AudioRecorder {
 				if (e.data.size > 0) {
 					this.chunks.push(e.data);
 				}
-				// Restore original handler
 				if (this.mediaRecorder) {
 					this.mediaRecorder.ondataavailable = originalHandler;
 				}
 
-				const blob = new Blob(
-					[...existingChunks, ...this.chunks],
-					{ type: this.getSupportedMimeType() }
-				);
+				const blob = new Blob([...existingChunks, ...this.chunks], {
+					type: this.getSupportedMimeType(),
+				});
 				this.chunks = [];
 				resolve(blob);
 			};
@@ -178,10 +163,6 @@ export class AudioRecorder {
 			this.sourceNode.disconnect();
 			this.sourceNode = null;
 		}
-		if (this.analyserNode) {
-			this.analyserNode.disconnect();
-			this.analyserNode = null;
-		}
 		if (this.audioContext) {
 			this.audioContext.close();
 			this.audioContext = null;
@@ -192,7 +173,7 @@ export class AudioRecorder {
 		}
 		this.mediaRecorder = null;
 		this.chunks = [];
-		this.smoothLevel = 0;
+		this.activeMicLabel = "";
 	}
 
 	get isRecording(): boolean {

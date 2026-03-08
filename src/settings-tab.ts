@@ -1,5 +1,6 @@
 import { App, Platform, PluginSettingTab, Setting } from "obsidian";
 import type VoxtralPlugin from "./main";
+import { AudioRecorder } from "./audio-recorder";
 
 export class VoxtralSettingTab extends PluginSettingTab {
 	plugin: VoxtralPlugin;
@@ -31,6 +32,29 @@ export class VoxtralSettingTab extends PluginSettingTab {
 				const input = setting.controlEl.querySelector("input");
 				if (input) input.type = "password";
 			});
+
+		// Microphone selection
+		const micSetting = new Setting(containerEl)
+			.setName("Microfoon")
+			.setDesc("Selecteer welke microfoon je wilt gebruiken");
+
+		micSetting.addDropdown((drop) => {
+			drop.addOption("", "Standaard systeemmicrofoon");
+			drop.setValue(this.plugin.settings.microphoneDeviceId);
+
+			// Populate async
+			AudioRecorder.enumerateMicrophones().then((mics) => {
+				for (const mic of mics) {
+					drop.addOption(mic.deviceId, mic.label);
+				}
+				drop.setValue(this.plugin.settings.microphoneDeviceId);
+			});
+
+			drop.onChange(async (value) => {
+				this.plugin.settings.microphoneDeviceId = value;
+				await this.plugin.saveSettings();
+			});
+		});
 
 		const modeDesc = Platform.isMobile
 			? "Op mobiel is alleen batch modus beschikbaar. Gebruik tap-to-send (▶ knop) om chunks te verzenden terwijl je praat."

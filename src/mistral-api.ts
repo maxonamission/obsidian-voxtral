@@ -75,20 +75,15 @@ export async function correctText(
 }
 
 // ── Realtime streaming transcription via WebSocket ──
-//
-// The Mistral API requires Authorization headers on WebSocket connections.
-// The browser WebSocket API does NOT support custom headers.
-// Obsidian runs in Electron, so we use Node.js `http`/`https` modules
-// to do a raw WebSocket upgrade with custom headers.
 
 export interface RealtimeCallbacks {
 	onSessionCreated: () => void;
 	onDelta: (text: string) => void;
 	onDone: (text: string) => void;
 	onError: (message: string) => void;
+	onDisconnect: () => void;
 }
 
-// Minimal WebSocket-like interface for our Node.js implementation
 interface WsConnection {
 	send: (data: string) => void;
 	close: () => void;
@@ -97,11 +92,6 @@ interface WsConnection {
 
 const WS_OPEN = 1;
 
-/**
- * Create a WebSocket connection using Node.js https module.
- * This allows us to send Authorization headers, which the browser
- * WebSocket API does not support.
- */
 function createNodeWebSocket(
 	url: string,
 	headers: Record<string, string>,
@@ -121,7 +111,7 @@ function createNodeWebSocket(
 	const wsKey = crypto.randomBytes(16).toString("base64");
 
 	const conn: WsConnection = {
-		readyState: 0, // CONNECTING
+		readyState: 0,
 		send: () => {},
 		close: () => {},
 	};
@@ -141,7 +131,6 @@ function createNodeWebSocket(
 			},
 		},
 		(res) => {
-			// If we get a normal HTTP response, it means upgrade failed
 			callbacks.onError(
 				new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
 			);
@@ -151,7 +140,6 @@ function createNodeWebSocket(
 	req.on("upgrade", (res, socket) => {
 		conn.readyState = WS_OPEN;
 
-		// WebSocket frame sender (text frames only)
 		conn.send = (data: string) => {
 			const payload = Buffer.from(data, "utf-8");
 			const mask = crypto.randomBytes(4);
@@ -159,8 +147,8 @@ function createNodeWebSocket(
 
 			if (payload.length < 126) {
 				header = Buffer.alloc(6);
-				header[0] = 0x81; // FIN + text opcode
-				header[1] = 0x80 | payload.length; // MASK + length
+				header[0] = 0x81;
+				header[1] = 0x80 | payload.length;
 				mask.copy(header, 2);
 			} else if (payload.length < 65536) {
 				header = Buffer.alloc(8);
@@ -176,7 +164,6 @@ function createNodeWebSocket(
 				mask.copy(header, 10);
 			}
 
-			// Mask payload
 			const masked = Buffer.alloc(payload.length);
 			for (let i = 0; i < payload.length; i++) {
 				masked[i] = payload[i] ^ mask[i % 4];
@@ -186,11 +173,10 @@ function createNodeWebSocket(
 		};
 
 		conn.close = () => {
-			conn.readyState = 3; // CLOSED
-			// Send close frame
+			conn.readyState = 3;
 			const closeFrame = Buffer.alloc(6);
-			closeFrame[0] = 0x88; // FIN + close opcode
-			closeFrame[1] = 0x80; // MASK + 0 length
+			closeFrame[0] = 0x88;
+			closeFrame[1] = 0x80;
 			const mask = crypto.randomBytes(4);
 			mask.copy(closeFrame, 2);
 			try {
@@ -201,9 +187,26 @@ function createNodeWebSocket(
 			socket.end();
 		};
 
+		// Client-side ping every 15s to keep the connection alive
+		const pingInterval = setInterval(() => {
+			if (conn.readyState !== WS_OPEN) {
+				clearInterval(pingInterval);
+				return;
+			}
+			try {
+				const pingFrame = Buffer.alloc(6);
+				pingFrame[0] = 0x89; // FIN + ping opcode
+				pingFrame[1] = 0x80; // MASK + 0 length
+				const pingMask = crypto.randomBytes(4);
+				pingMask.copy(pingFrame, 2);
+				socket.write(pingFrame);
+			} catch {
+				// Socket may be dead
+			}
+		}, 15000);
+
 		callbacks.onOpen();
 
-		// WebSocket frame reader
 		let buffer = Buffer.alloc(0);
 
 		socket.on("data", (chunk: Buffer) => {
@@ -244,31 +247,33 @@ function createNodeWebSocket(
 				buffer = buffer.subarray(offset + payloadLength);
 
 				if (opcode === 0x01) {
-					// Text frame
 					callbacks.onMessage(payload.toString("utf-8"));
 				} else if (opcode === 0x08) {
-					// Close frame
 					conn.readyState = 3;
+					clearInterval(pingInterval);
 					socket.end();
 					callbacks.onClose();
 					return;
 				} else if (opcode === 0x09) {
 					// Ping — send pong
-					const pong = Buffer.alloc(2);
-					pong[0] = 0x8a; // FIN + pong
-					pong[1] = 0x00;
+					const pong = Buffer.alloc(6);
+					pong[0] = 0x8a;
+					pong[1] = 0x80;
+					const pongMask = crypto.randomBytes(4);
+					pongMask.copy(pong, 2);
 					socket.write(pong);
 				}
-				// Ignore other opcodes (pong, continuation, binary)
 			}
 		});
 
 		socket.on("close", () => {
 			conn.readyState = 3;
+			clearInterval(pingInterval);
 			callbacks.onClose();
 		});
 
 		socket.on("error", (err: Error) => {
+			clearInterval(pingInterval);
 			callbacks.onError(err);
 		});
 	});
@@ -286,6 +291,7 @@ export class RealtimeTranscriber {
 	private ws: WsConnection | null = null;
 	private settings: VoxtralSettings;
 	private callbacks: RealtimeCallbacks;
+	private intentionallyClosed = false;
 
 	constructor(settings: VoxtralSettings, callbacks: RealtimeCallbacks) {
 		this.settings = settings;
@@ -293,6 +299,8 @@ export class RealtimeTranscriber {
 	}
 
 	async connect(): Promise<void> {
+		this.intentionallyClosed = false;
+
 		const params = new URLSearchParams({
 			model: this.settings.realtimeModel,
 		});
@@ -356,6 +364,12 @@ export class RealtimeTranscriber {
 					},
 					onClose: () => {
 						this.ws = null;
+						if (!this.intentionallyClosed) {
+							console.log(
+								"Voxtral: WebSocket closed unexpectedly, notifying plugin"
+							);
+							this.callbacks.onDisconnect();
+						}
 					},
 				}
 			);
@@ -399,6 +413,7 @@ export class RealtimeTranscriber {
 	}
 
 	close(): void {
+		this.intentionallyClosed = true;
 		if (this.ws) {
 			this.ws.close();
 			this.ws = null;

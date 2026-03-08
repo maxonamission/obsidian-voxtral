@@ -37,7 +37,10 @@ export default class VoxtralPlugin extends Plugin {
 	private statusBarEl: HTMLElement | null = null;
 	private sendRibbonEl: HTMLElement | null = null;
 	private pendingText = "";
-	private chunkIndex = 0; // Track chunk number for "sending chunk N"
+	private chunkIndex = 0;
+	private reconnectAttempts = 0;
+	private maxReconnectAttempts = 5;
+	private currentEditor: Editor | null = null;
 
 	/** Whether realtime mode is available on this platform */
 	get canRealtime(): boolean {
@@ -182,19 +185,23 @@ export default class VoxtralPlugin extends Plugin {
 		}
 
 		const editor = view.editor;
+		this.currentEditor = editor;
 
 		try {
 			if (this.effectiveMode === "realtime") {
 				await this.startRealtimeRecording(editor);
 			} else {
 				await this.startBatchRecording();
-				// Show the send button during batch recording
 				this.addSendButton();
 			}
 			this.isRecording = true;
 			this.chunkIndex = 0;
+			this.reconnectAttempts = 0;
 			this.updateStatusBar("recording");
-			new Notice("Voxtral: Opname gestart");
+
+			// Show which microphone is active
+			const micName = this.recorder.activeMicLabel;
+			new Notice(`Voxtral: Opname gestart (${micName})`);
 		} catch (e) {
 			console.error("Voxtral: Failed to start recording", e);
 			new Notice(`Voxtral: Kon opname niet starten: ${e}`);
@@ -218,6 +225,7 @@ export default class VoxtralPlugin extends Plugin {
 			new Notice(`Voxtral: Fout bij stoppen: ${e}`);
 		}
 
+		this.currentEditor = null;
 		this.updateStatusBar("idle");
 		new Notice("Voxtral: Opname gestopt");
 	}
@@ -244,7 +252,6 @@ export default class VoxtralPlugin extends Plugin {
 				return;
 			}
 
-			// Transcribe in the background while recording continues
 			let text = await transcribeBatch(blob, this.settings);
 
 			if (this.settings.autoCorrect && text) {
@@ -266,6 +273,15 @@ export default class VoxtralPlugin extends Plugin {
 	private async startRealtimeRecording(editor: Editor): Promise<void> {
 		this.pendingText = "";
 
+		await this.connectRealtimeWebSocket(editor);
+
+		const deviceId = this.settings.microphoneDeviceId || undefined;
+		await this.recorder.start(deviceId, (pcmData) => {
+			this.realtimeTranscriber?.sendAudio(pcmData);
+		});
+	}
+
+	private async connectRealtimeWebSocket(editor: Editor): Promise<void> {
 		this.realtimeTranscriber = new RealtimeTranscriber(this.settings, {
 			onSessionCreated: () => {
 				console.log("Voxtral: Realtime session created");
@@ -280,26 +296,71 @@ export default class VoxtralPlugin extends Plugin {
 				console.error("Voxtral: Realtime error:", message);
 				new Notice(`Voxtral: Streaming fout: ${message}`);
 			},
+			onDisconnect: () => {
+				this.handleRealtimeDisconnect();
+			},
 		});
 
 		await this.realtimeTranscriber.connect();
+	}
 
-		await this.recorder.start(
-			undefined,
-			(pcmData) => {
-				this.realtimeTranscriber?.sendAudio(pcmData);
-			},
-			(level) => {
-				this.updateLevelIndicator(level);
-			}
+	/**
+	 * Handle unexpected WebSocket disconnection during recording.
+	 * Automatically reconnects up to maxReconnectAttempts times.
+	 */
+	private async handleRealtimeDisconnect(): Promise<void> {
+		if (!this.isRecording) return; // User stopped, nothing to do
+
+		this.reconnectAttempts++;
+		if (this.reconnectAttempts > this.maxReconnectAttempts) {
+			new Notice(
+				"Voxtral: Verbinding verloren na meerdere pogingen. Opname gestopt.",
+				6000
+			);
+			this.stopRecording();
+			return;
+		}
+
+		const delay = Math.min(1000 * this.reconnectAttempts, 5000);
+		console.log(
+			`Voxtral: WebSocket disconnected, reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`
 		);
+		this.updateStatusBar("reconnecting");
+		new Notice(
+			`Voxtral: Verbinding verbroken, opnieuw verbinden... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`
+		);
+
+		await new Promise((resolve) => setTimeout(resolve, delay));
+
+		if (!this.isRecording) return; // User may have stopped during wait
+
+		const editor =
+			this.currentEditor ||
+			this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+		if (!editor) {
+			this.stopRecording();
+			return;
+		}
+
+		try {
+			await this.connectRealtimeWebSocket(editor);
+			this.updateStatusBar("recording");
+			new Notice("Voxtral: Verbinding hersteld");
+			console.log("Voxtral: WebSocket reconnected successfully");
+		} catch (e) {
+			console.error("Voxtral: Reconnection failed", e);
+			this.handleRealtimeDisconnect();
+		}
 	}
 
 	private handleRealtimeDelta(editor: Editor, text: string): void {
 		this.pendingText += text;
 
+		// Flush on sentence-ending punctuation OR after accumulating enough text
 		const sentenceEnd = /[.!?]\s*$/;
-		if (sentenceEnd.test(this.pendingText)) {
+		const longEnough = this.pendingText.length > 120;
+
+		if (sentenceEnd.test(this.pendingText) || longEnough) {
 			const sentence = this.pendingText.trim();
 			this.pendingText = "";
 
@@ -346,9 +407,8 @@ export default class VoxtralPlugin extends Plugin {
 	// ── Batch recording ──
 
 	private async startBatchRecording(): Promise<void> {
-		await this.recorder.start(undefined, undefined, (level) => {
-			this.updateLevelIndicator(level);
-		});
+		const deviceId = this.settings.microphoneDeviceId || undefined;
+		await this.recorder.start(deviceId);
 	}
 
 	private async stopBatchRecording(): Promise<void> {
@@ -474,10 +534,10 @@ export default class VoxtralPlugin extends Plugin {
 		}
 	}
 
-	// ── Status bar & level indicator ──
+	// ── Status bar ──
 
 	private updateStatusBar(
-		state: "idle" | "recording" | "processing"
+		state: "idle" | "recording" | "processing" | "reconnecting"
 	): void {
 		if (!this.statusBarEl) return;
 		switch (state) {
@@ -485,26 +545,38 @@ export default class VoxtralPlugin extends Plugin {
 				this.statusBarEl.setText("");
 				this.statusBarEl.removeClass(
 					"voxtral-recording",
-					"voxtral-processing"
+					"voxtral-processing",
+					"voxtral-reconnecting"
 				);
 				break;
-			case "recording":
-				this.statusBarEl.setText("● Opname");
+			case "recording": {
+				const mic = this.recorder.activeMicLabel;
+				const short =
+					mic.length > 25 ? mic.slice(0, 22) + "..." : mic;
+				this.statusBarEl.setText(`● ${short}`);
 				this.statusBarEl.addClass("voxtral-recording");
-				this.statusBarEl.removeClass("voxtral-processing");
+				this.statusBarEl.removeClass(
+					"voxtral-processing",
+					"voxtral-reconnecting"
+				);
 				break;
+			}
 			case "processing":
 				this.statusBarEl.setText("⏳ Verwerken...");
 				this.statusBarEl.addClass("voxtral-processing");
-				this.statusBarEl.removeClass("voxtral-recording");
+				this.statusBarEl.removeClass(
+					"voxtral-recording",
+					"voxtral-reconnecting"
+				);
+				break;
+			case "reconnecting":
+				this.statusBarEl.setText("⟳ Verbinden...");
+				this.statusBarEl.addClass("voxtral-reconnecting");
+				this.statusBarEl.removeClass(
+					"voxtral-recording",
+					"voxtral-processing"
+				);
 				break;
 		}
-	}
-
-	private updateLevelIndicator(level: number): void {
-		if (!this.statusBarEl || !this.isRecording) return;
-		const bars = Math.round(level * 5);
-		const indicator = "█".repeat(bars) + "░".repeat(5 - bars);
-		this.statusBarEl.setText(`● Opname ${indicator}`);
 	}
 }

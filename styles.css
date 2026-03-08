@@ -9,6 +9,11 @@
 	color: var(--text-warning);
 }
 
+.voxtral-reconnecting {
+	color: var(--text-warning);
+	font-style: italic;
+}
+
 /* ── Help panel (side view) ── */
 
 .voxtral-help-view {

@@ -8,6 +8,7 @@ export interface VoxtralSettings {
 	streamingDelayMs: number;
 	systemPrompt: string;
 	mode: "realtime" | "batch";
+	microphoneDeviceId: string; // "" = system default
 }
 
 export const DEFAULT_SETTINGS: VoxtralSettings = {
@@ -20,6 +21,7 @@ export const DEFAULT_SETTINGS: VoxtralSettings = {
 	streamingDelayMs: 480,
 	systemPrompt: "",
 	mode: "realtime",
+	microphoneDeviceId: "",
 };
 
 export const DEFAULT_CORRECT_PROMPT =
