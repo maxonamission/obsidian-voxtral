@@ -105,6 +105,8 @@ export class AudioRecorder {
 
 	/**
 	 * Flush current audio as a blob WITHOUT stopping the recording.
+	 * Stops and restarts MediaRecorder so each blob is a complete,
+	 * valid audio file with proper container headers.
 	 */
 	async flushChunk(): Promise<Blob> {
 		return new Promise((resolve) => {
@@ -113,26 +115,29 @@ export class AudioRecorder {
 				return;
 			}
 
-			const existingChunks = [...this.chunks];
-			this.chunks = [];
-
-			const originalHandler = this.mediaRecorder.ondataavailable;
-			this.mediaRecorder.ondataavailable = (e) => {
-				if (e.data.size > 0) {
-					this.chunks.push(e.data);
-				}
-				if (this.mediaRecorder) {
-					this.mediaRecorder.ondataavailable = originalHandler;
-				}
-
-				const blob = new Blob([...existingChunks, ...this.chunks], {
-					type: this.getSupportedMimeType(),
-				});
+			this.mediaRecorder.onstop = () => {
+				const mimeType = this.getSupportedMimeType();
+				const blob = new Blob(this.chunks, { type: mimeType });
 				this.chunks = [];
+
+				// Restart a fresh MediaRecorder so the next chunk
+				// will also have proper container headers
+				if (this.stream) {
+					this.mediaRecorder = new MediaRecorder(this.stream, {
+						mimeType,
+					});
+					this.mediaRecorder.ondataavailable = (e) => {
+						if (e.data.size > 0) {
+							this.chunks.push(e.data);
+						}
+					};
+					this.mediaRecorder.start(1000);
+				}
+
 				resolve(blob);
 			};
 
-			this.mediaRecorder.requestData();
+			this.mediaRecorder.stop();
 		});
 	}
 

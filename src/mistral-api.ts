@@ -10,8 +10,14 @@ export async function transcribeBatch(
 	settings: VoxtralSettings,
 	diarize = false
 ): Promise<string> {
+	// Derive filename extension from the blob's actual mime type
+	const ext = audioBlob.type.includes("mp4")
+		? "m4a"
+		: audioBlob.type.includes("ogg")
+			? "ogg"
+			: "webm";
 	const formData = new FormData();
-	formData.append("file", audioBlob, "recording.webm");
+	formData.append("file", audioBlob, `recording.${ext}`);
 	formData.append("model", settings.batchModel);
 	if (settings.language) {
 		formData.append("language", settings.language);
