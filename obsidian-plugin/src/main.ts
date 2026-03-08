@@ -134,14 +134,6 @@ export default class VoxtralPlugin extends Plugin {
 			this.handleTypingMute(e);
 		});
 
-		// Show mobile notice on first load
-		if (Platform.isMobile && this.settings.mode === "realtime") {
-			new Notice(
-				"Voxtral: Realtime mode is not available on mobile. " +
-					"Using batch mode instead. Tap the send button to submit audio.",
-				8000
-			);
-		}
 	}
 
 	onunload(): void {
@@ -366,11 +358,37 @@ export default class VoxtralPlugin extends Plugin {
 			// Show which microphone is active
 			const micName = this.recorder.activeMicLabel;
 			if (this.effectiveMode === "batch") {
-				new Notice(
-					`Voxtral: Recording started (${micName})\n` +
-						"Tap the send button to transcribe while you keep talking.",
-					6000
-				);
+				if (
+					Platform.isMobile &&
+					!this.settings.dismissMobileBatchNotice
+				) {
+					// Show a one-time explainer on mobile; user can dismiss permanently
+					const frag = document.createDocumentFragment();
+					frag.createSpan({
+						text:
+							`Recording started (${micName}). ` +
+							"Tap the send button (\u2191) to transcribe chunks while you keep talking.",
+					});
+					frag.createEl("br");
+					const dismiss = frag.createEl("a", {
+						text: "Don\u2019t show again",
+						href: "#",
+					});
+					dismiss.style.opacity = "0.7";
+					dismiss.style.fontSize = "0.85em";
+					dismiss.addEventListener("click", (e) => {
+						e.preventDefault();
+						this.settings.dismissMobileBatchNotice = true;
+						this.saveSettings();
+					});
+					new Notice(frag, 8000);
+				} else {
+					new Notice(
+						`Voxtral: Recording started (${micName})\n` +
+							"Tap send to transcribe while you keep talking.",
+						6000
+					);
+				}
 			} else {
 				new Notice(`Voxtral: Recording started (${micName})`);
 			}
