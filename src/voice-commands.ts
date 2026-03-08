@@ -245,17 +245,42 @@ export function matchCommand(rawText: string): CommandMatch | null {
 }
 
 /**
- * Process a completed sentence: check for voice commands and execute them,
- * or insert the text as-is.
+ * Process transcribed text: split into sentences, check each for voice
+ * commands, and execute them or insert the text as-is.
+ *
+ * In realtime mode each call is typically one sentence. In batch mode
+ * the text may contain multiple sentences, so we split on sentence
+ * boundaries to catch commands like "nieuw punt" mid-text.
  */
 export function processText(editor: Editor, text: string): void {
+	// Split on sentence-ending punctuation, keeping the delimiter
+	// attached to the preceding segment.
+	const segments = text.match(/[^.!?]+[.!?]+\s*/g);
+
+	if (!segments) {
+		// No sentence boundaries found — process as a single block
+		processSegment(editor, text);
+		return;
+	}
+
+	// Check if there's trailing text after the last sentence-ending
+	const joined = segments.join("");
+	const remainder = text.slice(joined.length);
+
+	for (const segment of segments) {
+		processSegment(editor, segment);
+	}
+	if (remainder.trim()) {
+		processSegment(editor, remainder);
+	}
+}
+
+function processSegment(editor: Editor, text: string): void {
 	const match = matchCommand(text);
 	if (match) {
-		// Insert any text before the command
 		if (match.textBefore) {
 			insertAtCursor(editor, match.textBefore);
 		}
-		// Execute the command
 		match.command.action(editor);
 	} else {
 		insertAtCursor(editor, text);

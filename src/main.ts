@@ -16,6 +16,7 @@ import {
 	RealtimeTranscriber,
 	transcribeBatch,
 	correctText,
+	isLikelyHallucination,
 } from "./mistral-api";
 import { normalizeCommand, processText } from "./voice-commands";
 
@@ -362,6 +363,18 @@ export default class VoxtralPlugin extends Plugin {
 
 			let text = await transcribeBatch(blob, this.settings);
 
+			if (
+				text &&
+				isLikelyHallucination(
+					text,
+					this.recorder.lastChunkDurationSec
+				)
+			) {
+				console.warn("Voxtral: Discarding hallucinated chunk");
+				this.updateStatusBar("recording");
+				return;
+			}
+
 			if (this.settings.autoCorrect && text) {
 				text = await correctText(text, this.settings);
 			}
@@ -555,6 +568,17 @@ export default class VoxtralPlugin extends Plugin {
 
 		try {
 			let text = await transcribeBatch(blob, this.settings);
+
+			if (
+				text &&
+				isLikelyHallucination(
+					text,
+					this.recorder.lastChunkDurationSec
+				)
+			) {
+				console.warn("Voxtral: Discarding hallucinated batch");
+				return;
+			}
 
 			if (this.settings.autoCorrect && text) {
 				text = await correctText(text, this.settings);

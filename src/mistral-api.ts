@@ -3,6 +3,64 @@ import { VoxtralSettings, DEFAULT_CORRECT_PROMPT } from "./types";
 
 const BASE_URL = "https://api.mistral.ai";
 
+// ── Hallucination detection ──
+
+/**
+ * Detect likely hallucinated transcription output.
+ * Whisper-style models hallucinate when given silence or very short audio,
+ * producing repetitive or impossibly long text.
+ */
+export function isLikelyHallucination(
+	text: string,
+	audioDurationSec: number
+): boolean {
+	if (!text.trim()) return false;
+
+	const words = text.trim().split(/\s+/).length;
+	const wordsPerSec = audioDurationSec > 0 ? words / audioDurationSec : words;
+
+	// Normal speech is ~2-3 words/sec. Allow generous headroom but
+	// flag anything over 5 words/sec as suspicious.
+	if (wordsPerSec > 5 && words > 20) {
+		console.warn(
+			`Voxtral: Hallucination detected — ${words} words in ${audioDurationSec.toFixed(1)}s (${wordsPerSec.toFixed(1)} w/s)`
+		);
+		return true;
+	}
+
+	// Detect repetitive blocks: split on horizontal rules or repeated
+	// sentence patterns.  3+ similar blocks = hallucination.
+	const blocks = text.split(/\n---\n|^---$/m).filter((b) => b.trim());
+	if (blocks.length >= 3) {
+		console.warn(
+			`Voxtral: Hallucination detected — ${blocks.length} repeated blocks separated by ---`
+		);
+		return true;
+	}
+
+	// Detect repeated sentences (3+ identical or near-identical)
+	const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
+	if (sentences.length >= 6) {
+		const normalized = sentences.map((s) =>
+			s.trim().toLowerCase().replace(/\s+/g, " ")
+		);
+		const counts = new Map<string, number>();
+		for (const s of normalized) {
+			counts.set(s, (counts.get(s) || 0) + 1);
+		}
+		for (const [, count] of counts) {
+			if (count >= 3) {
+				console.warn(
+					"Voxtral: Hallucination detected — repeated sentences"
+				);
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
 // ── Batch transcription ──
 
 export async function transcribeBatch(

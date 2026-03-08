@@ -16,11 +16,15 @@ export class AudioRecorder {
 	private processorNode: ScriptProcessorNode | null = null;
 	private mediaRecorder: MediaRecorder | null = null;
 	private chunks: Blob[] = [];
+	private lastFlushTime = 0;
 
 	private onPcmChunk: ((pcmData: ArrayBuffer) => void) | null = null;
 
 	/** The label of the currently active microphone */
 	activeMicLabel = "";
+
+	/** Duration in seconds of the last flushed/stopped chunk */
+	lastChunkDurationSec = 0;
 
 	/**
 	 * Enumerate available audio input devices.
@@ -91,6 +95,7 @@ export class AudioRecorder {
 			}
 		};
 		this.mediaRecorder.start(1000); // Collect in 1s chunks
+		this.lastFlushTime = Date.now();
 	}
 
 	private processAudio(e: AudioProcessingEvent): void {
@@ -116,6 +121,10 @@ export class AudioRecorder {
 			}
 
 			this.mediaRecorder.onstop = () => {
+				const now = Date.now();
+				this.lastChunkDurationSec = (now - this.lastFlushTime) / 1000;
+				this.lastFlushTime = now;
+
 				const mimeType = this.getSupportedMimeType();
 				const blob = new Blob(this.chunks, { type: mimeType });
 				this.chunks = [];
@@ -145,6 +154,8 @@ export class AudioRecorder {
 		return new Promise((resolve) => {
 			if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
 				this.mediaRecorder.onstop = () => {
+					this.lastChunkDurationSec =
+						(Date.now() - this.lastFlushTime) / 1000;
 					const blob = new Blob(this.chunks, {
 						type: this.getSupportedMimeType(),
 					});

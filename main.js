@@ -53,9 +53,12 @@ var AudioRecorder = class {
     this.processorNode = null;
     this.mediaRecorder = null;
     this.chunks = [];
+    this.lastFlushTime = 0;
     this.onPcmChunk = null;
     /** The label of the currently active microphone */
     this.activeMicLabel = "";
+    /** Duration in seconds of the last flushed/stopped chunk */
+    this.lastChunkDurationSec = 0;
   }
   /**
    * Enumerate available audio input devices.
@@ -108,6 +111,7 @@ var AudioRecorder = class {
       }
     };
     this.mediaRecorder.start(1e3);
+    this.lastFlushTime = Date.now();
   }
   processAudio(e) {
     var _a;
@@ -131,6 +135,9 @@ var AudioRecorder = class {
         return;
       }
       this.mediaRecorder.onstop = () => {
+        const now = Date.now();
+        this.lastChunkDurationSec = (now - this.lastFlushTime) / 1e3;
+        this.lastFlushTime = now;
         const mimeType = this.getSupportedMimeType();
         const blob = new Blob(this.chunks, { type: mimeType });
         this.chunks = [];
@@ -154,6 +161,7 @@ var AudioRecorder = class {
     return new Promise((resolve) => {
       if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
         this.mediaRecorder.onstop = () => {
+          this.lastChunkDurationSec = (Date.now() - this.lastFlushTime) / 1e3;
           const blob = new Blob(this.chunks, {
             type: this.getSupportedMimeType()
           });
@@ -574,6 +582,21 @@ function matchCommand(rawText) {
   return null;
 }
 function processText(editor, text) {
+  const segments = text.match(/[^.!?]+[.!?]+\s*/g);
+  if (!segments) {
+    processSegment(editor, text);
+    return;
+  }
+  const joined = segments.join("");
+  const remainder = text.slice(joined.length);
+  for (const segment of segments) {
+    processSegment(editor, segment);
+  }
+  if (remainder.trim()) {
+    processSegment(editor, remainder);
+  }
+}
+function processSegment(editor, text) {
   const match = matchCommand(text);
   if (match) {
     if (match.textBefore) {
@@ -654,6 +677,43 @@ var VoxtralHelpView = class extends import_obsidian2.ItemView {
 // src/mistral-api.ts
 var import_obsidian3 = require("obsidian");
 var BASE_URL = "https://api.mistral.ai";
+function isLikelyHallucination(text, audioDurationSec) {
+  if (!text.trim()) return false;
+  const words = text.trim().split(/\s+/).length;
+  const wordsPerSec = audioDurationSec > 0 ? words / audioDurationSec : words;
+  if (wordsPerSec > 5 && words > 20) {
+    console.warn(
+      `Voxtral: Hallucination detected \u2014 ${words} words in ${audioDurationSec.toFixed(1)}s (${wordsPerSec.toFixed(1)} w/s)`
+    );
+    return true;
+  }
+  const blocks = text.split(/\n---\n|^---$/m).filter((b) => b.trim());
+  if (blocks.length >= 3) {
+    console.warn(
+      `Voxtral: Hallucination detected \u2014 ${blocks.length} repeated blocks separated by ---`
+    );
+    return true;
+  }
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
+  if (sentences.length >= 6) {
+    const normalized = sentences.map(
+      (s) => s.trim().toLowerCase().replace(/\s+/g, " ")
+    );
+    const counts = /* @__PURE__ */ new Map();
+    for (const s of normalized) {
+      counts.set(s, (counts.get(s) || 0) + 1);
+    }
+    for (const [, count] of counts) {
+      if (count >= 3) {
+        console.warn(
+          "Voxtral: Hallucination detected \u2014 repeated sentences"
+        );
+        return true;
+      }
+    }
+  }
+  return false;
+}
 async function transcribeBatch(audioBlob, settings, diarize = false) {
   const ext = audioBlob.type.includes("mp4") ? "m4a" : audioBlob.type.includes("ogg") ? "ogg" : "webm";
   const formData = new FormData();
@@ -1327,6 +1387,14 @@ Tap the send button to transcribe while you keep talking.`,
         return;
       }
       let text = await transcribeBatch(blob, this.settings);
+      if (text && isLikelyHallucination(
+        text,
+        this.recorder.lastChunkDurationSec
+      )) {
+        console.warn("Voxtral: Discarding hallucinated chunk");
+        this.updateStatusBar("recording");
+        return;
+      }
       if (this.settings.autoCorrect && text) {
         text = await correctText(text, this.settings);
       }
@@ -1486,6 +1554,13 @@ Tap the send button to transcribe while you keep talking.`,
     const editor = view.editor;
     try {
       let text = await transcribeBatch(blob, this.settings);
+      if (text && isLikelyHallucination(
+        text,
+        this.recorder.lastChunkDurationSec
+      )) {
+        console.warn("Voxtral: Discarding hallucinated batch");
+        return;
+      }
       if (this.settings.autoCorrect && text) {
         text = await correctText(text, this.settings);
       }
