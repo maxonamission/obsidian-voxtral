@@ -85,6 +85,18 @@ export async function correctText(
 	// don't appear in the input.
 	result = stripLlmCommentary(result, text);
 
+	// Guard against hallucination: if the correction is significantly
+	// longer than the input, the model likely added invented content.
+	// A corrected text should never be much longer than the original
+	// (minor growth from e.g. expanding abbreviations is fine).
+	if (result.length > text.length * 1.5 + 50) {
+		console.warn(
+			"Voxtral: Correction rejected — output is suspiciously longer than input",
+			{ inputLen: text.length, outputLen: result.length }
+		);
+		return text;
+	}
+
 	return result;
 }
 

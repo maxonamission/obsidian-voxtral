@@ -352,10 +352,11 @@ export default class VoxtralPlugin extends Plugin {
 		this.chunkIndex++;
 
 		try {
+			this.updateStatusBar("processing");
 			const blob = await this.recorder.flushChunk();
 
 			if (blob.size === 0) {
-				new Notice("Voxtral: No audio in chunk");
+				this.updateStatusBar("recording");
 				return;
 			}
 
@@ -365,11 +366,13 @@ export default class VoxtralPlugin extends Plugin {
 				text = await correctText(text, this.settings);
 			}
 
+			this.updateStatusBar("recording");
 			if (text) {
 				processText(editor, text);
 			}
 		} catch (e) {
 			console.error("Voxtral: Chunk transcription failed", e);
+			this.updateStatusBar("recording");
 			new Notice(`Voxtral: Chunk failed: ${e}`);
 		}
 	}
