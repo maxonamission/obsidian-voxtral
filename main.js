@@ -398,6 +398,15 @@ function fixMishearings(text) {
 }
 function insertAtCursor(editor, text) {
   const cursor = editor.getCursor();
+  if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
+    const charBefore = editor.getRange(
+      { line: cursor.line, ch: cursor.ch - 1 },
+      cursor
+    );
+    if (charBefore && /\S/.test(charBefore)) {
+      text = " " + text;
+    }
+  }
   editor.replaceRange(text, cursor);
   const lines = text.split("\n");
   const lastLine = lines[lines.length - 1];

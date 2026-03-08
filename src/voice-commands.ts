@@ -34,6 +34,20 @@ function fixMishearings(text: string): string {
 
 function insertAtCursor(editor: Editor, text: string): void {
 	const cursor = editor.getCursor();
+
+	// Ensure a space between existing text and new text when needed.
+	// Voxtral transcriptions often lack a leading space, causing
+	// "sentence.Next" instead of "sentence. Next".
+	if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
+		const charBefore = editor.getRange(
+			{ line: cursor.line, ch: cursor.ch - 1 },
+			cursor
+		);
+		if (charBefore && /\S/.test(charBefore)) {
+			text = " " + text;
+		}
+	}
+
 	editor.replaceRange(text, cursor);
 	// Move cursor to end of inserted text
 	const lines = text.split("\n");
