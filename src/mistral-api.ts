@@ -77,7 +77,36 @@ export async function correctText(
 	}
 
 	const data = response.json;
-	return data.choices?.[0]?.message?.content?.trim() || text;
+	let result = data.choices?.[0]?.message?.content?.trim() || text;
+
+	// Strip any parenthesized commentary the LLM may have added that
+	// was not present in the original text.  We only remove trailing
+	// parenthesized blocks and standalone parenthesized lines that
+	// don't appear in the input.
+	result = stripLlmCommentary(result, text);
+
+	return result;
+}
+
+/**
+ * Remove parenthesized text blocks that the correction LLM added
+ * but were NOT in the original transcription.
+ */
+function stripLlmCommentary(corrected: string, original: string): string {
+	// Match parenthesized blocks (including multi-line)
+	const parenPattern = /\s*\([^)]{10,}\)\s*/g;
+	let cleaned = corrected;
+	let match;
+
+	while ((match = parenPattern.exec(corrected)) !== null) {
+		const block = match[0].trim();
+		// If this parenthesized block wasn't in the original, remove it
+		if (!original.includes(block)) {
+			cleaned = cleaned.replace(match[0], " ");
+		}
+	}
+
+	return cleaned.trim();
 }
 
 // ── Realtime streaming transcription via WebSocket ──

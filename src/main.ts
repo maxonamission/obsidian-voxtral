@@ -181,12 +181,21 @@ export default class VoxtralPlugin extends Plugin {
 
 			document.body.appendChild(this.floatingEl);
 
-			// Move buttons above keyboard when it appears
+			// Move buttons above keyboard when it appears.
+			// Mobile browsers fire "resize" and/or "scroll" on
+			// visualViewport when the soft keyboard opens/closes.
+			// We listen to both to cover all platforms.
 			if (window.visualViewport) {
 				this.viewportHandler = () => {
 					if (!this.floatingEl || !window.visualViewport) return;
+					const vv = window.visualViewport;
+					// The keyboard height is the difference between the
+					// full layout viewport and the visual viewport,
+					// accounting for any scroll offset of the viewport.
 					const keyboardHeight =
-						window.innerHeight - window.visualViewport.height;
+						window.innerHeight -
+						vv.height -
+						vv.offsetTop;
 					this.floatingEl.style.bottom =
 						keyboardHeight > 50
 							? `${keyboardHeight + 12}px`
@@ -194,6 +203,10 @@ export default class VoxtralPlugin extends Plugin {
 				};
 				window.visualViewport.addEventListener(
 					"resize",
+					this.viewportHandler
+				);
+				window.visualViewport.addEventListener(
+					"scroll",
 					this.viewportHandler
 				);
 			}
@@ -208,6 +221,10 @@ export default class VoxtralPlugin extends Plugin {
 		if (this.viewportHandler && window.visualViewport) {
 			window.visualViewport.removeEventListener(
 				"resize",
+				this.viewportHandler
+			);
+			window.visualViewport.removeEventListener(
+				"scroll",
 				this.viewportHandler
 			);
 			this.viewportHandler = null;
@@ -256,7 +273,11 @@ export default class VoxtralPlugin extends Plugin {
 			this.chunkIndex = 0;
 			this.consecutiveFailures = 0;
 			this.updateStatusBar("recording");
-			this.openHelpPanel();
+			// Auto-open help panel on desktop only — on mobile it
+			// takes over the whole screen which is annoying.
+			if (!Platform.isMobile) {
+				this.openHelpPanel();
+			}
 
 			// Show which microphone is active
 			const micName = this.recorder.activeMicLabel;
