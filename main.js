@@ -35,7 +35,9 @@ var DEFAULT_SETTINGS = {
   streamingDelayMs: 480,
   systemPrompt: "",
   mode: "realtime",
-  microphoneDeviceId: ""
+  microphoneDeviceId: "",
+  focusBehavior: "pause",
+  focusPauseDelaySec: 30
 };
 var DEFAULT_CORRECT_PROMPT = "Je bent een nauwkeurige tekstcorrector voor Nederlands. Corrigeer ALLEEN:\n- Capitalisatie (hoofdletters aan het begin van zinnen, eigennamen)\n- Duidelijk verkeerd geschreven of verminkte woorden (door spraakherkenning)\n- Ontbrekende of verkeerde leestekens\n\nNIET veranderen:\n- Zinsstructuur of woordvolgorde\n- Stijl of toon\n- Markdown opmaak (# koppen, - lijstjes, - [ ] to-do items)\n\nINLINE CORRECTIE-INSTRUCTIES:\nDe tekst is gedicteerd via spraakherkenning. De spreker geeft soms inline instructies of correcties die voor jou bedoeld zijn. Herken deze patronen:\n- Expliciete markers: 'voor de correctie', 'voor de controle achteraf', 'voor de correctie achteraf', 'correctie-instructie', 'noot voor de corrector', 'voor de automatische correctie'\n- Gespelde woorden: 'V-O-X-T-R-A-L' of 'met een x' \u2192 voeg samen tot het bedoelde woord\n- Zelfcorrecties: 'nee niet X maar Y', 'ik bedoel Y', 'dat moet Z zijn'\n- Meta-commentaar over het dicteren: 'dat is een Nederlands woord', 'met een hoofdletter'\n\nAls je zulke instructies of meta-commentaar tegenkomt:\n1. Volg de instructie op bij het corrigeren van de REST van de tekst\n2. Verwijder de instructie/het meta-commentaar zelf volledig uit de output\n3. Behoud alle inhoudelijke tekst \u2014 verwijder NOOIT gewone zinnen\n\nSTRIKT VERBODEN:\n- Voeg NOOIT eigen tekst, commentaar, uitleg of opmerkingen toe\n- Voeg NOOIT tekst tussen haakjes toe zoals '(tekst ontbreekt)' of '(geen correcties nodig)'\n- Als de invoer kort is (zelfs \xE9\xE9n woord), geef dan gewoon die tekst gecorrigeerd terug\n- Je output mag ALLEEN de gecorrigeerde versie van de invoertekst bevatten, NIETS anders";
 
@@ -268,6 +270,45 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
           await this.plugin.saveSettings();
         })
       );
+    }
+    const focusSetting = new import_obsidian.Setting(containerEl).setName("Bij focus-verlies").setDesc(
+      "Wat moet er gebeuren als je van app wisselt terwijl je opneemt?"
+    ).addDropdown((drop) => {
+      drop.addOption("pause", "Direct pauzeren");
+      drop.addOption(
+        "pause-after-delay",
+        "Pauzeren na vertraging"
+      );
+      drop.addOption("keep-recording", "Doorlopen");
+      drop.setValue(this.plugin.settings.focusBehavior).onChange(
+        async (value) => {
+          this.plugin.settings.focusBehavior = value;
+          await this.plugin.saveSettings();
+          this.display();
+        }
+      );
+    });
+    if (this.plugin.settings.focusBehavior === "pause-after-delay") {
+      new import_obsidian.Setting(containerEl).setName("Pauze-vertraging (seconden)").setDesc(
+        "Na zoveel seconden op de achtergrond wordt de opname gepauzeerd"
+      ).addDropdown((drop) => {
+        const options = {
+          "10": "10 sec",
+          "30": "30 sec (standaard)",
+          "60": "1 minuut",
+          "120": "2 minuten",
+          "300": "5 minuten"
+        };
+        for (const [value, label] of Object.entries(options)) {
+          drop.addOption(value, label);
+        }
+        drop.setValue(
+          String(this.plugin.settings.focusPauseDelaySec)
+        ).onChange(async (value) => {
+          this.plugin.settings.focusPauseDelaySec = Number(value);
+          await this.plugin.saveSettings();
+        });
+      });
     }
     new import_obsidian.Setting(containerEl).setName("Taal").setDesc("Taal voor batch-transcriptie (ISO 639-1)").addText(
       (text) => text.setPlaceholder("nl").setValue(this.plugin.settings.language).onChange(async (value) => {
@@ -1010,6 +1051,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.realtimeTranscriber = null;
     this.isRecording = false;
     this.isPaused = false;
+    this.focusPauseTimer = null;
     this.statusBarEl = null;
     this.sendRibbonEl = null;
     this.mobileActionEl = null;
@@ -1136,17 +1178,48 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
   // ── Visibility (auto-pause on background) ──
   handleVisibilityChange() {
     if (!this.isRecording) return;
+    const behavior = this.settings.focusBehavior;
     if (document.hidden) {
-      this.isPaused = true;
-      this.recorder.pause();
-      this.updateStatusBar("paused");
-      console.log("Voxtral: Opname gepauzeerd (app op achtergrond)");
-    } else if (this.isPaused) {
-      this.isPaused = false;
-      this.recorder.resume();
-      this.updateStatusBar("recording");
-      new import_obsidian4.Notice("Voxtral: Opname hervat");
-      console.log("Voxtral: Opname hervat (app op voorgrond)");
+      this.clearFocusPauseTimer();
+      if (behavior === "keep-recording") {
+        console.log("Voxtral: App op achtergrond, opname loopt door");
+      } else if (behavior === "pause-after-delay") {
+        const delaySec = this.settings.focusPauseDelaySec;
+        console.log(
+          `Voxtral: App op achtergrond, pauze over ${delaySec}s`
+        );
+        this.focusPauseTimer = setTimeout(() => {
+          if (this.isRecording && document.hidden) {
+            this.pauseRecording();
+          }
+        }, delaySec * 1e3);
+      } else {
+        this.pauseRecording();
+      }
+    } else {
+      this.clearFocusPauseTimer();
+      if (this.isPaused) {
+        this.resumeRecording();
+      }
+    }
+  }
+  pauseRecording() {
+    this.isPaused = true;
+    this.recorder.pause();
+    this.updateStatusBar("paused");
+    console.log("Voxtral: Opname gepauzeerd (app op achtergrond)");
+  }
+  resumeRecording() {
+    this.isPaused = false;
+    this.recorder.resume();
+    this.updateStatusBar("recording");
+    new import_obsidian4.Notice("Voxtral: Opname hervat");
+    console.log("Voxtral: Opname hervat (app op voorgrond)");
+  }
+  clearFocusPauseTimer() {
+    if (this.focusPauseTimer) {
+      clearTimeout(this.focusPauseTimer);
+      this.focusPauseTimer = null;
     }
   }
   // ── Recording toggle ──
@@ -1204,6 +1277,7 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
   async stopRecording() {
     this.isRecording = false;
     this.isPaused = false;
+    this.clearFocusPauseTimer();
     this.updateStatusBar("processing");
     this.removeSendButton();
     try {

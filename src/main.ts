@@ -35,6 +35,7 @@ export default class VoxtralPlugin extends Plugin {
 	private realtimeTranscriber: RealtimeTranscriber | null = null;
 	private isRecording = false;
 	private isPaused = false;
+	private focusPauseTimer: ReturnType<typeof setTimeout> | null = null;
 	private statusBarEl: HTMLElement | null = null;
 	private sendRibbonEl: HTMLElement | null = null;
 	private mobileActionEl: HTMLElement | null = null;
@@ -198,19 +199,57 @@ export default class VoxtralPlugin extends Plugin {
 	private handleVisibilityChange(): void {
 		if (!this.isRecording) return;
 
+		const behavior = this.settings.focusBehavior;
+
 		if (document.hidden) {
-			// App went to background — pause recording
-			this.isPaused = true;
-			this.recorder.pause();
-			this.updateStatusBar("paused");
-			console.log("Voxtral: Opname gepauzeerd (app op achtergrond)");
-		} else if (this.isPaused) {
-			// App came back — resume recording
-			this.isPaused = false;
-			this.recorder.resume();
-			this.updateStatusBar("recording");
-			new Notice("Voxtral: Opname hervat");
-			console.log("Voxtral: Opname hervat (app op voorgrond)");
+			// Clear any pending delayed pause
+			this.clearFocusPauseTimer();
+
+			if (behavior === "keep-recording") {
+				// Do nothing — keep recording in background
+				console.log("Voxtral: App op achtergrond, opname loopt door");
+			} else if (behavior === "pause-after-delay") {
+				const delaySec = this.settings.focusPauseDelaySec;
+				console.log(
+					`Voxtral: App op achtergrond, pauze over ${delaySec}s`
+				);
+				this.focusPauseTimer = setTimeout(() => {
+					if (this.isRecording && document.hidden) {
+						this.pauseRecording();
+					}
+				}, delaySec * 1000);
+			} else {
+				// "pause" — immediate
+				this.pauseRecording();
+			}
+		} else {
+			// App came back to foreground
+			this.clearFocusPauseTimer();
+			if (this.isPaused) {
+				this.resumeRecording();
+			}
+		}
+	}
+
+	private pauseRecording(): void {
+		this.isPaused = true;
+		this.recorder.pause();
+		this.updateStatusBar("paused");
+		console.log("Voxtral: Opname gepauzeerd (app op achtergrond)");
+	}
+
+	private resumeRecording(): void {
+		this.isPaused = false;
+		this.recorder.resume();
+		this.updateStatusBar("recording");
+		new Notice("Voxtral: Opname hervat");
+		console.log("Voxtral: Opname hervat (app op voorgrond)");
+	}
+
+	private clearFocusPauseTimer(): void {
+		if (this.focusPauseTimer) {
+			clearTimeout(this.focusPauseTimer);
+			this.focusPauseTimer = null;
 		}
 	}
 
@@ -279,6 +318,7 @@ export default class VoxtralPlugin extends Plugin {
 	private async stopRecording(): Promise<void> {
 		this.isRecording = false;
 		this.isPaused = false;
+		this.clearFocusPauseTimer();
 		this.updateStatusBar("processing");
 		this.removeSendButton();
 

@@ -1,6 +1,7 @@
 import { App, Platform, PluginSettingTab, Setting } from "obsidian";
 import type VoxtralPlugin from "./main";
 import { AudioRecorder } from "./audio-recorder";
+import type { FocusBehavior } from "./types";
 
 export class VoxtralSettingTab extends PluginSettingTab {
 	plugin: VoxtralPlugin;
@@ -84,6 +85,57 @@ export class VoxtralSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+		}
+
+		// Focus behavior
+		const focusSetting = new Setting(containerEl)
+			.setName("Bij focus-verlies")
+			.setDesc(
+				"Wat moet er gebeuren als je van app wisselt terwijl je opneemt?"
+			)
+			.addDropdown((drop) => {
+				drop.addOption("pause", "Direct pauzeren");
+				drop.addOption(
+					"pause-after-delay",
+					"Pauzeren na vertraging"
+				);
+				drop.addOption("keep-recording", "Doorlopen");
+				drop.setValue(this.plugin.settings.focusBehavior).onChange(
+					async (value) => {
+						this.plugin.settings.focusBehavior =
+							value as FocusBehavior;
+						await this.plugin.saveSettings();
+						// Re-render to show/hide delay setting
+						this.display();
+					}
+				);
+			});
+
+		if (this.plugin.settings.focusBehavior === "pause-after-delay") {
+			new Setting(containerEl)
+				.setName("Pauze-vertraging (seconden)")
+				.setDesc(
+					"Na zoveel seconden op de achtergrond wordt de opname gepauzeerd"
+				)
+				.addDropdown((drop) => {
+					const options: Record<string, string> = {
+						"10": "10 sec",
+						"30": "30 sec (standaard)",
+						"60": "1 minuut",
+						"120": "2 minuten",
+						"300": "5 minuten",
+					};
+					for (const [value, label] of Object.entries(options)) {
+						drop.addOption(value, label);
+					}
+					drop.setValue(
+						String(this.plugin.settings.focusPauseDelaySec)
+					).onChange(async (value) => {
+						this.plugin.settings.focusPauseDelaySec =
+							Number(value);
+						await this.plugin.saveSettings();
+					});
+				});
 		}
 
 		new Setting(containerEl)

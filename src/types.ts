@@ -1,3 +1,5 @@
+export type FocusBehavior = "pause" | "keep-recording" | "pause-after-delay";
+
 export interface VoxtralSettings {
 	apiKey: string;
 	language: string;
@@ -9,6 +11,8 @@ export interface VoxtralSettings {
 	systemPrompt: string;
 	mode: "realtime" | "batch";
 	microphoneDeviceId: string; // "" = system default
+	focusBehavior: FocusBehavior;
+	focusPauseDelaySec: number; // seconds before pausing (for "pause-after-delay")
 }
 
 export const DEFAULT_SETTINGS: VoxtralSettings = {
@@ -22,6 +26,8 @@ export const DEFAULT_SETTINGS: VoxtralSettings = {
 	systemPrompt: "",
 	mode: "realtime",
 	microphoneDeviceId: "",
+	focusBehavior: "pause",
+	focusPauseDelaySec: 30,
 };
 
 export const DEFAULT_CORRECT_PROMPT =
