@@ -152,6 +152,26 @@ const COMMANDS: VoiceCommand[] = [
 		action: (editor) => insertAtCursor(editor, "\n- [ ] "),
 	},
 	{
+		label: "Genummerd item",
+		patterns: [
+			"nieuw genummerd item",
+			"nieuw genummerd punt",
+			"genummerd punt",
+			"genummerd item",
+			"volgend nummer",
+			"nummer punt",
+			"numbered item",
+			"new numbered item",
+		],
+		action: (editor) => {
+			const cursor = editor.getCursor();
+			const lineText = editor.getLine(cursor.line);
+			const match = lineText.match(/^(\d+)\.\s/);
+			const nextNum = match ? parseInt(match[1], 10) + 1 : 1;
+			insertAtCursor(editor, `\n${nextNum}. `);
+		},
+	},
+	{
 		label: "Verwijder laatste alinea",
 		patterns: [
 			"verwijder laatste alinea",
