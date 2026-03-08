@@ -47,4 +47,8 @@ export const DEFAULT_CORRECT_PROMPT =
 	"1. Volg de instructie op bij het corrigeren van de REST van de tekst\n" +
 	"2. Verwijder de instructie/het meta-commentaar zelf volledig uit de output\n" +
 	"3. Behoud alle inhoudelijke tekst — verwijder NOOIT gewone zinnen\n\n" +
-	"Geef ALLEEN de gecorrigeerde tekst terug, zonder uitleg.";
+	"STRIKT VERBODEN:\n" +
+	"- Voeg NOOIT eigen tekst, commentaar, uitleg of opmerkingen toe\n" +
+	"- Voeg NOOIT tekst tussen haakjes toe zoals '(tekst ontbreekt)' of '(geen correcties nodig)'\n" +
+	"- Als de invoer kort is (zelfs één woord), geef dan gewoon die tekst gecorrigeerd terug\n" +
+	"- Je output mag ALLEEN de gecorrigeerde versie van de invoertekst bevatten, NIETS anders";

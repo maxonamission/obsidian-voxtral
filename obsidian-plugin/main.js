@@ -37,7 +37,7 @@ var DEFAULT_SETTINGS = {
   mode: "realtime",
   microphoneDeviceId: ""
 };
-var DEFAULT_CORRECT_PROMPT = "Je bent een nauwkeurige tekstcorrector voor Nederlands. Corrigeer ALLEEN:\n- Capitalisatie (hoofdletters aan het begin van zinnen, eigennamen)\n- Duidelijk verkeerd geschreven of verminkte woorden (door spraakherkenning)\n- Ontbrekende of verkeerde leestekens\n\nNIET veranderen:\n- Zinsstructuur of woordvolgorde\n- Stijl of toon\n- Markdown opmaak (# koppen, - lijstjes, - [ ] to-do items)\n\nINLINE CORRECTIE-INSTRUCTIES:\nDe tekst is gedicteerd via spraakherkenning. De spreker geeft soms inline instructies of correcties die voor jou bedoeld zijn. Herken deze patronen:\n- Expliciete markers: 'voor de correctie', 'voor de controle achteraf', 'voor de correctie achteraf', 'correctie-instructie', 'noot voor de corrector', 'voor de automatische correctie'\n- Gespelde woorden: 'V-O-X-T-R-A-L' of 'met een x' \u2192 voeg samen tot het bedoelde woord\n- Zelfcorrecties: 'nee niet X maar Y', 'ik bedoel Y', 'dat moet Z zijn'\n- Meta-commentaar over het dicteren: 'dat is een Nederlands woord', 'met een hoofdletter'\n\nAls je zulke instructies of meta-commentaar tegenkomt:\n1. Volg de instructie op bij het corrigeren van de REST van de tekst\n2. Verwijder de instructie/het meta-commentaar zelf volledig uit de output\n3. Behoud alle inhoudelijke tekst \u2014 verwijder NOOIT gewone zinnen\n\nGeef ALLEEN de gecorrigeerde tekst terug, zonder uitleg.";
+var DEFAULT_CORRECT_PROMPT = "Je bent een nauwkeurige tekstcorrector voor Nederlands. Corrigeer ALLEEN:\n- Capitalisatie (hoofdletters aan het begin van zinnen, eigennamen)\n- Duidelijk verkeerd geschreven of verminkte woorden (door spraakherkenning)\n- Ontbrekende of verkeerde leestekens\n\nNIET veranderen:\n- Zinsstructuur of woordvolgorde\n- Stijl of toon\n- Markdown opmaak (# koppen, - lijstjes, - [ ] to-do items)\n\nINLINE CORRECTIE-INSTRUCTIES:\nDe tekst is gedicteerd via spraakherkenning. De spreker geeft soms inline instructies of correcties die voor jou bedoeld zijn. Herken deze patronen:\n- Expliciete markers: 'voor de correctie', 'voor de controle achteraf', 'voor de correctie achteraf', 'correctie-instructie', 'noot voor de corrector', 'voor de automatische correctie'\n- Gespelde woorden: 'V-O-X-T-R-A-L' of 'met een x' \u2192 voeg samen tot het bedoelde woord\n- Zelfcorrecties: 'nee niet X maar Y', 'ik bedoel Y', 'dat moet Z zijn'\n- Meta-commentaar over het dicteren: 'dat is een Nederlands woord', 'met een hoofdletter'\n\nAls je zulke instructies of meta-commentaar tegenkomt:\n1. Volg de instructie op bij het corrigeren van de REST van de tekst\n2. Verwijder de instructie/het meta-commentaar zelf volledig uit de output\n3. Behoud alle inhoudelijke tekst \u2014 verwijder NOOIT gewone zinnen\n\nSTRIKT VERBODEN:\n- Voeg NOOIT eigen tekst, commentaar, uitleg of opmerkingen toe\n- Voeg NOOIT tekst tussen haakjes toe zoals '(tekst ontbreekt)' of '(geen correcties nodig)'\n- Als de invoer kort is (zelfs \xE9\xE9n woord), geef dan gewoon die tekst gecorrigeerd terug\n- Je output mag ALLEEN de gecorrigeerde versie van de invoertekst bevatten, NIETS anders";
 
 // src/settings-tab.ts
 var import_obsidian = require("obsidian");
@@ -616,7 +616,21 @@ async function correctText(text, settings) {
     );
   }
   const data = response.json;
-  return ((_d = (_c = (_b = (_a = data.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || text;
+  let result = ((_d = (_c = (_b = (_a = data.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || text;
+  result = stripLlmCommentary(result, text);
+  return result;
+}
+function stripLlmCommentary(corrected, original) {
+  const parenPattern = /\s*\([^)]{10,}\)\s*/g;
+  let cleaned = corrected;
+  let match;
+  while ((match = parenPattern.exec(corrected)) !== null) {
+    const block = match[0].trim();
+    if (!original.includes(block)) {
+      cleaned = cleaned.replace(match[0], " ");
+    }
+  }
+  return cleaned.trim();
 }
 var WS_OPEN = 1;
 function createNodeWebSocket(url, headers, callbacks) {
@@ -1071,11 +1085,16 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       if (window.visualViewport) {
         this.viewportHandler = () => {
           if (!this.floatingEl || !window.visualViewport) return;
-          const keyboardHeight = window.innerHeight - window.visualViewport.height;
+          const vv = window.visualViewport;
+          const keyboardHeight = window.innerHeight - vv.height - vv.offsetTop;
           this.floatingEl.style.bottom = keyboardHeight > 50 ? `${keyboardHeight + 12}px` : "72px";
         };
         window.visualViewport.addEventListener(
           "resize",
+          this.viewportHandler
+        );
+        window.visualViewport.addEventListener(
+          "scroll",
           this.viewportHandler
         );
       }
@@ -1089,6 +1108,10 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     if (this.viewportHandler && window.visualViewport) {
       window.visualViewport.removeEventListener(
         "resize",
+        this.viewportHandler
+      );
+      window.visualViewport.removeEventListener(
+        "scroll",
         this.viewportHandler
       );
       this.viewportHandler = null;
@@ -1131,7 +1154,9 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       this.chunkIndex = 0;
       this.consecutiveFailures = 0;
       this.updateStatusBar("recording");
-      this.openHelpPanel();
+      if (!import_obsidian4.Platform.isMobile) {
+        this.openHelpPanel();
+      }
       const micName = this.recorder.activeMicLabel;
       if (this.effectiveMode === "batch") {
         new import_obsidian4.Notice(
