@@ -274,6 +274,7 @@ export default class VoxtralPlugin extends Plugin {
 		this.pendingText = "";
 
 		await this.connectRealtimeWebSocket(editor);
+		this.openHelpPanel();
 
 		const deviceId = this.settings.microphoneDeviceId || undefined;
 		await this.recorder.start(deviceId, (pcmData) => {
