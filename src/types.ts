@@ -13,6 +13,7 @@ export interface VoxtralSettings {
 	microphoneDeviceId: string; // "" = system default
 	focusBehavior: FocusBehavior;
 	focusPauseDelaySec: number; // seconds before pausing (for "pause-after-delay")
+	dismissMobileBatchNotice: boolean; // hide "using batch mode" notice on mobile
 }
 
 export const DEFAULT_SETTINGS: VoxtralSettings = {
@@ -28,6 +29,7 @@ export const DEFAULT_SETTINGS: VoxtralSettings = {
 	microphoneDeviceId: "",
 	focusBehavior: "pause",
 	focusPauseDelaySec: 30,
+	dismissMobileBatchNotice: false,
 };
 
 export const DEFAULT_CORRECT_PROMPT =
