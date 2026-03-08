@@ -19,6 +19,10 @@ stemcommando's, en automatische tekstcorrectie.
 
 ## Installatie (handmatig testen)
 
+> **Let op:** De onderstaande terminal-commando's werken in **PowerShell**, **bash** en **zsh**.
+> Ze werken **niet** in de Windows Command Prompt (`cmd.exe`).
+> Open PowerShell via Start → "PowerShell", of gebruik Windows Terminal.
+
 ### Stap 1: Plugin bouwen
 
 ```bash
