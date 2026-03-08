@@ -198,10 +198,19 @@ export default class VoxtralPlugin extends Plugin {
 			this.chunkIndex = 0;
 			this.consecutiveFailures = 0;
 			this.updateStatusBar("recording");
+			this.openHelpPanel();
 
 			// Show which microphone is active
 			const micName = this.recorder.activeMicLabel;
-			new Notice(`Voxtral: Opname gestart (${micName})`);
+			if (this.effectiveMode === "batch") {
+				new Notice(
+					`Voxtral: Opname gestart (${micName})\n` +
+						"Tik op ▶ (send) om tekst te verzenden terwijl je blijft praten.",
+					6000
+				);
+			} else {
+				new Notice(`Voxtral: Opname gestart (${micName})`);
+			}
 		} catch (e) {
 			console.error("Voxtral: Failed to start recording", e);
 			new Notice(`Voxtral: Kon opname niet starten: ${e}`);
@@ -274,7 +283,6 @@ export default class VoxtralPlugin extends Plugin {
 		this.pendingText = "";
 
 		await this.connectRealtimeWebSocket(editor);
-		this.openHelpPanel();
 
 		const deviceId = this.settings.microphoneDeviceId || undefined;
 		await this.recorder.start(deviceId, (pcmData) => {
