@@ -9,11 +9,6 @@
 	color: var(--text-warning);
 }
 
-.voxtral-reconnecting {
-	color: var(--text-warning);
-	font-style: italic;
-}
-
 /* ── Help panel (side view) ── */
 
 .voxtral-help-view {
@@ -73,4 +68,50 @@
 
 .voxtral-send-button {
 	color: var(--text-accent) !important;
+}
+
+/* ── Floating action buttons (mobile, during batch recording) ── */
+
+.voxtral-floating-send {
+	position: fixed;
+	bottom: 72px;
+	right: 16px;
+	z-index: 999;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.voxtral-fab-send,
+.voxtral-fab-stop {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 14px 22px;
+	border-radius: 28px;
+	font-size: 16px;
+	font-weight: 600;
+	cursor: pointer;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+	-webkit-tap-highlight-color: transparent;
+	user-select: none;
+}
+
+.voxtral-fab-send {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.voxtral-fab-send:active {
+	opacity: 0.8;
+}
+
+.voxtral-fab-stop {
+	background-color: var(--background-secondary);
+	color: var(--text-error);
+	border: 1px solid var(--background-modifier-border);
+}
+
+.voxtral-fab-stop:active {
+	opacity: 0.8;
 }

@@ -36,6 +36,7 @@ export default class VoxtralPlugin extends Plugin {
 	private isRecording = false;
 	private statusBarEl: HTMLElement | null = null;
 	private sendRibbonEl: HTMLElement | null = null;
+	private floatingEl: HTMLElement | null = null;
 	private pendingText = "";
 	private chunkIndex = 0;
 	private consecutiveFailures = 0;
@@ -145,18 +146,45 @@ export default class VoxtralPlugin extends Plugin {
 
 	private addSendButton(): void {
 		this.removeSendButton();
+
+		// Ribbon icon (desktop)
 		this.sendRibbonEl = this.addRibbonIcon(
 			"send",
 			"Voxtral: Verzend chunk",
 			() => this.sendChunk()
 		);
 		this.sendRibbonEl.addClass("voxtral-send-button");
+
+		// Floating button (mobile) — large, always visible
+		if (Platform.isMobile) {
+			this.floatingEl = document.createElement("div");
+			this.floatingEl.addClass("voxtral-floating-send");
+			this.floatingEl.innerHTML =
+				'<div class="voxtral-fab-send">▶ Verzend</div>' +
+				'<div class="voxtral-fab-stop">⏹ Stop</div>';
+
+			const sendBtn = this.floatingEl.querySelector(
+				".voxtral-fab-send"
+			) as HTMLElement;
+			const stopBtn = this.floatingEl.querySelector(
+				".voxtral-fab-stop"
+			) as HTMLElement;
+
+			sendBtn.addEventListener("click", () => this.sendChunk());
+			stopBtn.addEventListener("click", () => this.stopRecording());
+
+			document.body.appendChild(this.floatingEl);
+		}
 	}
 
 	private removeSendButton(): void {
 		if (this.sendRibbonEl) {
 			this.sendRibbonEl.remove();
 			this.sendRibbonEl = null;
+		}
+		if (this.floatingEl) {
+			this.floatingEl.remove();
+			this.floatingEl = null;
 		}
 	}
 
