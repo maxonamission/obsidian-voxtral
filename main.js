@@ -39,7 +39,7 @@ var DEFAULT_SETTINGS = {
   focusBehavior: "pause",
   focusPauseDelaySec: 30
 };
-var DEFAULT_CORRECT_PROMPT = "Je bent een nauwkeurige tekstcorrector voor Nederlands. Corrigeer ALLEEN:\n- Capitalisatie (hoofdletters aan het begin van zinnen, eigennamen)\n- Duidelijk verkeerd geschreven of verminkte woorden (door spraakherkenning)\n- Ontbrekende of verkeerde leestekens\n\nNIET veranderen:\n- Zinsstructuur of woordvolgorde\n- Stijl of toon\n- Markdown opmaak (# koppen, - lijstjes, - [ ] to-do items)\n\nINLINE CORRECTIE-INSTRUCTIES:\nDe tekst is gedicteerd via spraakherkenning. De spreker geeft soms inline instructies of correcties die voor jou bedoeld zijn. Herken deze patronen:\n- Expliciete markers: 'voor de correctie', 'voor de controle achteraf', 'voor de correctie achteraf', 'correctie-instructie', 'noot voor de corrector', 'voor de automatische correctie'\n- Gespelde woorden: 'V-O-X-T-R-A-L' of 'met een x' \u2192 voeg samen tot het bedoelde woord\n- Zelfcorrecties: 'nee niet X maar Y', 'ik bedoel Y', 'dat moet Z zijn'\n- Meta-commentaar over het dicteren: 'dat is een Nederlands woord', 'met een hoofdletter'\n\nAls je zulke instructies of meta-commentaar tegenkomt:\n1. Volg de instructie op bij het corrigeren van de REST van de tekst\n2. Verwijder de instructie/het meta-commentaar zelf volledig uit de output\n3. Behoud alle inhoudelijke tekst \u2014 verwijder NOOIT gewone zinnen\n\nSTRIKT VERBODEN:\n- Voeg NOOIT eigen tekst, commentaar, uitleg of opmerkingen toe\n- Voeg NOOIT tekst tussen haakjes toe zoals '(tekst ontbreekt)' of '(geen correcties nodig)'\n- Als de invoer kort is (zelfs \xE9\xE9n woord), geef dan gewoon die tekst gecorrigeerd terug\n- Je output mag ALLEEN de gecorrigeerde versie van de invoertekst bevatten, NIETS anders";
+var DEFAULT_CORRECT_PROMPT = "You are a precise text corrector for dictated text. The input language may vary (commonly Dutch, but follow whatever language the text is in).\n\nCORRECT ONLY:\n- Capitalization (sentence starts, proper nouns)\n- Clearly misspelled or garbled words (from speech recognition)\n- Missing or wrong punctuation\n\nDO NOT CHANGE:\n- Sentence structure or word order\n- Style or tone\n- Markdown formatting (# headings, - lists, - [ ] to-do items)\n\nINLINE CORRECTION INSTRUCTIONS:\nThe text was dictated via speech recognition. The speaker sometimes gives inline instructions meant for you. Recognize these patterns:\n- Explicit markers: 'voor de correctie', 'voor de correctie achteraf', 'for the correction', 'correction note'\n- Spelled-out words: 'V-O-X-T-R-A-L' or 'with an x' \u2192 merge into the intended word\n- Self-corrections: 'no not X but Y', 'nee niet X maar Y', 'I mean Y', 'ik bedoel Y'\n- Meta-commentary: 'that's a Dutch word', 'with a capital letter', 'met een hoofdletter'\n\nWhen you encounter such instructions:\n1. Apply the instruction to the REST of the text\n2. Remove the instruction/meta-commentary itself from the output\n3. Keep all content text \u2014 NEVER remove normal sentences\n\nCRITICAL RULES:\n- Your output must be SHORTER than or equal to the input (after removing meta-instructions)\n- NEVER add your own text, commentary, explanations, or notes\n- NEVER add parenthesized text like '(text missing)' or '(no corrections needed)'\n- NEVER continue, elaborate, or expand on the content\n- NEVER invent or hallucinate text that wasn't in the input\n- If the input is short (even one word), just return it corrected\n- Your output must contain ONLY the corrected version of the input text, NOTHING else";
 
 // src/settings-tab.ts
 var import_obsidian = require("obsidian");
@@ -707,6 +707,13 @@ async function correctText(text, settings) {
   const data = response.json;
   let result = ((_d = (_c = (_b = (_a = data.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || text;
   result = stripLlmCommentary(result, text);
+  if (result.length > text.length * 1.5 + 50) {
+    console.warn(
+      "Voxtral: Correction rejected \u2014 output is suspiciously longer than input",
+      { inputLen: text.length, outputLen: result.length }
+    );
+    return text;
+  }
   return result;
 }
 function stripLlmCommentary(corrected, original) {
@@ -1313,20 +1320,23 @@ Tap the send button to transcribe while you keep talking.`,
     const editor = view.editor;
     this.chunkIndex++;
     try {
+      this.updateStatusBar("processing");
       const blob = await this.recorder.flushChunk();
       if (blob.size === 0) {
-        new import_obsidian4.Notice("Voxtral: No audio in chunk");
+        this.updateStatusBar("recording");
         return;
       }
       let text = await transcribeBatch(blob, this.settings);
       if (this.settings.autoCorrect && text) {
         text = await correctText(text, this.settings);
       }
+      this.updateStatusBar("recording");
       if (text) {
         processText(editor, text);
       }
     } catch (e) {
       console.error("Voxtral: Chunk transcription failed", e);
+      this.updateStatusBar("recording");
       new import_obsidian4.Notice(`Voxtral: Chunk failed: ${e}`);
     }
   }
