@@ -249,6 +249,20 @@ function createNodeWebSocket(
 				if (opcode === 0x01) {
 					callbacks.onMessage(payload.toString("utf-8"));
 				} else if (opcode === 0x08) {
+					// Close frame — extract close code and reason
+					let closeCode = 0;
+					let closeReason = "";
+					if (payload.length >= 2) {
+						closeCode = payload.readUInt16BE(0);
+						if (payload.length > 2) {
+							closeReason = payload
+								.subarray(2)
+								.toString("utf-8");
+						}
+					}
+					console.log(
+						`Voxtral: WebSocket close frame received — code=${closeCode} reason="${closeReason}"`
+					);
 					conn.readyState = 3;
 					clearInterval(pingInterval);
 					socket.end();
@@ -325,6 +339,12 @@ export class RealtimeTranscriber {
 					onMessage: (data: string) => {
 						try {
 							const msg = JSON.parse(data);
+							console.log(
+								`Voxtral WS ← ${msg.type}`,
+								msg.type === "transcription.text.delta"
+									? msg.text?.slice(0, 50)
+									: ""
+							);
 							switch (msg.type) {
 								case "session.created":
 									clearTimeout(timeout);
@@ -333,22 +353,42 @@ export class RealtimeTranscriber {
 									resolve();
 									break;
 								case "session.updated":
+									console.log(
+										"Voxtral WS: session updated",
+										JSON.stringify(msg.session || {})
+									);
 									break;
 								case "transcription.text.delta":
 									this.callbacks.onDelta(msg.text || "");
 									break;
 								case "transcription.done":
+									console.log(
+										"Voxtral WS: transcription.done — full text:",
+										msg.text?.slice(0, 200)
+									);
 									this.callbacks.onDone(msg.text || "");
 									break;
 								case "error":
+									console.error(
+										"Voxtral WS: server error:",
+										JSON.stringify(msg.error)
+									);
 									this.callbacks.onError(
 										msg.error?.message || "Unknown error"
+									);
+									break;
+								default:
+									console.log(
+										"Voxtral WS: unknown message type:",
+										msg.type,
+										data.slice(0, 300)
 									);
 									break;
 							}
 						} catch (e) {
 							console.error(
 								"Voxtral: failed to parse WS message",
+								data.slice(0, 200),
 								e
 							);
 						}
@@ -363,11 +403,11 @@ export class RealtimeTranscriber {
 						);
 					},
 					onClose: () => {
+						console.log(
+							`Voxtral WS: connection closed (intentional=${this.intentionallyClosed})`
+						);
 						this.ws = null;
 						if (!this.intentionallyClosed) {
-							console.log(
-								"Voxtral: WebSocket closed unexpectedly, notifying plugin"
-							);
 							this.callbacks.onDisconnect();
 						}
 					},
