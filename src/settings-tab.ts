@@ -92,18 +92,28 @@ export class VoxtralSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Streaming vertraging")
 			.setDesc(
-				"Vertraging in ms voor realtime modus (240-2400). Lager = sneller maar minder nauwkeurig."
+				"Vertraging in ms voor realtime modus. Lager = sneller maar minder nauwkeurig."
 			)
-			.addSlider((slider) =>
-				slider
-					.setLimits(240, 2400, 80)
-					.setValue(this.plugin.settings.streamingDelayMs)
-					.setDynamicTooltip()
-					.onChange(async (value) => {
-						this.plugin.settings.streamingDelayMs = value;
-						await this.plugin.saveSettings();
-					})
-			);
+			.addDropdown((drop) => {
+				const options: Record<string, string> = {
+					"240": "240 ms (snelst)",
+					"480": "480 ms (standaard)",
+					"640": "640 ms",
+					"800": "800 ms",
+					"1200": "1200 ms",
+					"1600": "1600 ms",
+					"2400": "2400 ms (nauwkeurigst)",
+				};
+				for (const [value, label] of Object.entries(options)) {
+					drop.addOption(value, label);
+				}
+				drop.setValue(
+					String(this.plugin.settings.streamingDelayMs)
+				).onChange(async (value) => {
+					this.plugin.settings.streamingDelayMs = Number(value);
+					await this.plugin.saveSettings();
+				});
+			});
 
 		// Support
 		containerEl.createEl("h3", { text: "Steun dit project" });
