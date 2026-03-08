@@ -37,6 +37,7 @@ export default class VoxtralPlugin extends Plugin {
 	private statusBarEl: HTMLElement | null = null;
 	private sendRibbonEl: HTMLElement | null = null;
 	private floatingEl: HTMLElement | null = null;
+	private viewportHandler: (() => void) | null = null;
 	private pendingText = "";
 	private chunkIndex = 0;
 	private consecutiveFailures = 0;
@@ -174,6 +175,23 @@ export default class VoxtralPlugin extends Plugin {
 			stopBtn.addEventListener("click", () => this.stopRecording());
 
 			document.body.appendChild(this.floatingEl);
+
+			// Move buttons above keyboard when it appears
+			if (window.visualViewport) {
+				this.viewportHandler = () => {
+					if (!this.floatingEl || !window.visualViewport) return;
+					const keyboardHeight =
+						window.innerHeight - window.visualViewport.height;
+					this.floatingEl.style.bottom =
+						keyboardHeight > 50
+							? `${keyboardHeight + 12}px`
+							: "72px";
+				};
+				window.visualViewport.addEventListener(
+					"resize",
+					this.viewportHandler
+				);
+			}
 		}
 	}
 
@@ -181,6 +199,13 @@ export default class VoxtralPlugin extends Plugin {
 		if (this.sendRibbonEl) {
 			this.sendRibbonEl.remove();
 			this.sendRibbonEl = null;
+		}
+		if (this.viewportHandler && window.visualViewport) {
+			window.visualViewport.removeEventListener(
+				"resize",
+				this.viewportHandler
+			);
+			this.viewportHandler = null;
 		}
 		if (this.floatingEl) {
 			this.floatingEl.remove();

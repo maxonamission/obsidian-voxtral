@@ -959,6 +959,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.statusBarEl = null;
     this.sendRibbonEl = null;
     this.floatingEl = null;
+    this.viewportHandler = null;
     this.pendingText = "";
     this.chunkIndex = 0;
     this.consecutiveFailures = 0;
@@ -1062,12 +1063,30 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       sendBtn.addEventListener("click", () => this.sendChunk());
       stopBtn.addEventListener("click", () => this.stopRecording());
       document.body.appendChild(this.floatingEl);
+      if (window.visualViewport) {
+        this.viewportHandler = () => {
+          if (!this.floatingEl || !window.visualViewport) return;
+          const keyboardHeight = window.innerHeight - window.visualViewport.height;
+          this.floatingEl.style.bottom = keyboardHeight > 50 ? `${keyboardHeight + 12}px` : "72px";
+        };
+        window.visualViewport.addEventListener(
+          "resize",
+          this.viewportHandler
+        );
+      }
     }
   }
   removeSendButton() {
     if (this.sendRibbonEl) {
       this.sendRibbonEl.remove();
       this.sendRibbonEl = null;
+    }
+    if (this.viewportHandler && window.visualViewport) {
+      window.visualViewport.removeEventListener(
+        "resize",
+        this.viewportHandler
+      );
+      this.viewportHandler = null;
     }
     if (this.floatingEl) {
       this.floatingEl.remove();
