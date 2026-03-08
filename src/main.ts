@@ -34,6 +34,7 @@ export default class VoxtralPlugin extends Plugin {
 	private recorder: AudioRecorder;
 	private realtimeTranscriber: RealtimeTranscriber | null = null;
 	private isRecording = false;
+	private isPaused = false;
 	private statusBarEl: HTMLElement | null = null;
 	private sendRibbonEl: HTMLElement | null = null;
 	private mobileActionEl: HTMLElement | null = null;
@@ -118,6 +119,11 @@ export default class VoxtralPlugin extends Plugin {
 		// Settings tab
 		this.addSettingTab(new VoxtralSettingTab(this.app, this));
 
+		// Auto-pause recording when app loses focus (mobile background)
+		this.registerDomEvent(document, "visibilitychange", () => {
+			this.handleVisibilityChange();
+		});
+
 		// Show mobile notice on first load
 		if (Platform.isMobile && this.settings.mode === "realtime") {
 			new Notice(
@@ -187,6 +193,27 @@ export default class VoxtralPlugin extends Plugin {
 		}
 	}
 
+	// ── Visibility (auto-pause on background) ──
+
+	private handleVisibilityChange(): void {
+		if (!this.isRecording) return;
+
+		if (document.hidden) {
+			// App went to background — pause recording
+			this.isPaused = true;
+			this.recorder.pause();
+			this.updateStatusBar("paused");
+			console.log("Voxtral: Opname gepauzeerd (app op achtergrond)");
+		} else if (this.isPaused) {
+			// App came back — resume recording
+			this.isPaused = false;
+			this.recorder.resume();
+			this.updateStatusBar("recording");
+			new Notice("Voxtral: Opname hervat");
+			console.log("Voxtral: Opname hervat (app op voorgrond)");
+		}
+	}
+
 	// ── Recording toggle ──
 
 	private async toggleRecording(): Promise<void> {
@@ -251,6 +278,7 @@ export default class VoxtralPlugin extends Plugin {
 
 	private async stopRecording(): Promise<void> {
 		this.isRecording = false;
+		this.isPaused = false;
 		this.updateStatusBar("processing");
 		this.removeSendButton();
 
@@ -594,7 +622,7 @@ export default class VoxtralPlugin extends Plugin {
 	// ── Status bar ──
 
 	private updateStatusBar(
-		state: "idle" | "recording" | "processing"
+		state: "idle" | "recording" | "processing" | "paused"
 	): void {
 		if (!this.statusBarEl) return;
 		switch (state) {
@@ -602,7 +630,8 @@ export default class VoxtralPlugin extends Plugin {
 				this.statusBarEl.setText("");
 				this.statusBarEl.removeClass(
 					"voxtral-recording",
-					"voxtral-processing"
+					"voxtral-processing",
+					"voxtral-paused"
 				);
 				break;
 			case "recording": {
@@ -611,13 +640,18 @@ export default class VoxtralPlugin extends Plugin {
 					mic.length > 25 ? mic.slice(0, 22) + "..." : mic;
 				this.statusBarEl.setText(`● ${short}`);
 				this.statusBarEl.addClass("voxtral-recording");
-				this.statusBarEl.removeClass("voxtral-processing");
+				this.statusBarEl.removeClass("voxtral-processing", "voxtral-paused");
 				break;
 			}
+			case "paused":
+				this.statusBarEl.setText("⏸ Gepauzeerd");
+				this.statusBarEl.addClass("voxtral-paused");
+				this.statusBarEl.removeClass("voxtral-recording", "voxtral-processing");
+				break;
 			case "processing":
 				this.statusBarEl.setText("⏳ Verwerken...");
 				this.statusBarEl.addClass("voxtral-processing");
-				this.statusBarEl.removeClass("voxtral-recording");
+				this.statusBarEl.removeClass("voxtral-recording", "voxtral-paused");
 				break;
 		}
 	}

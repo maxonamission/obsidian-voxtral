@@ -185,6 +185,26 @@ export class AudioRecorder {
 		return this.stream !== null;
 	}
 
+	get isPaused(): boolean {
+		return this.mediaRecorder?.state === "paused";
+	}
+
+	pause(): void {
+		if (this.mediaRecorder?.state === "recording") {
+			this.mediaRecorder.pause();
+		}
+		// Mute the mic track so the OS can release hardware
+		this.stream?.getAudioTracks().forEach((t) => (t.enabled = false));
+	}
+
+	resume(): void {
+		// Re-enable the mic track
+		this.stream?.getAudioTracks().forEach((t) => (t.enabled = true));
+		if (this.mediaRecorder?.state === "paused") {
+			this.mediaRecorder.resume();
+		}
+	}
+
 	private getSupportedMimeType(): string {
 		const types = [
 			"audio/webm;codecs=opus",

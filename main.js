@@ -189,6 +189,24 @@ var AudioRecorder = class {
   get isRecording() {
     return this.stream !== null;
   }
+  get isPaused() {
+    var _a;
+    return ((_a = this.mediaRecorder) == null ? void 0 : _a.state) === "paused";
+  }
+  pause() {
+    var _a, _b;
+    if (((_a = this.mediaRecorder) == null ? void 0 : _a.state) === "recording") {
+      this.mediaRecorder.pause();
+    }
+    (_b = this.stream) == null ? void 0 : _b.getAudioTracks().forEach((t) => t.enabled = false);
+  }
+  resume() {
+    var _a, _b;
+    (_a = this.stream) == null ? void 0 : _a.getAudioTracks().forEach((t) => t.enabled = true);
+    if (((_b = this.mediaRecorder) == null ? void 0 : _b.state) === "paused") {
+      this.mediaRecorder.resume();
+    }
+  }
   getSupportedMimeType() {
     const types = [
       "audio/webm;codecs=opus",
@@ -441,6 +459,27 @@ var COMMANDS = [
       "todo item"
     ],
     action: (editor) => insertAtCursor(editor, "\n- [ ] ")
+  },
+  {
+    label: "Genummerd item",
+    patterns: [
+      "nieuw genummerd item",
+      "nieuw genummerd punt",
+      "genummerd punt",
+      "genummerd item",
+      "volgend nummer",
+      "nummer punt",
+      "numbered item",
+      "new numbered item"
+    ],
+    action: (editor) => {
+      const cursor = editor.getCursor();
+      const lineText = editor.getLine(cursor.line);
+      const match = lineText.match(/^(\d+)\.\s/);
+      const nextNum = match ? parseInt(match[1], 10) + 1 : 1;
+      insertAtCursor(editor, `
+${nextNum}. `);
+    }
   },
   {
     label: "Verwijder laatste alinea",
@@ -970,6 +1009,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     super(...arguments);
     this.realtimeTranscriber = null;
     this.isRecording = false;
+    this.isPaused = false;
     this.statusBarEl = null;
     this.sendRibbonEl = null;
     this.mobileActionEl = null;
@@ -1036,6 +1076,9 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       editorCallback: (editor) => this.correctAll(editor)
     });
     this.addSettingTab(new VoxtralSettingTab(this.app, this));
+    this.registerDomEvent(document, "visibilitychange", () => {
+      this.handleVisibilityChange();
+    });
     if (import_obsidian4.Platform.isMobile && this.settings.mode === "realtime") {
       new import_obsidian4.Notice(
         "Voxtral: Realtime modus is niet beschikbaar op mobiel. Batch modus wordt gebruikt. Tik op \u25B6 om audio te verzenden.",
@@ -1088,6 +1131,22 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     if (this.mobileActionEl) {
       this.mobileActionEl.remove();
       this.mobileActionEl = null;
+    }
+  }
+  // ── Visibility (auto-pause on background) ──
+  handleVisibilityChange() {
+    if (!this.isRecording) return;
+    if (document.hidden) {
+      this.isPaused = true;
+      this.recorder.pause();
+      this.updateStatusBar("paused");
+      console.log("Voxtral: Opname gepauzeerd (app op achtergrond)");
+    } else if (this.isPaused) {
+      this.isPaused = false;
+      this.recorder.resume();
+      this.updateStatusBar("recording");
+      new import_obsidian4.Notice("Voxtral: Opname hervat");
+      console.log("Voxtral: Opname hervat (app op voorgrond)");
     }
   }
   // ── Recording toggle ──
@@ -1144,6 +1203,7 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
   }
   async stopRecording() {
     this.isRecording = false;
+    this.isPaused = false;
     this.updateStatusBar("processing");
     this.removeSendButton();
     try {
@@ -1433,7 +1493,8 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
         this.statusBarEl.setText("");
         this.statusBarEl.removeClass(
           "voxtral-recording",
-          "voxtral-processing"
+          "voxtral-processing",
+          "voxtral-paused"
         );
         break;
       case "recording": {
@@ -1441,13 +1502,18 @@ Tik op \u25B6 (send) om tekst te verzenden terwijl je blijft praten.`,
         const short = mic.length > 25 ? mic.slice(0, 22) + "..." : mic;
         this.statusBarEl.setText(`\u25CF ${short}`);
         this.statusBarEl.addClass("voxtral-recording");
-        this.statusBarEl.removeClass("voxtral-processing");
+        this.statusBarEl.removeClass("voxtral-processing", "voxtral-paused");
         break;
       }
+      case "paused":
+        this.statusBarEl.setText("\u23F8 Gepauzeerd");
+        this.statusBarEl.addClass("voxtral-paused");
+        this.statusBarEl.removeClass("voxtral-recording", "voxtral-processing");
+        break;
       case "processing":
         this.statusBarEl.setText("\u23F3 Verwerken...");
         this.statusBarEl.addClass("voxtral-processing");
-        this.statusBarEl.removeClass("voxtral-recording");
+        this.statusBarEl.removeClass("voxtral-recording", "voxtral-paused");
         break;
     }
   }
