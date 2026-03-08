@@ -38,8 +38,8 @@ export default class VoxtralPlugin extends Plugin {
 	private sendRibbonEl: HTMLElement | null = null;
 	private pendingText = "";
 	private chunkIndex = 0;
-	private reconnectAttempts = 0;
-	private maxReconnectAttempts = 5;
+	private consecutiveFailures = 0;
+	private maxConsecutiveFailures = 5;
 	private currentEditor: Editor | null = null;
 
 	/** Whether realtime mode is available on this platform */
@@ -196,7 +196,7 @@ export default class VoxtralPlugin extends Plugin {
 			}
 			this.isRecording = true;
 			this.chunkIndex = 0;
-			this.reconnectAttempts = 0;
+			this.consecutiveFailures = 0;
 			this.updateStatusBar("recording");
 
 			// Show which microphone is active
@@ -305,34 +305,17 @@ export default class VoxtralPlugin extends Plugin {
 	}
 
 	/**
-	 * Handle unexpected WebSocket disconnection during recording.
-	 * Automatically reconnects up to maxReconnectAttempts times.
+	 * Handle WebSocket closure during recording.
+	 *
+	 * The Mistral realtime API closes the connection after each
+	 * transcription.done event (end of utterance / silence detected).
+	 * This is NORMAL — not an error. We silently reconnect so the
+	 * user can keep talking without interruption.
+	 *
+	 * Only shows a warning if reconnection fails repeatedly.
 	 */
 	private async handleRealtimeDisconnect(): Promise<void> {
-		if (!this.isRecording) return; // User stopped, nothing to do
-
-		this.reconnectAttempts++;
-		if (this.reconnectAttempts > this.maxReconnectAttempts) {
-			new Notice(
-				"Voxtral: Verbinding verloren na meerdere pogingen. Opname gestopt.",
-				6000
-			);
-			this.stopRecording();
-			return;
-		}
-
-		const delay = Math.min(1000 * this.reconnectAttempts, 5000);
-		console.log(
-			`Voxtral: WebSocket disconnected, reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`
-		);
-		this.updateStatusBar("reconnecting");
-		new Notice(
-			`Voxtral: Verbinding verbroken, opnieuw verbinden... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`
-		);
-
-		await new Promise((resolve) => setTimeout(resolve, delay));
-
-		if (!this.isRecording) return; // User may have stopped during wait
+		if (!this.isRecording) return;
 
 		const editor =
 			this.currentEditor ||
@@ -342,14 +325,39 @@ export default class VoxtralPlugin extends Plugin {
 			return;
 		}
 
+		// Silent, immediate reconnect — this is expected API behavior
+		console.log("Voxtral: Session ended, reconnecting silently...");
+
 		try {
 			await this.connectRealtimeWebSocket(editor);
-			this.updateStatusBar("recording");
-			new Notice("Voxtral: Verbinding hersteld");
-			console.log("Voxtral: WebSocket reconnected successfully");
+			this.consecutiveFailures = 0;
+			console.log("Voxtral: Session reconnected");
 		} catch (e) {
-			console.error("Voxtral: Reconnection failed", e);
-			this.handleRealtimeDisconnect();
+			this.consecutiveFailures++;
+			console.error(
+				`Voxtral: Reconnect failed (${this.consecutiveFailures}/${this.maxConsecutiveFailures})`,
+				e
+			);
+
+			if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
+				new Notice(
+					"Voxtral: Kan geen verbinding maken met de API. Opname gestopt.",
+					6000
+				);
+				this.stopRecording();
+				return;
+			}
+
+			// Brief delay before retry, only on actual failures
+			const delay = Math.min(
+				500 * this.consecutiveFailures,
+				3000
+			);
+			await new Promise((resolve) => setTimeout(resolve, delay));
+
+			if (this.isRecording) {
+				this.handleRealtimeDisconnect();
+			}
 		}
 	}
 
@@ -537,7 +545,7 @@ export default class VoxtralPlugin extends Plugin {
 	// ── Status bar ──
 
 	private updateStatusBar(
-		state: "idle" | "recording" | "processing" | "reconnecting"
+		state: "idle" | "recording" | "processing"
 	): void {
 		if (!this.statusBarEl) return;
 		switch (state) {
@@ -545,8 +553,7 @@ export default class VoxtralPlugin extends Plugin {
 				this.statusBarEl.setText("");
 				this.statusBarEl.removeClass(
 					"voxtral-recording",
-					"voxtral-processing",
-					"voxtral-reconnecting"
+					"voxtral-processing"
 				);
 				break;
 			case "recording": {
@@ -555,27 +562,13 @@ export default class VoxtralPlugin extends Plugin {
 					mic.length > 25 ? mic.slice(0, 22) + "..." : mic;
 				this.statusBarEl.setText(`● ${short}`);
 				this.statusBarEl.addClass("voxtral-recording");
-				this.statusBarEl.removeClass(
-					"voxtral-processing",
-					"voxtral-reconnecting"
-				);
+				this.statusBarEl.removeClass("voxtral-processing");
 				break;
 			}
 			case "processing":
 				this.statusBarEl.setText("⏳ Verwerken...");
 				this.statusBarEl.addClass("voxtral-processing");
-				this.statusBarEl.removeClass(
-					"voxtral-recording",
-					"voxtral-reconnecting"
-				);
-				break;
-			case "reconnecting":
-				this.statusBarEl.setText("⟳ Verbinden...");
-				this.statusBarEl.addClass("voxtral-reconnecting");
-				this.statusBarEl.removeClass(
-					"voxtral-recording",
-					"voxtral-processing"
-				);
+				this.statusBarEl.removeClass("voxtral-recording");
 				break;
 		}
 	}
