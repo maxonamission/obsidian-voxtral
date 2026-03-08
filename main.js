@@ -37,7 +37,8 @@ var DEFAULT_SETTINGS = {
   mode: "realtime",
   microphoneDeviceId: "",
   focusBehavior: "pause",
-  focusPauseDelaySec: 30
+  focusPauseDelaySec: 30,
+  dismissMobileBatchNotice: false
 };
 var DEFAULT_CORRECT_PROMPT = "You are a precise text corrector for dictated text. The input language may vary (commonly Dutch, but follow whatever language the text is in).\n\nCORRECT ONLY:\n- Capitalization (sentence starts, proper nouns)\n- Clearly misspelled or garbled words (from speech recognition)\n- Missing or wrong punctuation\n\nDO NOT CHANGE:\n- Sentence structure or word order\n- Style or tone\n- Markdown formatting (# headings, - lists, - [ ] to-do items)\n\nINLINE CORRECTION INSTRUCTIONS:\nThe text was dictated via speech recognition. The speaker sometimes gives inline instructions meant for you. Recognize these patterns:\n- Explicit markers: 'voor de correctie', 'voor de correctie achteraf', 'for the correction', 'correction note'\n- Spelled-out words: 'V-O-X-T-R-A-L' or 'with an x' \u2192 merge into the intended word\n- Self-corrections: 'no not X but Y', 'nee niet X maar Y', 'I mean Y', 'ik bedoel Y'\n- Meta-commentary: 'that's a Dutch word', 'with a capital letter', 'met een hoofdletter'\n\nWhen you encounter such instructions:\n1. Apply the instruction to the REST of the text\n2. Remove the instruction/meta-commentary itself from the output\n3. Keep all content text \u2014 NEVER remove normal sentences\n\nCRITICAL RULES:\n- Your output must be SHORTER than or equal to the input (after removing meta-instructions)\n- NEVER add your own text, commentary, explanations, or notes\n- NEVER add parenthesized text like '(text missing)' or '(no corrections needed)'\n- NEVER continue, elaborate, or expand on the content\n- NEVER invent or hallucinate text that wasn't in the input\n- If the input is short (even one word), just return it corrected\n- Your output must contain ONLY the corrected version of the input text, NOTHING else";
 
@@ -1212,12 +1213,6 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.registerDomEvent(document, "keydown", (e) => {
       this.handleTypingMute(e);
     });
-    if (import_obsidian4.Platform.isMobile && this.settings.mode === "realtime") {
-      new import_obsidian4.Notice(
-        "Voxtral: Realtime mode is not available on mobile. Using batch mode instead. Tap the send button to submit audio.",
-        8e3
-      );
-    }
   }
   onunload() {
     if (this.isRecording) {
@@ -1374,11 +1369,31 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       }
       const micName = this.recorder.activeMicLabel;
       if (this.effectiveMode === "batch") {
-        new import_obsidian4.Notice(
-          `Voxtral: Recording started (${micName})
-Tap the send button to transcribe while you keep talking.`,
-          6e3
-        );
+        if (import_obsidian4.Platform.isMobile && !this.settings.dismissMobileBatchNotice) {
+          const frag = document.createDocumentFragment();
+          frag.createSpan({
+            text: `Recording started (${micName}). Tap the send button (\u2191) to transcribe chunks while you keep talking.`
+          });
+          frag.createEl("br");
+          const dismiss = frag.createEl("a", {
+            text: "Don\u2019t show again",
+            href: "#"
+          });
+          dismiss.style.opacity = "0.7";
+          dismiss.style.fontSize = "0.85em";
+          dismiss.addEventListener("click", (e) => {
+            e.preventDefault();
+            this.settings.dismissMobileBatchNotice = true;
+            this.saveSettings();
+          });
+          new import_obsidian4.Notice(frag, 8e3);
+        } else {
+          new import_obsidian4.Notice(
+            `Voxtral: Recording started (${micName})
+Tap send to transcribe while you keep talking.`,
+            6e3
+          );
+        }
       } else {
         new import_obsidian4.Notice(`Voxtral: Recording started (${micName})`);
       }
