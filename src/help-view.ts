@@ -13,7 +13,7 @@ export class VoxtralHelpView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Stemcommando's";
+		return "Voice Commands";
 	}
 
 	getIcon(): string {
@@ -25,7 +25,7 @@ export class VoxtralHelpView extends ItemView {
 		container.empty();
 		container.addClass("voxtral-help-view");
 
-		container.createEl("h3", { text: "Voxtral Stemcommando's" });
+		container.createEl("h3", { text: "Voxtral Voice Commands" });
 
 		const commands = getCommandList();
 
@@ -36,8 +36,8 @@ export class VoxtralHelpView extends ItemView {
 		// Header
 		const thead = table.createEl("thead");
 		const headerRow = thead.createEl("tr");
-		headerRow.createEl("th", { text: "Commando" });
-		headerRow.createEl("th", { text: "Zeg..." });
+		headerRow.createEl("th", { text: "Command" });
+		headerRow.createEl("th", { text: "Say..." });
 
 		// Body
 		const tbody = table.createEl("tbody");
@@ -48,7 +48,7 @@ export class VoxtralHelpView extends ItemView {
 				cls: "voxtral-help-label",
 			});
 			row.createEl("td", {
-				text: cmd.patterns.slice(0, 2).map((p) => `"${p}"`).join(" of "),
+				text: cmd.patterns.slice(0, 2).map((p) => `"${p}"`).join(" or "),
 				cls: "voxtral-help-patterns",
 			});
 		}
@@ -57,16 +57,16 @@ export class VoxtralHelpView extends ItemView {
 		container.createEl("h4", { text: "Tips" });
 		const tips = container.createEl("ul", { cls: "voxtral-help-tips" });
 		tips.createEl("li", {
-			text: "Commando's worden herkend aan het einde van een zin.",
+			text: "Commands are recognized at the end of a sentence.",
 		});
 		tips.createEl("li", {
-			text: 'Zeg "voor de correctie: ..." om inline instructies mee te geven.',
+			text: 'Say "for the correction: ..." to give inline instructions to the corrector.',
 		});
 		tips.createEl("li", {
-			text: "Gespelde woorden (V-O-X-T-R-A-L) worden samengevoegd.",
+			text: "Spelled-out words (V-O-X-T-R-A-L) are merged automatically.",
 		});
 		tips.createEl("li", {
-			text: 'Zelfcorrecties ("nee niet X maar Y") worden herkend.',
+			text: 'Self-corrections ("no not X but Y") are recognized.',
 		});
 	}
 
