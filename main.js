@@ -1058,7 +1058,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     if (import_obsidian4.Platform.isMobile) {
       this.floatingEl = document.createElement("div");
       this.floatingEl.addClass("voxtral-floating-send");
-      this.floatingEl.innerHTML = '<div class="voxtral-fab-send">\u25B6 Verzend</div><div class="voxtral-fab-stop">\u23F9 Stop</div>';
+      this.floatingEl.innerHTML = '<div class="voxtral-fab-send">\u25B6</div><div class="voxtral-fab-stop">\u25FC</div>';
       const sendBtn = this.floatingEl.querySelector(
         ".voxtral-fab-send"
       );
