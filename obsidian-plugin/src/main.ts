@@ -166,8 +166,8 @@ export default class VoxtralPlugin extends Plugin {
 			this.floatingEl = document.createElement("div");
 			this.floatingEl.addClass("voxtral-floating-send");
 			this.floatingEl.innerHTML =
-				'<div class="voxtral-fab-send">▶ Verzend</div>' +
-				'<div class="voxtral-fab-stop">⏹ Stop</div>';
+				'<div class="voxtral-fab-send">▶</div>' +
+				'<div class="voxtral-fab-stop">◼</div>';
 
 			const sendBtn = this.floatingEl.querySelector(
 				".voxtral-fab-send"
