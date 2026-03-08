@@ -994,27 +994,32 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.addCommand({
       id: "toggle-recording",
       name: "Start/stop opname",
+      icon: "mic",
       callback: () => this.toggleRecording(),
       hotkeys: [{ modifiers: ["Ctrl"], key: " " }]
     });
     this.addCommand({
       id: "send-chunk",
       name: "Verzend audio chunk (tap-to-send)",
+      icon: "send",
       callback: () => this.sendChunk()
     });
     this.addCommand({
       id: "open-help-panel",
       name: "Toon stemcommando's (zijpaneel)",
+      icon: "help-circle",
       callback: () => this.openHelpPanel()
     });
     this.addCommand({
       id: "correct-selection",
       name: "Corrigeer geselecteerde tekst",
+      icon: "spell-check",
       editorCallback: (editor) => this.correctSelection(editor)
     });
     this.addCommand({
       id: "correct-all",
       name: "Corrigeer hele notitie",
+      icon: "file-check",
       editorCallback: (editor) => this.correctAll(editor)
     });
     this.addSettingTab(new VoxtralSettingTab(this.app, this));
