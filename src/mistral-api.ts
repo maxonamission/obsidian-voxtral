@@ -382,7 +382,7 @@ export class RealtimeTranscriber {
 
 		const base64 = arrayBufferToBase64(pcmBytes);
 		const msg = {
-			type: "input_audio_buffer.append",
+			type: "input_audio.append",
 			audio: base64,
 		};
 		this.ws.send(JSON.stringify(msg));
@@ -390,12 +390,12 @@ export class RealtimeTranscriber {
 
 	flush(): void {
 		if (!this.ws || this.ws.readyState !== WS_OPEN) return;
-		this.ws.send(JSON.stringify({ type: "input_audio_buffer.flush" }));
+		this.ws.send(JSON.stringify({ type: "input_audio.flush" }));
 	}
 
 	endAudio(): void {
 		if (!this.ws || this.ws.readyState !== WS_OPEN) return;
-		this.ws.send(JSON.stringify({ type: "input_audio_buffer.end" }));
+		this.ws.send(JSON.stringify({ type: "input_audio.end" }));
 	}
 
 	close(): void {
