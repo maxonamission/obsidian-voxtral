@@ -507,6 +507,11 @@ var COMMANDS = [
       "nieuw lijstitem",
       "lijst punt",
       "nieuw bullet",
+      "nieuw item",
+      "nieuwe item",
+      "volgend item",
+      "new item",
+      "next item",
       "bullet",
       "bullet point",
       "volgend punt"
@@ -523,12 +528,8 @@ var COMMANDS = [
       "nieuwe todo",
       "nieuw taak",
       "nieuwe taak",
-      "nieuw item",
-      "nieuwe item",
-      "volgend item",
       "new todo",
-      "new item",
-      "next item",
+      "new to do",
       "to do item",
       "todo item"
     ],
@@ -589,8 +590,9 @@ function matchCommand(rawText) {
   for (const cmd of COMMANDS) {
     for (const pattern of cmd.patterns) {
       if (normalized.endsWith(pattern)) {
-        const idx = normalized.lastIndexOf(pattern);
-        const textBefore = rawText.substring(0, idx).trimEnd();
+        const patternWordCount = pattern.split(/\s+/).length;
+        const rawWords = rawText.trimEnd().split(/\s+/);
+        const textBefore = rawWords.slice(0, -patternWordCount).join(" ").trimEnd();
         return { command: cmd, textBefore };
       }
     }

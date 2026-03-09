@@ -143,6 +143,11 @@ const COMMANDS: VoiceCommand[] = [
 			"nieuw lijstitem",
 			"lijst punt",
 			"nieuw bullet",
+			"nieuw item",
+			"nieuwe item",
+			"volgend item",
+			"new item",
+			"next item",
 			"bullet",
 			"bullet point",
 			"volgend punt",
@@ -159,12 +164,8 @@ const COMMANDS: VoiceCommand[] = [
 			"nieuwe todo",
 			"nieuw taak",
 			"nieuwe taak",
-			"nieuw item",
-			"nieuwe item",
-			"volgend item",
 			"new todo",
-			"new item",
-			"next item",
+			"new to do",
 			"to do item",
 			"todo item",
 		],
@@ -237,10 +238,17 @@ export function matchCommand(rawText: string): CommandMatch | null {
 	for (const cmd of COMMANDS) {
 		for (const pattern of cmd.patterns) {
 			if (normalized.endsWith(pattern)) {
-				// Extract text before the command
-				const idx = normalized.lastIndexOf(pattern);
-				const textBefore = rawText
-					.substring(0, idx)
+				// Find text before the command.  The pattern index comes
+				// from the *normalized* string, so we can't use it directly
+				// on rawText (normalization may remove characters like
+				// punctuation, hyphens or diacritics).  Instead, strip
+				// the same number of *words* from the end of rawText.
+				const patternWordCount =
+					pattern.split(/\s+/).length;
+				const rawWords = rawText.trimEnd().split(/\s+/);
+				const textBefore = rawWords
+					.slice(0, -patternWordCount)
+					.join(" ")
 					.trimEnd();
 				return { command: cmd, textBefore };
 			}
