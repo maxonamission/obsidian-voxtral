@@ -327,6 +327,7 @@ export default class VoxtralPlugin extends Plugin {
 
 		// Unmute after 800ms of no typing (reduced from 1.5s)
 		this.typingResumeTimer = setTimeout(() => {
+			this.typingResumeTimer = null;
 			if (this.isRecording && this.isTypingMuted && !this.isPaused) {
 				this.isTypingMuted = false;
 				this.recorder.unmute();

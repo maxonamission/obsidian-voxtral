@@ -1400,6 +1400,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       clearTimeout(this.typingResumeTimer);
     }
     this.typingResumeTimer = setTimeout(() => {
+      this.typingResumeTimer = null;
       if (this.isRecording && this.isTypingMuted && !this.isPaused) {
         this.isTypingMuted = false;
         this.recorder.unmute();
