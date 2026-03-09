@@ -733,7 +733,67 @@ function isLikelyHallucination(text, audioDurationSec) {
   return false;
 }
 async function transcribeBatch(audioBlob, settings, diarize = false) {
+  var _a;
   const ext = audioBlob.type.includes("mp4") ? "m4a" : audioBlob.type.includes("ogg") ? "ogg" : "webm";
+  const mimeType = audioBlob.type || `audio/${ext}`;
+  if (import_obsidian3.Platform.isMobile) {
+    const boundary = `----VoxtralBoundary${Date.now()}`;
+    const arrayBuf = await audioBlob.arrayBuffer();
+    const fileBytes = new Uint8Array(arrayBuf);
+    let textParts = "";
+    textParts += `--${boundary}\r
+`;
+    textParts += `Content-Disposition: form-data; name="file"; filename="recording.${ext}"\r
+`;
+    textParts += `Content-Type: ${mimeType}\r
+\r
+`;
+    const afterFile = `\r
+--${boundary}\r
+Content-Disposition: form-data; name="model"\r
+\r
+${settings.batchModel}\r
+`;
+    let extraFields = "";
+    if (settings.language) {
+      extraFields += `--${boundary}\r
+Content-Disposition: form-data; name="language"\r
+\r
+${settings.language}\r
+`;
+    }
+    if (diarize) {
+      extraFields += `--${boundary}\r
+Content-Disposition: form-data; name="diarize"\r
+\r
+true\r
+`;
+    }
+    extraFields += `--${boundary}--\r
+`;
+    const enc = new TextEncoder();
+    const headerBuf = enc.encode(textParts);
+    const tailBuf = enc.encode(afterFile + extraFields);
+    const body = new Uint8Array(headerBuf.length + fileBytes.length + tailBuf.length);
+    body.set(headerBuf, 0);
+    body.set(fileBytes, headerBuf.length);
+    body.set(tailBuf, headerBuf.length + fileBytes.length);
+    const response2 = await (0, import_obsidian3.requestUrl)({
+      url: `${BASE_URL}/v1/audio/transcriptions`,
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${settings.apiKey}`,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`
+      },
+      body: body.buffer
+    });
+    if (response2.status !== 200) {
+      throw new Error(
+        `Transcription failed (${response2.status}): ${response2.text}`
+      );
+    }
+    return ((_a = response2.json) == null ? void 0 : _a.text) || "";
+  }
   const formData = new FormData();
   formData.append("file", audioBlob, `recording.${ext}`);
   formData.append("model", settings.batchModel);
