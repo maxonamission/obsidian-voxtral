@@ -275,6 +275,13 @@ export default class VoxtralPlugin extends Plugin {
 			return;
 		}
 
+		// Enter = tap-to-send shortcut in batch mode
+		if (e.key === "Enter" && this.effectiveMode === "batch") {
+			e.preventDefault();
+			this.sendChunk();
+			return;
+		}
+
 		// Ignore keys that don't produce sustained keyboard noise
 		if (
 			e.key === "Escape" ||

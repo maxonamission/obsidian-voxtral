@@ -1381,6 +1381,11 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta" || e.ctrlKey || e.metaKey) {
       return;
     }
+    if (e.key === "Enter" && this.effectiveMode === "batch") {
+      e.preventDefault();
+      this.sendChunk();
+      return;
+    }
     if (e.key === "Escape" || e.key === "Tab" || e.key === "Enter" || e.key === "Backspace" || e.key === "Delete" || e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End" || e.key === "PageUp" || e.key === "PageDown" || e.key.startsWith("F") && e.key.length <= 3) {
       return;
     }
