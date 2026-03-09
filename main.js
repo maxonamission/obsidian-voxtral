@@ -1039,12 +1039,26 @@ function createNodeWebSocket(url, headers, callbacks) {
           callbacks.onClose();
           return;
         } else if (opcode === 9) {
-          const pong = Buffer.alloc(6);
-          pong[0] = 138;
-          pong[1] = 128;
           const pongMask = crypto.randomBytes(4);
-          pongMask.copy(pong, 2);
-          socket.write(pong);
+          const pongLen = payload.length;
+          let pongHeader;
+          if (pongLen < 126) {
+            pongHeader = Buffer.alloc(6);
+            pongHeader[0] = 138;
+            pongHeader[1] = 128 | pongLen;
+            pongMask.copy(pongHeader, 2);
+          } else {
+            pongHeader = Buffer.alloc(8);
+            pongHeader[0] = 138;
+            pongHeader[1] = 128 | 126;
+            pongHeader.writeUInt16BE(pongLen, 2);
+            pongMask.copy(pongHeader, 4);
+          }
+          const maskedPong = Buffer.from(payload);
+          for (let i = 0; i < maskedPong.length; i++) {
+            maskedPong[i] ^= pongMask[i % 4];
+          }
+          socket.write(Buffer.concat([pongHeader, maskedPong]));
         }
       }
     });

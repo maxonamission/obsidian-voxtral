@@ -430,13 +430,27 @@ function createNodeWebSocket(
 					callbacks.onClose();
 					return;
 				} else if (opcode === 0x09) {
-					// Ping — send pong
-					const pong = Buffer.alloc(6);
-					pong[0] = 0x8a;
-					pong[1] = 0x80;
+					// Ping — send pong echoing the payload (RFC 6455 §5.5.3)
 					const pongMask = crypto.randomBytes(4);
-					pongMask.copy(pong, 2);
-					socket.write(pong);
+					const pongLen = payload.length;
+					let pongHeader: Buffer;
+					if (pongLen < 126) {
+						pongHeader = Buffer.alloc(6);
+						pongHeader[0] = 0x8a; // FIN + pong
+						pongHeader[1] = 0x80 | pongLen;
+						pongMask.copy(pongHeader, 2);
+					} else {
+						pongHeader = Buffer.alloc(8);
+						pongHeader[0] = 0x8a;
+						pongHeader[1] = 0x80 | 126;
+						pongHeader.writeUInt16BE(pongLen, 2);
+						pongMask.copy(pongHeader, 4);
+					}
+					const maskedPong = Buffer.from(payload);
+					for (let i = 0; i < maskedPong.length; i++) {
+						maskedPong[i] ^= pongMask[i % 4];
+					}
+					socket.write(Buffer.concat([pongHeader, maskedPong]));
 				}
 			}
 		});
