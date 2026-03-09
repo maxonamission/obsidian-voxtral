@@ -263,9 +263,6 @@ export default class VoxtralPlugin extends Plugin {
 	private handleTypingMute(e: KeyboardEvent): void {
 		if (!this.isRecording || this.isPaused) return;
 
-		// On mobile, virtual keyboards don't produce mic noise — skip entirely
-		if (Platform.isMobile) return;
-
 		// Ignore modifier-only keys and shortcuts
 		if (
 			e.key === "Control" ||

@@ -1318,7 +1318,6 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
   // ── Typing mute (prevent keyboard noise from being transcribed) ──
   handleTypingMute(e) {
     if (!this.isRecording || this.isPaused) return;
-    if (import_obsidian4.Platform.isMobile) return;
     if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta" || e.ctrlKey || e.metaKey) {
       return;
     }
