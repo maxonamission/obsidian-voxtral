@@ -1222,6 +1222,26 @@ function arrayBufferToBase64(buffer) {
 }
 
 // src/main.ts
+var LOG_BUFFER_SIZE = 500;
+var logBuffer = [];
+function pushLog(level, args) {
+  const ts = (/* @__PURE__ */ new Date()).toISOString();
+  const msg = args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
+  logBuffer.push(`[${ts}] [${level}] ${msg}`);
+  if (logBuffer.length > LOG_BUFFER_SIZE) {
+    logBuffer.shift();
+  }
+}
+for (const level of ["log", "warn", "error"]) {
+  const original = console[level].bind(console);
+  console[level] = (...args) => {
+    const first = args[0];
+    if (typeof first === "string" && first.startsWith("Voxtral:")) {
+      pushLog(level.toUpperCase(), args);
+    }
+    original(...args);
+  };
+}
 function hasNodeJs() {
   try {
     require("https");
@@ -1292,6 +1312,12 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       name: "Show voice commands (side panel)",
       icon: "help-circle",
       callback: () => this.openHelpPanel()
+    });
+    this.addCommand({
+      id: "export-logs",
+      name: "Export logs to clipboard",
+      icon: "clipboard-copy",
+      callback: () => this.exportLogs()
     });
     this.addCommand({
       id: "correct-selection",
@@ -1762,6 +1788,15 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     } catch (e) {
       console.error("Voxtral: Auto-correct failed", e);
     }
+  }
+  async exportLogs() {
+    if (logBuffer.length === 0) {
+      new import_obsidian4.Notice("Voxtral: No logs to export");
+      return;
+    }
+    const text = logBuffer.join("\n");
+    await navigator.clipboard.writeText(text);
+    new import_obsidian4.Notice(`Voxtral: ${logBuffer.length} log entries copied to clipboard`);
   }
   async correctSelection(editor) {
     const selection = editor.getSelection();
