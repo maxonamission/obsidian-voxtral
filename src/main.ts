@@ -18,7 +18,11 @@ import {
 	correctText,
 	isLikelyHallucination,
 } from "./mistral-api";
-import { normalizeCommand, processText } from "./voice-commands";
+import {
+	normalizeCommand,
+	processText,
+	matchCommand,
+} from "./voice-commands";
 
 /** Check if Node.js APIs are available (desktop Electron only) */
 function hasNodeJs(): boolean {
@@ -463,7 +467,12 @@ export default class VoxtralPlugin extends Plugin {
 				return;
 			}
 
-			if (this.settings.autoCorrect && text) {
+			// Check for voice commands BEFORE auto-correct.
+			// The correction LLM can mangle command phrases like
+			// "nieuw todo item" into literal "[ ]" text.
+			const hasCommand = text ? matchCommand(text) !== null : false;
+
+			if (this.settings.autoCorrect && text && !hasCommand) {
 				text = await correctText(text, this.settings);
 			}
 
@@ -668,7 +677,9 @@ export default class VoxtralPlugin extends Plugin {
 				return;
 			}
 
-			if (this.settings.autoCorrect && text) {
+			const hasCommand = text ? matchCommand(text) !== null : false;
+
+			if (this.settings.autoCorrect && text && !hasCommand) {
 				text = await correctText(text, this.settings);
 			}
 

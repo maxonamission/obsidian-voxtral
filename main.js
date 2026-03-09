@@ -1460,7 +1460,8 @@ Tap send to transcribe while you keep talking.`,
         this.updateStatusBar("recording");
         return;
       }
-      if (this.settings.autoCorrect && text) {
+      const hasCommand = text ? matchCommand(text) !== null : false;
+      if (this.settings.autoCorrect && text && !hasCommand) {
         text = await correctText(text, this.settings);
       }
       this.updateStatusBar("recording");
@@ -1626,7 +1627,8 @@ Tap send to transcribe while you keep talking.`,
         console.warn("Voxtral: Discarding hallucinated batch");
         return;
       }
-      if (this.settings.autoCorrect && text) {
+      const hasCommand = text ? matchCommand(text) !== null : false;
+      if (this.settings.autoCorrect && text && !hasCommand) {
         text = await correctText(text, this.settings);
       }
       if (text) {
