@@ -263,6 +263,9 @@ export default class VoxtralPlugin extends Plugin {
 	private handleTypingMute(e: KeyboardEvent): void {
 		if (!this.isRecording || this.isPaused) return;
 
+		// On mobile, virtual keyboards don't produce mic noise — skip entirely
+		if (Platform.isMobile) return;
+
 		// Ignore modifier-only keys and shortcuts
 		if (
 			e.key === "Control" ||
@@ -275,22 +278,22 @@ export default class VoxtralPlugin extends Plugin {
 			return;
 		}
 
-		// Ignore single special keys that aren't "typing"
+		// Ignore keys that don't produce sustained keyboard noise
 		if (
 			e.key === "Escape" ||
 			e.key === "Tab" ||
-			e.key === "F1" ||
-			e.key === "F2" ||
-			e.key === "F3" ||
-			e.key === "F4" ||
-			e.key === "F5" ||
-			e.key === "F6" ||
-			e.key === "F7" ||
-			e.key === "F8" ||
-			e.key === "F9" ||
-			e.key === "F10" ||
-			e.key === "F11" ||
-			e.key === "F12"
+			e.key === "Enter" ||
+			e.key === "Backspace" ||
+			e.key === "Delete" ||
+			e.key === "ArrowUp" ||
+			e.key === "ArrowDown" ||
+			e.key === "ArrowLeft" ||
+			e.key === "ArrowRight" ||
+			e.key === "Home" ||
+			e.key === "End" ||
+			e.key === "PageUp" ||
+			e.key === "PageDown" ||
+			e.key.startsWith("F") && e.key.length <= 3
 		) {
 			return;
 		}
@@ -306,13 +309,13 @@ export default class VoxtralPlugin extends Plugin {
 			clearTimeout(this.typingResumeTimer);
 		}
 
-		// Unmute after 1.5s of no typing
+		// Unmute after 800ms of no typing (reduced from 1.5s)
 		this.typingResumeTimer = setTimeout(() => {
 			if (this.isRecording && this.isTypingMuted && !this.isPaused) {
 				this.isTypingMuted = false;
 				this.recorder.unmute();
 			}
-		}, 1500);
+		}, 800);
 	}
 
 	// ── Recording toggle ──

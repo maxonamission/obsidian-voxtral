@@ -1318,10 +1318,11 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
   // ── Typing mute (prevent keyboard noise from being transcribed) ──
   handleTypingMute(e) {
     if (!this.isRecording || this.isPaused) return;
+    if (import_obsidian4.Platform.isMobile) return;
     if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta" || e.ctrlKey || e.metaKey) {
       return;
     }
-    if (e.key === "Escape" || e.key === "Tab" || e.key === "F1" || e.key === "F2" || e.key === "F3" || e.key === "F4" || e.key === "F5" || e.key === "F6" || e.key === "F7" || e.key === "F8" || e.key === "F9" || e.key === "F10" || e.key === "F11" || e.key === "F12") {
+    if (e.key === "Escape" || e.key === "Tab" || e.key === "Enter" || e.key === "Backspace" || e.key === "Delete" || e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End" || e.key === "PageUp" || e.key === "PageDown" || e.key.startsWith("F") && e.key.length <= 3) {
       return;
     }
     if (!this.isTypingMuted) {
@@ -1336,7 +1337,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
         this.isTypingMuted = false;
         this.recorder.unmute();
       }
-    }, 1500);
+    }, 800);
   }
   // ── Recording toggle ──
   async toggleRecording() {
