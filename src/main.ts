@@ -51,6 +51,7 @@ export default class VoxtralPlugin extends Plugin {
 	private consecutiveFailures = 0;
 	private maxConsecutiveFailures = 5;
 	private currentEditor: Editor | null = null;
+	private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
 	/** Whether realtime mode is available on this platform */
 	get canRealtime(): boolean {
@@ -133,10 +134,11 @@ export default class VoxtralPlugin extends Plugin {
 		});
 
 		// Auto-mute microphone while typing to prevent keyboard noise
-		// from being transcribed as hallucinated text
-		this.registerDomEvent(document, "keydown", (e: KeyboardEvent) => {
-			this.handleTypingMute(e);
-		});
+		// from being transcribed as hallucinated text.
+		// Use capture phase so we can preventDefault on Enter (tap-to-send)
+		// before the editor inserts a newline.
+		this.keydownHandler = (e: KeyboardEvent) => this.handleTypingMute(e);
+		document.addEventListener("keydown", this.keydownHandler, true);
 
 	}
 
@@ -145,6 +147,9 @@ export default class VoxtralPlugin extends Plugin {
 			this.stopRecording();
 		}
 		this.removeSendButton();
+		if (this.keydownHandler) {
+			document.removeEventListener("keydown", this.keydownHandler, true);
+		}
 	}
 
 	async loadSettings(): Promise<void> {

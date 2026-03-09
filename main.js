@@ -1216,6 +1216,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.consecutiveFailures = 0;
     this.maxConsecutiveFailures = 5;
     this.currentEditor = null;
+    this.keydownHandler = null;
   }
   /** Whether realtime mode is available on this platform */
   get canRealtime() {
@@ -1277,15 +1278,17 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.registerDomEvent(document, "visibilitychange", () => {
       this.handleVisibilityChange();
     });
-    this.registerDomEvent(document, "keydown", (e) => {
-      this.handleTypingMute(e);
-    });
+    this.keydownHandler = (e) => this.handleTypingMute(e);
+    document.addEventListener("keydown", this.keydownHandler, true);
   }
   onunload() {
     if (this.isRecording) {
       this.stopRecording();
     }
     this.removeSendButton();
+    if (this.keydownHandler) {
+      document.removeEventListener("keydown", this.keydownHandler, true);
+    }
   }
   async loadSettings() {
     this.settings = Object.assign(
