@@ -1421,6 +1421,16 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       return;
     }
     if (e.key === "Escape" || e.key === "Tab" || e.key === "Enter" || e.key === "Backspace" || e.key === "Delete" || e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End" || e.key === "PageUp" || e.key === "PageDown" || e.key.startsWith("F") && e.key.length <= 3) {
+      if (this.isTypingMuted && this.typingResumeTimer) {
+        clearTimeout(this.typingResumeTimer);
+        this.typingResumeTimer = setTimeout(() => {
+          this.typingResumeTimer = null;
+          if (this.isRecording && this.isTypingMuted && !this.isPaused) {
+            this.isTypingMuted = false;
+            this.recorder.unmute();
+          }
+        }, this.settings.typingCooldownMs);
+      }
       return;
     }
     if (!this.isTypingMuted) {

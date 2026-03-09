@@ -295,7 +295,9 @@ export default class VoxtralPlugin extends Plugin {
 			return;
 		}
 
-		// Ignore keys that don't produce sustained keyboard noise
+		// Ignore keys that don't produce sustained keyboard noise,
+		// but still reset the cooldown timer if we're already muted
+		// so that e.g. Enter-as-newline extends the typing session.
 		if (
 			e.key === "Escape" ||
 			e.key === "Tab" ||
@@ -312,6 +314,17 @@ export default class VoxtralPlugin extends Plugin {
 			e.key === "PageDown" ||
 			e.key.startsWith("F") && e.key.length <= 3
 		) {
+			// If already muted, reset the cooldown so the mic stays muted
+			if (this.isTypingMuted && this.typingResumeTimer) {
+				clearTimeout(this.typingResumeTimer);
+				this.typingResumeTimer = setTimeout(() => {
+					this.typingResumeTimer = null;
+					if (this.isRecording && this.isTypingMuted && !this.isPaused) {
+						this.isTypingMuted = false;
+						this.recorder.unmute();
+					}
+				}, this.settings.typingCooldownMs);
+			}
 			return;
 		}
 
