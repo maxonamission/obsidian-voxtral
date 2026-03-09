@@ -24,6 +24,34 @@ import {
 	matchCommand,
 } from "./voice-commands";
 
+// ── In-memory log buffer (ring buffer, last 500 entries) ──
+
+const LOG_BUFFER_SIZE = 500;
+const logBuffer: string[] = [];
+
+function pushLog(level: string, args: unknown[]): void {
+	const ts = new Date().toISOString();
+	const msg = args
+		.map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
+		.join(" ");
+	logBuffer.push(`[${ts}] [${level}] ${msg}`);
+	if (logBuffer.length > LOG_BUFFER_SIZE) {
+		logBuffer.shift();
+	}
+}
+
+// Intercept console.log/warn/error for Voxtral messages
+for (const level of ["log", "warn", "error"] as const) {
+	const original = console[level].bind(console);
+	console[level] = (...args: unknown[]) => {
+		const first = args[0];
+		if (typeof first === "string" && first.startsWith("Voxtral:")) {
+			pushLog(level.toUpperCase(), args);
+		}
+		original(...args);
+	};
+}
+
 /** Check if Node.js APIs are available (desktop Electron only) */
 function hasNodeJs(): boolean {
 	try {
@@ -109,6 +137,13 @@ export default class VoxtralPlugin extends Plugin {
 			name: "Show voice commands (side panel)",
 			icon: "help-circle",
 			callback: () => this.openHelpPanel(),
+		});
+
+		this.addCommand({
+			id: "export-logs",
+			name: "Export logs to clipboard",
+			icon: "clipboard-copy",
+			callback: () => this.exportLogs(),
 		});
 
 		this.addCommand({
@@ -743,6 +778,16 @@ export default class VoxtralPlugin extends Plugin {
 		} catch (e) {
 			console.error("Voxtral: Auto-correct failed", e);
 		}
+	}
+
+	private async exportLogs(): Promise<void> {
+		if (logBuffer.length === 0) {
+			new Notice("Voxtral: No logs to export");
+			return;
+		}
+		const text = logBuffer.join("\n");
+		await navigator.clipboard.writeText(text);
+		new Notice(`Voxtral: ${logBuffer.length} log entries copied to clipboard`);
 	}
 
 	private async correctSelection(editor: Editor): Promise<void> {
