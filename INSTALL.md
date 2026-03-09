@@ -82,7 +82,12 @@ De vault staat in `On My iPhone > Obsidian > MijnVault` of in iCloud Drive.
 
 1. Ga naar **Instellingen** → **Voxtral Transcribe** → zet modus op **Batch**
 2. Klik op 🎙 om op te nemen
-3. Klik nogmaals op 🎙 om te stoppen → tekst wordt getranscribeerd en ingevoegd
+3. Druk op **Enter** wanneer de mic actief is (niet aan het typen) om een chunk te verzenden — of gebruik het verzend-icoon
+4. Tijdens het typen gedraagt Enter zich gewoon als een newline
+5. Klik nogmaals op 🎙 om te stoppen → tekst wordt getranscribeerd en ingevoegd
+
+> **Tip:** De Enter-als-tap-to-send functie en de typing cooldown (standaard 800 ms)
+> zijn configureerbaar via **Instellingen** → **Voxtral Transcribe**.
 
 ### Tekstcorrectie los gebruiken
 
@@ -117,6 +122,7 @@ chunks verzenden zonder het dicteren te stoppen.
 
 - Chunks van 10-30 seconden werken het best
 - Stemcommando's ("nieuwe alinea", "kop twee", etc.) werken ook in batch modus
+- Op desktop: druk op **Enter** (als de mic actief is) om een chunk te versturen — tijdens het typen is Enter gewoon een newline
 - Je kunt ook via Command palette → "Voxtral: Verzend audio chunk" de chunk versturen
 - Het stemcommando-zijpaneel opent **niet** automatisch op mobiel (om je scherm niet te blokkeren). Open het handmatig via Command palette → "Voxtral: Toon stemcommando's (zijpaneel)"
 

@@ -14,6 +14,8 @@ export interface VoxtralSettings {
 	focusBehavior: FocusBehavior;
 	focusPauseDelaySec: number; // seconds before pausing (for "pause-after-delay")
 	dismissMobileBatchNotice: boolean; // hide "using batch mode" notice on mobile
+	enterToSend: boolean; // Enter key acts as tap-to-send when mic is live in batch mode
+	typingCooldownMs: number; // ms of silence before mic unmutes after typing
 }
 
 export const DEFAULT_SETTINGS: VoxtralSettings = {
@@ -30,6 +32,8 @@ export const DEFAULT_SETTINGS: VoxtralSettings = {
 	focusBehavior: "pause",
 	focusPauseDelaySec: 30,
 	dismissMobileBatchNotice: false,
+	enterToSend: true,
+	typingCooldownMs: 800,
 };
 
 export const DEFAULT_CORRECT_PROMPT =

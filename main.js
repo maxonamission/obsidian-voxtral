@@ -38,7 +38,9 @@ var DEFAULT_SETTINGS = {
   microphoneDeviceId: "",
   focusBehavior: "pause",
   focusPauseDelaySec: 30,
-  dismissMobileBatchNotice: false
+  dismissMobileBatchNotice: false,
+  enterToSend: true,
+  typingCooldownMs: 800
 };
 var DEFAULT_CORRECT_PROMPT = "You are a precise text corrector for dictated text. The input language may vary (commonly Dutch, but follow whatever language the text is in).\n\nCORRECT ONLY:\n- Capitalization (sentence starts, proper nouns)\n- Clearly misspelled or garbled words (from speech recognition)\n- Missing or wrong punctuation\n\nDO NOT CHANGE:\n- Sentence structure or word order\n- Style or tone\n- Markdown formatting (# headings, - lists, - [ ] to-do items)\n\nINLINE CORRECTION INSTRUCTIONS:\nThe text was dictated via speech recognition. The speaker sometimes gives inline instructions meant for you. Recognize these patterns:\n- Explicit markers: 'voor de correctie', 'voor de correctie achteraf', 'for the correction', 'correction note'\n- Spelled-out words: 'V-O-X-T-R-A-L' or 'with an x' \u2192 merge into the intended word\n- Self-corrections: 'no not X but Y', 'nee niet X maar Y', 'I mean Y', 'ik bedoel Y'\n- Meta-commentary: 'that's a Dutch word', 'with a capital letter', 'met een hoofdletter'\n\nWhen you encounter such instructions:\n1. Apply the instruction to the REST of the text\n2. Remove the instruction/meta-commentary itself from the output\n3. Keep all content text \u2014 NEVER remove normal sentences\n\nCRITICAL RULES:\n- Your output must be SHORTER than or equal to the input (after removing meta-instructions)\n- NEVER add your own text, commentary, explanations, or notes\n- NEVER add parenthesized text like '(text missing)' or '(no corrections needed)'\n- NEVER continue, elaborate, or expand on the content\n- NEVER invent or hallucinate text that wasn't in the input\n- If the input is short (even one word), just return it corrected\n- Your output must contain ONLY the corrected version of the input text, NOTHING else";
 
@@ -290,6 +292,35 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         })
       );
     }
+    new import_obsidian.Setting(containerEl).setName("Enter = tap-to-send").setDesc(
+      "In batch mode, pressing Enter sends the current audio chunk when the mic is live. While typing, Enter inserts a normal newline."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.enterToSend).onChange(async (value) => {
+        this.plugin.settings.enterToSend = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Typing cooldown").setDesc(
+      "How long after you stop typing before the mic unmutes again"
+    ).addDropdown((drop) => {
+      const options = {
+        "400": "400 ms (fast)",
+        "800": "800 ms (default)",
+        "1200": "1.2 sec",
+        "1500": "1.5 sec",
+        "2000": "2 sec",
+        "3000": "3 sec"
+      };
+      for (const [value, label] of Object.entries(options)) {
+        drop.addOption(value, label);
+      }
+      drop.setValue(
+        String(this.plugin.settings.typingCooldownMs)
+      ).onChange(async (value) => {
+        this.plugin.settings.typingCooldownMs = Number(value);
+        await this.plugin.saveSettings();
+      });
+    });
     new import_obsidian.Setting(containerEl).setName("On focus loss").setDesc(
       "What should happen when you switch apps while recording?"
     ).addDropdown((drop) => {
@@ -1384,7 +1415,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta" || e.ctrlKey || e.metaKey) {
       return;
     }
-    if (e.key === "Enter" && this.effectiveMode === "batch" && !this.isTypingMuted && !this.typingResumeTimer) {
+    if (e.key === "Enter" && this.settings.enterToSend && this.effectiveMode === "batch" && !this.isTypingMuted && !this.typingResumeTimer) {
       e.preventDefault();
       this.sendChunk();
       return;
@@ -1405,7 +1436,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
         this.isTypingMuted = false;
         this.recorder.unmute();
       }
-    }, 800);
+    }, this.settings.typingCooldownMs);
   }
   // ── Recording toggle ──
   async toggleRecording() {
@@ -1445,6 +1476,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       }
       const micName = this.recorder.activeMicLabel;
       if (this.effectiveMode === "batch") {
+        const enterHint = this.settings.enterToSend ? " Press Enter (when not typing) or tap send to transcribe chunks." : " Tap send to transcribe chunks while you keep talking.";
         if (import_obsidian4.Platform.isMobile && !this.settings.dismissMobileBatchNotice) {
           const frag = document.createDocumentFragment();
           frag.createSpan({
@@ -1466,7 +1498,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
         } else {
           new import_obsidian4.Notice(
             `Voxtral: Recording started (${micName})
-Tap send to transcribe while you keep talking.`,
+` + enterHint.trim(),
             6e3
           );
         }

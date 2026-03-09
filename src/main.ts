@@ -135,8 +135,8 @@ export default class VoxtralPlugin extends Plugin {
 
 		// Auto-mute microphone while typing to prevent keyboard noise
 		// from being transcribed as hallucinated text.
-		// Use capture phase so we can preventDefault on Enter (tap-to-send)
-		// before the editor inserts a newline.
+		// Use capture phase so we can preventDefault on Enter
+		// (tap-to-send, if enabled) before the editor inserts a newline.
 		this.keydownHandler = (e: KeyboardEvent) => this.handleTypingMute(e);
 		document.addEventListener("keydown", this.keydownHandler, true);
 
@@ -285,6 +285,7 @@ export default class VoxtralPlugin extends Plugin {
 		// Enter behaves normally (newline).
 		if (
 			e.key === "Enter" &&
+			this.settings.enterToSend &&
 			this.effectiveMode === "batch" &&
 			!this.isTypingMuted &&
 			!this.typingResumeTimer
@@ -325,14 +326,14 @@ export default class VoxtralPlugin extends Plugin {
 			clearTimeout(this.typingResumeTimer);
 		}
 
-		// Unmute after 800ms of no typing (reduced from 1.5s)
+		// Unmute after cooldown period of no typing
 		this.typingResumeTimer = setTimeout(() => {
 			this.typingResumeTimer = null;
 			if (this.isRecording && this.isTypingMuted && !this.isPaused) {
 				this.isTypingMuted = false;
 				this.recorder.unmute();
 			}
-		}, 800);
+		}, this.settings.typingCooldownMs);
 	}
 
 	// ── Recording toggle ──
@@ -382,6 +383,9 @@ export default class VoxtralPlugin extends Plugin {
 			// Show which microphone is active
 			const micName = this.recorder.activeMicLabel;
 			if (this.effectiveMode === "batch") {
+				const enterHint = this.settings.enterToSend
+					? " Press Enter (when not typing) or tap send to transcribe chunks."
+					: " Tap send to transcribe chunks while you keep talking.";
 				if (
 					Platform.isMobile &&
 					!this.settings.dismissMobileBatchNotice
@@ -390,8 +394,8 @@ export default class VoxtralPlugin extends Plugin {
 					const frag = document.createDocumentFragment();
 					frag.createSpan({
 						text:
-							`Recording started (${micName}). ` +
-							"Tap the send button (\u2191) to transcribe chunks while you keep talking.",
+							`Recording started (${micName}).` +
+							" Tap the send button (\u2191) to transcribe chunks while you keep talking.",
 					});
 					frag.createEl("br");
 					const dismiss = frag.createEl("a", {
@@ -409,7 +413,7 @@ export default class VoxtralPlugin extends Plugin {
 				} else {
 					new Notice(
 						`Voxtral: Recording started (${micName})\n` +
-							"Tap send to transcribe while you keep talking.",
+							enterHint.trim(),
 						6000
 					);
 				}

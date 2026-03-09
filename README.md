@@ -14,6 +14,8 @@ Speech-to-text dictation for [Obsidian](https://obsidian.md) powered by [Mistral
 - **Self-correction recognition** — "no not X but Y" is handled automatically
 - **Microphone selection** — choose which microphone to use
 - **Auto-pause on focus loss** — configurable behavior when switching apps on mobile
+- **Configurable Enter-to-send** — optionally use Enter as tap-to-send when the mic is live (batch mode)
+- **Typing cooldown** — adjustable delay before the mic resumes after typing
 
 ## Requirements
 
@@ -53,8 +55,9 @@ On mobile, only batch mode is available (real-time streaming requires Node.js).
 1. Open a note
 2. Tap the microphone icon to start recording
 3. Tap the **send icon** in the view header to transcribe the current audio chunk — the recording keeps going
-4. Keep talking and tap send again for the next chunk
-5. Tap the microphone to stop — the last chunk is processed automatically
+4. On desktop, press **Enter** while the mic is live (not typing) to send a chunk (if *Enter = tap-to-send* is enabled)
+5. Keep talking and tap/press send again for the next chunk
+6. Tap the microphone to stop — the last chunk is processed automatically
 
 ### Voice commands
 
@@ -95,6 +98,8 @@ When switching apps on mobile, you can configure what happens to an active recor
 | Mistral API key | Your API key from platform.mistral.ai |
 | Microphone | Which microphone to use |
 | Mode | Realtime (desktop only) or Batch |
+| Enter = tap-to-send | Use Enter to send audio chunks when mic is live (batch mode, default: on) |
+| Typing cooldown | Delay before mic resumes after typing (default: 800 ms) |
 | On focus loss | Pause immediately / after delay / keep recording |
 | Language | ISO 639-1 code (default: `nl`) |
 | Auto-correct | Enable/disable automatic correction |

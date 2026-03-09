@@ -87,6 +87,48 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			);
 		}
 
+		// Enter-to-send (batch mode)
+		new Setting(containerEl)
+			.setName("Enter = tap-to-send")
+			.setDesc(
+				"In batch mode, pressing Enter sends the current audio chunk when the mic is live. " +
+				"While typing, Enter inserts a normal newline."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.enterToSend)
+					.onChange(async (value) => {
+						this.plugin.settings.enterToSend = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		// Typing cooldown
+		new Setting(containerEl)
+			.setName("Typing cooldown")
+			.setDesc(
+				"How long after you stop typing before the mic unmutes again"
+			)
+			.addDropdown((drop) => {
+				const options: Record<string, string> = {
+					"400": "400 ms (fast)",
+					"800": "800 ms (default)",
+					"1200": "1.2 sec",
+					"1500": "1.5 sec",
+					"2000": "2 sec",
+					"3000": "3 sec",
+				};
+				for (const [value, label] of Object.entries(options)) {
+					drop.addOption(value, label);
+				}
+				drop.setValue(
+					String(this.plugin.settings.typingCooldownMs)
+				).onChange(async (value) => {
+					this.plugin.settings.typingCooldownMs = Number(value);
+					await this.plugin.saveSettings();
+				});
+			});
+
 		// Focus behavior
 		new Setting(containerEl)
 			.setName("On focus loss")
