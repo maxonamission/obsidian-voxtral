@@ -523,7 +523,12 @@ var COMMANDS = [
       "nieuwe todo",
       "nieuw taak",
       "nieuwe taak",
+      "nieuw item",
+      "nieuwe item",
+      "volgend item",
       "new todo",
+      "new item",
+      "next item",
       "to do item",
       "todo item"
     ],
