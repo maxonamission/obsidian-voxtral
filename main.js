@@ -1384,16 +1384,8 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta" || e.ctrlKey || e.metaKey) {
       return;
     }
-    if (e.key === "Enter" && this.effectiveMode === "batch" && (this.isTypingMuted || this.typingResumeTimer)) {
+    if (e.key === "Enter" && this.effectiveMode === "batch" && !this.isTypingMuted && !this.typingResumeTimer) {
       e.preventDefault();
-      if (this.typingResumeTimer) {
-        clearTimeout(this.typingResumeTimer);
-        this.typingResumeTimer = null;
-      }
-      if (this.isTypingMuted) {
-        this.isTypingMuted = false;
-        this.recorder.unmute();
-      }
       this.sendChunk();
       return;
     }

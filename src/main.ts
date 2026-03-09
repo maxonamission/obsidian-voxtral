@@ -280,24 +280,16 @@ export default class VoxtralPlugin extends Plugin {
 			return;
 		}
 
-		// Enter = tap-to-send, but only right after typing (while muted
-		// or within the 800ms unmute window). During pure dictation
-		// Enter just inserts a normal newline.
+		// Enter = tap-to-send in batch mode, but only when the mic is
+		// live (not typing). While typing / during the unmute cooldown,
+		// Enter behaves normally (newline).
 		if (
 			e.key === "Enter" &&
 			this.effectiveMode === "batch" &&
-			(this.isTypingMuted || this.typingResumeTimer)
+			!this.isTypingMuted &&
+			!this.typingResumeTimer
 		) {
 			e.preventDefault();
-			// Cancel the unmute timer — sendChunk will handle the audio
-			if (this.typingResumeTimer) {
-				clearTimeout(this.typingResumeTimer);
-				this.typingResumeTimer = null;
-			}
-			if (this.isTypingMuted) {
-				this.isTypingMuted = false;
-				this.recorder.unmute();
-			}
 			this.sendChunk();
 			return;
 		}
