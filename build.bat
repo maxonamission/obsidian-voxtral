@@ -78,7 +78,8 @@ pyinstaller ^
     --hidden-import uvicorn.lifespan.on ^
     --hidden-import uvicorn.lifespan.off ^
     --collect-all mistralai ^
-    --hidden-import pystray._win32 ^
+    --collect-all pystray ^
+    --collect-all PIL ^
     server.py
 
 if %errorlevel% neq 0 (

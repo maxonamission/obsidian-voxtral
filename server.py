@@ -402,44 +402,48 @@ if __name__ == "__main__":
         try:
             import pystray
             from PIL import Image, ImageDraw
-        except ImportError:
-            logger.info("pystray/Pillow not installed, skipping tray icon")
+        except ImportError as e:
+            logger.info(f"pystray/Pillow not available, skipping tray icon: {e}")
             return None
 
-        # Draw a simple microphone-style icon (green circle)
-        size = 64
-        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        draw.ellipse([8, 8, size - 8, size - 8], fill=(76, 175, 80))
-        # White mic shape (simplified)
-        cx, cy = size // 2, size // 2
-        draw.rounded_rectangle(
-            [cx - 6, cy - 16, cx + 6, cy + 4],
-            radius=6,
-            fill="white",
-        )
-        draw.rectangle([cx - 1, cy + 4, cx + 1, cy + 12], fill="white")
-        draw.rectangle([cx - 8, cy + 12, cx + 8, cy + 14], fill="white")
+        try:
+            # Draw a simple microphone-style icon (green circle)
+            size = 64
+            img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            draw.ellipse([8, 8, size - 8, size - 8], fill=(76, 175, 80))
+            # White mic shape (simplified)
+            cx, cy = size // 2, size // 2
+            draw.rounded_rectangle(
+                [cx - 6, cy - 16, cx + 6, cy + 4],
+                radius=6,
+                fill="white",
+            )
+            draw.rectangle([cx - 1, cy + 4, cx + 1, cy + 12], fill="white")
+            draw.rectangle([cx - 8, cy + 12, cx + 8, cy + 14], fill="white")
 
-        def on_open(_icon, _item):
-            webbrowser.open(url)
+            def on_open(_icon, _item):
+                webbrowser.open(url)
 
-        def on_quit(_icon, _item):
-            logger.info("Quit requested from system tray")
-            _icon.stop()
-            os.kill(os.getpid(), signal.SIGTERM)
+            def on_quit(_icon, _item):
+                logger.info("Quit requested from system tray")
+                _icon.stop()
+                os.kill(os.getpid(), signal.SIGTERM)
 
-        icon = pystray.Icon(
-            "voxtral",
-            img,
-            "Voxtral Transcribe",
-            menu=pystray.Menu(
-                pystray.MenuItem("Openen in browser", on_open, default=True),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Afsluiten", on_quit),
-            ),
-        )
-        return icon
+            icon = pystray.Icon(
+                "voxtral",
+                img,
+                "Voxtral Transcribe",
+                menu=pystray.Menu(
+                    pystray.MenuItem("Openen in browser", on_open, default=True),
+                    pystray.Menu.SEPARATOR,
+                    pystray.MenuItem("Afsluiten", on_quit),
+                ),
+            )
+            return icon
+        except Exception as e:
+            logger.error(f"Failed to create tray icon: {e}")
+            return None
 
     try:
         # Start uvicorn in a daemon thread
