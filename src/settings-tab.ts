@@ -1,10 +1,13 @@
 import { App, Platform, PluginSettingTab, Setting } from "obsidian";
 import type VoxtralPlugin from "./main";
 import { AudioRecorder } from "./audio-recorder";
+import { listModels } from "./mistral-api";
+import type { MistralModel, } from "./mistral-api";
 import type { FocusBehavior } from "./types";
 
 export class VoxtralSettingTab extends PluginSettingTab {
 	plugin: VoxtralPlugin;
+	private cachedModels: MistralModel[] | null = null;
 
 	constructor(app: App, plugin: VoxtralPlugin) {
 		super(app, plugin);
@@ -233,6 +236,30 @@ export class VoxtralSettingTab extends PluginSettingTab {
 				});
 			});
 
+		// Hotkeys hint
+		containerEl.createEl("h3", { text: "Keyboard shortcuts" });
+
+		new Setting(containerEl)
+			.setName("Customize hotkeys")
+			.setDesc(
+				"You can assign keyboard shortcuts to all Voxtral commands " +
+				"(start/stop recording, correct selection, correct note, etc.) " +
+				"via Obsidian's Settings → Hotkeys. Search for \"Voxtral\"."
+			)
+			.addButton((btn) =>
+				btn
+					.setButtonText("Open Hotkeys")
+					.onClick(() => {
+						// Open Obsidian's hotkey settings and pre-filter
+						(this.app as any).setting?.openTabById?.("hotkeys");
+						const tab = (this.app as any).setting?.activeTab;
+						if (tab?.searchComponent) {
+							tab.searchComponent.setValue("Voxtral");
+							tab.updateHotkeyVisibility?.();
+						}
+					})
+			);
+
 		// Support
 		containerEl.createEl("h3", { text: "Support this project" });
 
@@ -250,38 +277,38 @@ export class VoxtralSettingTab extends PluginSettingTab {
 		// Advanced settings
 		containerEl.createEl("h3", { text: "Advanced" });
 
-		new Setting(containerEl)
-			.setName("Realtime model")
-			.addText((text) =>
-				text
-					.setValue(this.plugin.settings.realtimeModel)
-					.onChange(async (value) => {
-						this.plugin.settings.realtimeModel = value.trim();
-						await this.plugin.saveSettings();
-					})
-			);
+		this.addModelDropdown(
+			containerEl,
+			"Realtime model",
+			"Model for real-time streaming transcription",
+			this.plugin.settings.realtimeModel,
+			async (value) => {
+				this.plugin.settings.realtimeModel = value.trim();
+				await this.plugin.saveSettings();
+			}
+		);
 
-		new Setting(containerEl)
-			.setName("Batch model")
-			.addText((text) =>
-				text
-					.setValue(this.plugin.settings.batchModel)
-					.onChange(async (value) => {
-						this.plugin.settings.batchModel = value.trim();
-						await this.plugin.saveSettings();
-					})
-			);
+		this.addModelDropdown(
+			containerEl,
+			"Batch model",
+			"Model for batch transcription",
+			this.plugin.settings.batchModel,
+			async (value) => {
+				this.plugin.settings.batchModel = value.trim();
+				await this.plugin.saveSettings();
+			}
+		);
 
-		new Setting(containerEl)
-			.setName("Correction model")
-			.addText((text) =>
-				text
-					.setValue(this.plugin.settings.correctModel)
-					.onChange(async (value) => {
-						this.plugin.settings.correctModel = value.trim();
-						await this.plugin.saveSettings();
-					})
-			);
+		this.addModelDropdown(
+			containerEl,
+			"Correction model",
+			"Model for text correction",
+			this.plugin.settings.correctModel,
+			async (value) => {
+				this.plugin.settings.correctModel = value.trim();
+				await this.plugin.saveSettings();
+			}
+		);
 
 		new Setting(containerEl)
 			.setName("Correction system prompt")
@@ -302,5 +329,61 @@ export class VoxtralSettingTab extends PluginSettingTab {
 					textarea.style.width = "100%";
 				}
 			});
+	}
+
+	/**
+	 * Add a model dropdown that fetches options from the Mistral API.
+	 * Falls back to a text field if no API key is set or the fetch fails.
+	 * The current value is always shown, even if not in the fetched list.
+	 */
+	private addModelDropdown(
+		containerEl: HTMLElement,
+		name: string,
+		desc: string,
+		currentValue: string,
+		onChange: (value: string) => Promise<void>
+	): void {
+		const setting = new Setting(containerEl).setName(name).setDesc(desc);
+
+		setting.addDropdown((drop) => {
+			// Always include the current value so it's visible immediately
+			if (currentValue) {
+				drop.addOption(currentValue, currentValue);
+			}
+			drop.setValue(currentValue);
+
+			drop.onChange(async (value) => {
+				await onChange(value);
+			});
+
+			// Fetch models async and populate
+			this.getModels().then((models) => {
+				if (models.length === 0) return;
+
+				// Clear and repopulate
+				const selectEl = drop.selectEl;
+				selectEl.empty();
+
+				// Add all models, marking current value if present
+				const ids = models.map((m) => m.id);
+				if (currentValue && !ids.includes(currentValue)) {
+					drop.addOption(currentValue, `${currentValue} (current)`);
+				}
+				for (const model of models) {
+					drop.addOption(model.id, model.id);
+				}
+				drop.setValue(currentValue);
+			});
+		});
+	}
+
+	private async getModels(): Promise<MistralModel[]> {
+		if (this.cachedModels) return this.cachedModels;
+
+		const models = await listModels(this.plugin.settings.apiKey);
+		if (models.length > 0) {
+			this.cachedModels = models;
+		}
+		return models;
 	}
 }
