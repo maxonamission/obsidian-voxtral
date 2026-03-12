@@ -1227,12 +1227,24 @@ ${nextNum}. `);
   {
     label: "Colon",
     patterns: ["dubbele punt", "double punt", "dubbelepunt", "colon"],
+    punctuation: true,
     action: (editor) => {
       const cursor = editor.getCursor();
-      editor.replaceRange(": ", cursor);
+      if (cursor.ch > 0) {
+        const lineText = editor.getLine(cursor.line);
+        const before = lineText.substring(0, cursor.ch);
+        const cleaned = before.replace(/[,;.!?]+\s*$/, "");
+        if (cleaned.length < before.length) {
+          const from = { line: cursor.line, ch: cleaned.length };
+          editor.replaceRange("", from, cursor);
+          editor.setCursor(from);
+        }
+      }
+      const pos = editor.getCursor();
+      editor.replaceRange(": ", pos);
       editor.setCursor({
-        line: cursor.line,
-        ch: cursor.ch + 2
+        line: pos.line,
+        ch: pos.ch + 2
       });
     }
   }
@@ -1270,7 +1282,11 @@ function processSegment(editor, text) {
   const match = matchCommand(text);
   if (match) {
     if (match.textBefore) {
-      insertAtCursor(editor, match.textBefore);
+      let before = match.textBefore;
+      if (match.command.punctuation) {
+        before = before.replace(/[,;.!?]+\s*$/, "");
+      }
+      insertAtCursor(editor, before);
     }
     match.command.action(editor);
   } else {
