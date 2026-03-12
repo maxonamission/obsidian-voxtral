@@ -20,6 +20,14 @@ if %errorlevel% neq 0 (
 echo  [OK] Repository is up-to-date.
 echo.
 
+:: Stop running instance if it exists
+tasklist /FI "IMAGENAME eq VoxtralTranscribe.exe" 2>nul | find /I "VoxtralTranscribe.exe" >nul
+if %errorlevel% equ 0 (
+    echo  [~] VoxtralTranscribe.exe draait nog, wordt afgesloten...
+    taskkill /IM VoxtralTranscribe.exe /F >nul 2>&1
+    timeout /t 2 /nobreak >nul
+)
+
 :: Clean previous build artifacts
 if exist "build\VoxtralTranscribe" rmdir /s /q "build\VoxtralTranscribe"
 if exist "dist\VoxtralTranscribe" rmdir /s /q "dist\VoxtralTranscribe"
