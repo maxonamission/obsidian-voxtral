@@ -1222,6 +1222,19 @@ ${nextNum}. `);
     action: (editor) => {
       editor.undo();
     }
+  },
+  // Punctuation
+  {
+    label: "Colon",
+    patterns: ["dubbele punt", "double punt", "dubbelepunt", "colon"],
+    action: (editor) => {
+      const cursor = editor.getCursor();
+      editor.replaceRange(": ", cursor);
+      editor.setCursor({
+        line: cursor.line,
+        ch: cursor.ch + 2
+      });
+    }
   }
 ];
 function matchCommand(rawText) {

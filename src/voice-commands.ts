@@ -220,6 +220,20 @@ const COMMANDS: VoiceCommand[] = [
 			(editor as any).undo();
 		},
 	},
+	// Punctuation
+	{
+		label: "Colon",
+		patterns: ["dubbele punt", "double punt", "dubbelepunt", "colon"],
+		action: (editor) => {
+			// Insert colon directly against preceding text (no leading space)
+			const cursor = editor.getCursor();
+			editor.replaceRange(": ", cursor);
+			editor.setCursor({
+				line: cursor.line,
+				ch: cursor.ch + 2,
+			});
+		},
+	},
 ];
 
 export interface CommandMatch {
