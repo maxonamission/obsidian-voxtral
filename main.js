@@ -45,7 +45,7 @@ var DEFAULT_SETTINGS = {
 var DEFAULT_CORRECT_PROMPT = "You are a precise text corrector for dictated text. The input language may vary (commonly Dutch, but follow whatever language the text is in).\n\nCORRECT ONLY:\n- Capitalization (sentence starts, proper nouns)\n- Clearly misspelled or garbled words (from speech recognition)\n- Missing or wrong punctuation\n\nDO NOT CHANGE:\n- Sentence structure or word order\n- Style or tone\n- Markdown formatting (# headings, - lists, - [ ] to-do items)\n\nINLINE CORRECTION INSTRUCTIONS:\nThe text was dictated via speech recognition. The speaker sometimes gives inline instructions meant for you. Recognize these patterns:\n- Explicit markers: 'voor de correctie', 'voor de correctie achteraf', 'for the correction', 'correction note'\n- Spelled-out words: 'V-O-X-T-R-A-L' or 'with an x' \u2192 merge into the intended word\n- Self-corrections: 'no not X but Y', 'nee niet X maar Y', 'I mean Y', 'ik bedoel Y'\n- Meta-commentary: 'that's a Dutch word', 'with a capital letter', 'met een hoofdletter'\n\nWhen you encounter such instructions:\n1. Apply the instruction to the REST of the text\n2. Remove the instruction/meta-commentary itself from the output\n3. Keep all content text \u2014 NEVER remove normal sentences\n\nCRITICAL RULES:\n- Your output must be SHORTER than or equal to the input (after removing meta-instructions)\n- NEVER add your own text, commentary, explanations, or notes\n- NEVER add parenthesized text like '(text missing)' or '(no corrections needed)'\n- NEVER continue, elaborate, or expand on the content\n- NEVER invent or hallucinate text that wasn't in the input\n- If the input is short (even one word), just return it corrected\n- Your output must contain ONLY the corrected version of the input text, NOTHING else";
 
 // src/settings-tab.ts
-var import_obsidian = require("obsidian");
+var import_obsidian2 = require("obsidian");
 
 // src/audio-recorder.ts
 var AudioRecorder = class {
@@ -244,488 +244,40 @@ var AudioRecorder = class {
   }
 };
 
-// src/settings-tab.ts
-var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
-  constructor(app, plugin) {
-    super(app, plugin);
-    this.plugin = plugin;
-  }
-  display() {
-    const { containerEl } = this;
-    containerEl.empty();
-    containerEl.createEl("h2", { text: "Voxtral Transcribe" });
-    new import_obsidian.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai").addText(
-      (text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
-        this.plugin.settings.apiKey = value.trim();
-        await this.plugin.saveSettings();
-      })
-    ).then((setting) => {
-      const input = setting.controlEl.querySelector("input");
-      if (input) input.type = "password";
-    });
-    const micSetting = new import_obsidian.Setting(containerEl).setName("Microphone").setDesc("Select which microphone to use");
-    micSetting.addDropdown((drop) => {
-      drop.addOption("", "System default");
-      drop.setValue(this.plugin.settings.microphoneDeviceId);
-      AudioRecorder.enumerateMicrophones().then((mics) => {
-        for (const mic of mics) {
-          drop.addOption(mic.deviceId, mic.label);
-        }
-        drop.setValue(this.plugin.settings.microphoneDeviceId);
-      });
-      drop.onChange(async (value) => {
-        this.plugin.settings.microphoneDeviceId = value;
-        await this.plugin.saveSettings();
-      });
-    });
-    const modeDesc = import_obsidian.Platform.isMobile ? "Only batch mode is available on mobile. Use tap-to-send to submit chunks while you keep talking." : "Realtime: text appears as you speak. Batch: audio is transcribed after you stop recording.";
-    const modeSetting = new import_obsidian.Setting(containerEl).setName("Mode").setDesc(modeDesc);
-    if (import_obsidian.Platform.isMobile) {
-      modeSetting.addDropdown(
-        (drop) => drop.addOption("batch", "Batch (after recording)").setValue("batch").setDisabled(true)
-      );
-    } else {
-      modeSetting.addDropdown(
-        (drop) => drop.addOption("realtime", "Realtime (streaming)").addOption("batch", "Batch (after recording)").setValue(this.plugin.settings.mode).onChange(async (value) => {
-          this.plugin.settings.mode = value;
-          await this.plugin.saveSettings();
-        })
-      );
-    }
-    new import_obsidian.Setting(containerEl).setName("Enter = tap-to-send").setDesc(
-      "In batch mode, pressing Enter sends the current audio chunk when the mic is live. While typing, Enter inserts a normal newline."
-    ).addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.enterToSend).onChange(async (value) => {
-        this.plugin.settings.enterToSend = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("Typing cooldown").setDesc(
-      "How long after you stop typing before the mic unmutes again"
-    ).addDropdown((drop) => {
-      const options = {
-        "400": "400 ms (fast)",
-        "800": "800 ms (default)",
-        "1200": "1.2 sec",
-        "1500": "1.5 sec",
-        "2000": "2 sec",
-        "3000": "3 sec"
-      };
-      for (const [value, label] of Object.entries(options)) {
-        drop.addOption(value, label);
-      }
-      drop.setValue(
-        String(this.plugin.settings.typingCooldownMs)
-      ).onChange(async (value) => {
-        this.plugin.settings.typingCooldownMs = Number(value);
-        await this.plugin.saveSettings();
-      });
-    });
-    new import_obsidian.Setting(containerEl).setName("On focus loss").setDesc(
-      "What should happen when you switch apps while recording?"
-    ).addDropdown((drop) => {
-      drop.addOption("pause", "Pause immediately");
-      drop.addOption(
-        "pause-after-delay",
-        "Pause after delay"
-      );
-      drop.addOption("keep-recording", "Keep recording");
-      drop.setValue(this.plugin.settings.focusBehavior).onChange(
-        async (value) => {
-          this.plugin.settings.focusBehavior = value;
-          await this.plugin.saveSettings();
-          this.display();
-        }
-      );
-    });
-    if (this.plugin.settings.focusBehavior === "pause-after-delay") {
-      new import_obsidian.Setting(containerEl).setName("Pause delay (seconds)").setDesc(
-        "How long to wait in the background before pausing the recording"
-      ).addDropdown((drop) => {
-        const options = {
-          "10": "10 sec",
-          "30": "30 sec (default)",
-          "60": "1 minute",
-          "120": "2 minutes",
-          "300": "5 minutes"
-        };
-        for (const [value, label] of Object.entries(options)) {
-          drop.addOption(value, label);
-        }
-        drop.setValue(
-          String(this.plugin.settings.focusPauseDelaySec)
-        ).onChange(async (value) => {
-          this.plugin.settings.focusPauseDelaySec = Number(value);
-          await this.plugin.saveSettings();
-        });
-      });
-    }
-    new import_obsidian.Setting(containerEl).setName("Language").setDesc("Language for transcription (ISO 639-1 code, e.g. 'en', 'nl', 'de')").addText(
-      (text) => text.setPlaceholder("nl").setValue(this.plugin.settings.language).onChange(async (value) => {
-        this.plugin.settings.language = value.trim();
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("Auto-correct").setDesc(
-      "Automatically correct spelling, capitalization, and punctuation after recording"
-    ).addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.autoCorrect).onChange(async (value) => {
-        this.plugin.settings.autoCorrect = value;
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("Streaming delay").setDesc(
-      "Delay in ms for realtime mode. Lower = faster but less accurate."
-    ).addDropdown((drop) => {
-      const options = {
-        "240": "240 ms (fastest)",
-        "480": "480 ms (default)",
-        "640": "640 ms",
-        "800": "800 ms",
-        "1200": "1200 ms",
-        "1600": "1600 ms",
-        "2400": "2400 ms (most accurate)"
-      };
-      for (const [value, label] of Object.entries(options)) {
-        drop.addOption(value, label);
-      }
-      drop.setValue(
-        String(this.plugin.settings.streamingDelayMs)
-      ).onChange(async (value) => {
-        this.plugin.settings.streamingDelayMs = Number(value);
-        await this.plugin.saveSettings();
-      });
-    });
-    containerEl.createEl("h3", { text: "Support this project" });
-    new import_obsidian.Setting(containerEl).setName("Buy Me a Coffee").setDesc("Find this plugin useful? Consider a donation!").addButton(
-      (btn) => btn.setButtonText("Buy Me a Coffee").onClick(() => {
-        window.open("https://buymeacoffee.com/maxonamission");
-      })
-    );
-    containerEl.createEl("h3", { text: "Advanced" });
-    new import_obsidian.Setting(containerEl).setName("Realtime model").addText(
-      (text) => text.setValue(this.plugin.settings.realtimeModel).onChange(async (value) => {
-        this.plugin.settings.realtimeModel = value.trim();
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("Batch model").addText(
-      (text) => text.setValue(this.plugin.settings.batchModel).onChange(async (value) => {
-        this.plugin.settings.batchModel = value.trim();
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("Correction model").addText(
-      (text) => text.setValue(this.plugin.settings.correctModel).onChange(async (value) => {
-        this.plugin.settings.correctModel = value.trim();
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("Correction system prompt").setDesc("Leave empty to use the default prompt").addTextArea(
-      (text) => text.setPlaceholder("Default correction prompt will be used...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
-        this.plugin.settings.systemPrompt = value;
-        await this.plugin.saveSettings();
-      })
-    ).then((setting) => {
-      const textarea = setting.controlEl.querySelector("textarea");
-      if (textarea) {
-        textarea.rows = 6;
-        textarea.style.width = "100%";
-      }
-    });
-  }
-};
-
-// src/help-view.ts
-var import_obsidian2 = require("obsidian");
-
-// src/voice-commands.ts
-function normalizeCommand(text) {
-  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-/g, " ").replace(/[.,!?;:'"()[\]{}]/g, "").toLowerCase().trim();
-}
-function fixMishearings(text) {
-  return text.replace(/\bniveau\b/g, "nieuwe").replace(/\bnieuw alinea\b/g, "nieuwe alinea").replace(/\bnieuw regel\b/g, "nieuwe regel").replace(/\bnieuw punt\b/g, "nieuw punt");
-}
-function insertAtCursor(editor, text) {
-  const cursor = editor.getCursor();
-  if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
-    const charBefore = editor.getRange(
-      { line: cursor.line, ch: cursor.ch - 1 },
-      cursor
-    );
-    if (charBefore && /\S/.test(charBefore)) {
-      text = " " + text;
-    }
-  }
-  editor.replaceRange(text, cursor);
-  const lines = text.split("\n");
-  const lastLine = lines[lines.length - 1];
-  const newLine = cursor.line + lines.length - 1;
-  const newCh = lines.length === 1 ? cursor.ch + lastLine.length : lastLine.length;
-  editor.setCursor({ line: newLine, ch: newCh });
-}
-function deleteLastParagraph(editor) {
-  const cursor = editor.getCursor();
-  const fullText = editor.getValue();
-  const offset = editor.posToOffset(cursor);
-  const textBefore = fullText.substring(0, offset);
-  const lastPara = textBefore.lastIndexOf("\n\n");
-  if (lastPara >= 0) {
-    const from = editor.offsetToPos(lastPara);
-    editor.replaceRange("", from, cursor);
-  } else {
-    editor.replaceRange("", { line: 0, ch: 0 }, cursor);
-  }
-}
-function deleteLastSentence(editor) {
-  const cursor = editor.getCursor();
-  const fullText = editor.getValue();
-  const offset = editor.posToOffset(cursor);
-  const textBefore = fullText.substring(0, offset).trimEnd();
-  const sentenceEnd = Math.max(
-    textBefore.lastIndexOf(". "),
-    textBefore.lastIndexOf("! "),
-    textBefore.lastIndexOf("? "),
-    textBefore.lastIndexOf(".\n"),
-    textBefore.lastIndexOf("!\n"),
-    textBefore.lastIndexOf("?\n")
-  );
-  if (sentenceEnd >= 0) {
-    const from = editor.offsetToPos(sentenceEnd + 1);
-    editor.replaceRange("", from, cursor);
-  } else {
-    editor.replaceRange("", { line: cursor.line, ch: 0 }, cursor);
-  }
-}
-var COMMANDS = [
-  {
-    label: "New paragraph",
-    patterns: [
-      "nieuwe alinea",
-      "nieuw alinea",
-      "nieuwe paragraaf",
-      "nieuw paragraaf",
-      "nieuwe linie",
-      "new paragraph"
-    ],
-    action: (editor) => insertAtCursor(editor, "\n\n")
-  },
-  {
-    label: "New line",
-    patterns: ["nieuwe regel", "nieuwe lijn", "new line", "volgende regel"],
-    action: (editor) => insertAtCursor(editor, "\n")
-  },
-  {
-    label: "Heading 1",
-    patterns: ["kop een", "kop 1", "kop een", "heading one", "heading 1"],
-    action: (editor) => insertAtCursor(editor, "\n\n# ")
-  },
-  {
-    label: "Heading 2",
-    patterns: ["kop twee", "kop 2", "heading two", "heading 2"],
-    action: (editor) => insertAtCursor(editor, "\n\n## ")
-  },
-  {
-    label: "Heading 3",
-    patterns: ["kop drie", "kop 3", "heading three", "heading 3"],
-    action: (editor) => insertAtCursor(editor, "\n\n### ")
-  },
-  {
-    label: "Bullet point",
-    patterns: [
-      "nieuw punt",
-      "nieuw lijstpunt",
-      "nieuw lijstitem",
-      "lijst punt",
-      "nieuw bullet",
-      "nieuw item",
-      "nieuwe item",
-      "volgend item",
-      "new item",
-      "next item",
-      "bullet",
-      "bullet point",
-      "volgend punt"
-    ],
-    action: (editor) => insertAtCursor(editor, "\n- ")
-  },
-  {
-    label: "To-do item",
-    patterns: [
-      "nieuw to do item",
-      "nieuw todo item",
-      "nieuw todo",
-      "nieuwe to do",
-      "nieuwe todo",
-      "nieuw taak",
-      "nieuwe taak",
-      "new todo",
-      "new to do",
-      "to do item",
-      "todo item"
-    ],
-    action: (editor) => insertAtCursor(editor, "\n- [ ] ")
-  },
-  {
-    label: "Numbered item",
-    patterns: [
-      "nieuw genummerd item",
-      "nieuw genummerd punt",
-      "genummerd punt",
-      "genummerd item",
-      "volgend nummer",
-      "nummer punt",
-      "numbered item",
-      "new numbered item"
-    ],
-    action: (editor) => {
-      const cursor = editor.getCursor();
-      const lineText = editor.getLine(cursor.line);
-      const match = lineText.match(/^(\d+)\.\s/);
-      const nextNum = match ? parseInt(match[1], 10) + 1 : 1;
-      insertAtCursor(editor, `
-${nextNum}. `);
-    }
-  },
-  {
-    label: "Delete last paragraph",
-    patterns: [
-      "verwijder laatste alinea",
-      "verwijder laatste paragraaf",
-      "wis laatste alinea",
-      "delete last paragraph"
-    ],
-    action: (editor) => deleteLastParagraph(editor)
-  },
-  {
-    label: "Delete last line",
-    patterns: [
-      "verwijder laatste regel",
-      "verwijder laatste zin",
-      "wis laatste regel",
-      "wist laatste regel",
-      "delete last line"
-    ],
-    action: (editor) => deleteLastSentence(editor)
-  },
-  {
-    label: "Undo",
-    patterns: ["herstel", "ongedaan maken", "undo"],
-    action: (editor) => {
-      editor.undo();
-    }
-  }
-];
-function matchCommand(rawText) {
-  const normalized = fixMishearings(normalizeCommand(rawText));
-  for (const cmd of COMMANDS) {
-    for (const pattern of cmd.patterns) {
-      if (normalized.endsWith(pattern)) {
-        const patternWordCount = pattern.split(/\s+/).length;
-        const rawWords = rawText.trimEnd().split(/\s+/);
-        const textBefore = rawWords.slice(0, -patternWordCount).join(" ").trimEnd();
-        return { command: cmd, textBefore };
-      }
-    }
-  }
-  return null;
-}
-function processText(editor, text) {
-  const segments = text.match(/[^.!?]+[.!?]+\s*/g);
-  if (!segments) {
-    processSegment(editor, text);
-    return;
-  }
-  const joined = segments.join("");
-  const remainder = text.slice(joined.length);
-  for (const segment of segments) {
-    processSegment(editor, segment);
-  }
-  if (remainder.trim()) {
-    processSegment(editor, remainder);
-  }
-}
-function processSegment(editor, text) {
-  const match = matchCommand(text);
-  if (match) {
-    if (match.textBefore) {
-      insertAtCursor(editor, match.textBefore);
-    }
-    match.command.action(editor);
-  } else {
-    insertAtCursor(editor, text);
-  }
-}
-function getCommandList() {
-  return COMMANDS.map((c) => ({
-    label: c.label,
-    patterns: c.patterns
-  }));
-}
-
-// src/help-view.ts
-var VIEW_TYPE_VOXTRAL_HELP = "voxtral-help";
-var VoxtralHelpView = class extends import_obsidian2.ItemView {
-  constructor(leaf) {
-    super(leaf);
-  }
-  getViewType() {
-    return VIEW_TYPE_VOXTRAL_HELP;
-  }
-  getDisplayText() {
-    return "Voice Commands";
-  }
-  getIcon() {
-    return "mic";
-  }
-  async onOpen() {
-    const container = this.contentEl;
-    container.empty();
-    container.addClass("voxtral-help-view");
-    container.createEl("h3", { text: "Voxtral Voice Commands" });
-    const commands = getCommandList();
-    const table = container.createEl("table", {
-      cls: "voxtral-help-table"
-    });
-    const thead = table.createEl("thead");
-    const headerRow = thead.createEl("tr");
-    headerRow.createEl("th", { text: "Command" });
-    headerRow.createEl("th", { text: "Say..." });
-    const tbody = table.createEl("tbody");
-    for (const cmd of commands) {
-      const row = tbody.createEl("tr");
-      row.createEl("td", {
-        text: cmd.label,
-        cls: "voxtral-help-label"
-      });
-      row.createEl("td", {
-        text: cmd.patterns.slice(0, 2).map((p) => `"${p}"`).join(" or "),
-        cls: "voxtral-help-patterns"
-      });
-    }
-    container.createEl("h4", { text: "Tips" });
-    const tips = container.createEl("ul", { cls: "voxtral-help-tips" });
-    tips.createEl("li", {
-      text: "Commands are recognized at the end of a sentence."
-    });
-    tips.createEl("li", {
-      text: 'Say "for the correction: ..." to give inline instructions to the corrector.'
-    });
-    tips.createEl("li", {
-      text: "Spelled-out words (V-O-X-T-R-A-L) are merged automatically."
-    });
-    tips.createEl("li", {
-      text: 'Self-corrections ("no not X but Y") are recognized.'
-    });
-  }
-  async onClose() {
-    this.contentEl.empty();
-  }
-};
-
 // src/mistral-api.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian = require("obsidian");
 var BASE_URL = "https://api.mistral.ai";
+async function listModels(apiKey) {
+  if (!apiKey) return [];
+  try {
+    const response = await (0, import_obsidian.requestUrl)({
+      url: `${BASE_URL}/v1/models`,
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`
+      }
+    });
+    if (response.status !== 200) {
+      console.warn(
+        `Voxtral: Failed to list models (${response.status})`
+      );
+      return [];
+    }
+    const data = response.json;
+    const models = (data.data || []).map(
+      (m) => ({
+        id: m.id,
+        type: m.type,
+        capabilities: m.capabilities
+      })
+    );
+    models.sort((a, b) => a.id.localeCompare(b.id));
+    return models;
+  } catch (e) {
+    console.warn("Voxtral: Could not fetch models", e);
+    return [];
+  }
+}
 function isLikelyHallucination(text, audioDurationSec) {
   if (!text.trim()) return false;
   const words = text.trim().split(/\s+/).length;
@@ -767,7 +319,7 @@ async function transcribeBatch(audioBlob, settings, diarize = false) {
   var _a;
   const ext = audioBlob.type.includes("mp4") ? "m4a" : audioBlob.type.includes("ogg") ? "ogg" : "webm";
   const mimeType = audioBlob.type || `audio/${ext}`;
-  if (import_obsidian3.Platform.isMobile) {
+  if (import_obsidian.Platform.isMobile) {
     const boundary = `----VoxtralBoundary${Date.now()}`;
     const arrayBuf = await audioBlob.arrayBuffer();
     const fileBytes = new Uint8Array(arrayBuf);
@@ -809,7 +361,7 @@ true\r
     body.set(headerBuf, 0);
     body.set(fileBytes, headerBuf.length);
     body.set(tailBuf, headerBuf.length + fileBytes.length);
-    const response2 = await (0, import_obsidian3.requestUrl)({
+    const response2 = await (0, import_obsidian.requestUrl)({
       url: `${BASE_URL}/v1/audio/transcriptions`,
       method: "POST",
       headers: {
@@ -859,7 +411,7 @@ async function correctText(text, settings) {
     ],
     temperature: 0.1
   };
-  const response = await (0, import_obsidian3.requestUrl)({
+  const response = await (0, import_obsidian.requestUrl)({
     url: `${BASE_URL}/v1/chat/completions`,
     method: "POST",
     headers: {
@@ -1234,6 +786,550 @@ function arrayBufferToBase64(buffer) {
   }
   return btoa(binary);
 }
+
+// src/settings-tab.ts
+var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.cachedModels = null;
+    this.plugin = plugin;
+  }
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl("h2", { text: "Voxtral Transcribe" });
+    new import_obsidian2.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai").addText(
+      (text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
+        this.plugin.settings.apiKey = value.trim();
+        await this.plugin.saveSettings();
+      })
+    ).then((setting) => {
+      const input = setting.controlEl.querySelector("input");
+      if (input) input.type = "password";
+    });
+    const micSetting = new import_obsidian2.Setting(containerEl).setName("Microphone").setDesc("Select which microphone to use");
+    micSetting.addDropdown((drop) => {
+      drop.addOption("", "System default");
+      drop.setValue(this.plugin.settings.microphoneDeviceId);
+      AudioRecorder.enumerateMicrophones().then((mics) => {
+        for (const mic of mics) {
+          drop.addOption(mic.deviceId, mic.label);
+        }
+        drop.setValue(this.plugin.settings.microphoneDeviceId);
+      });
+      drop.onChange(async (value) => {
+        this.plugin.settings.microphoneDeviceId = value;
+        await this.plugin.saveSettings();
+      });
+    });
+    const modeDesc = import_obsidian2.Platform.isMobile ? "Only batch mode is available on mobile. Use tap-to-send to submit chunks while you keep talking." : "Realtime: text appears as you speak. Batch: audio is transcribed after you stop recording.";
+    const modeSetting = new import_obsidian2.Setting(containerEl).setName("Mode").setDesc(modeDesc);
+    if (import_obsidian2.Platform.isMobile) {
+      modeSetting.addDropdown(
+        (drop) => drop.addOption("batch", "Batch (after recording)").setValue("batch").setDisabled(true)
+      );
+    } else {
+      modeSetting.addDropdown(
+        (drop) => drop.addOption("realtime", "Realtime (streaming)").addOption("batch", "Batch (after recording)").setValue(this.plugin.settings.mode).onChange(async (value) => {
+          this.plugin.settings.mode = value;
+          await this.plugin.saveSettings();
+        })
+      );
+    }
+    new import_obsidian2.Setting(containerEl).setName("Enter = tap-to-send").setDesc(
+      "In batch mode, pressing Enter sends the current audio chunk when the mic is live. While typing, Enter inserts a normal newline."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.enterToSend).onChange(async (value) => {
+        this.plugin.settings.enterToSend = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Typing cooldown").setDesc(
+      "How long after you stop typing before the mic unmutes again"
+    ).addDropdown((drop) => {
+      const options = {
+        "400": "400 ms (fast)",
+        "800": "800 ms (default)",
+        "1200": "1.2 sec",
+        "1500": "1.5 sec",
+        "2000": "2 sec",
+        "3000": "3 sec"
+      };
+      for (const [value, label] of Object.entries(options)) {
+        drop.addOption(value, label);
+      }
+      drop.setValue(
+        String(this.plugin.settings.typingCooldownMs)
+      ).onChange(async (value) => {
+        this.plugin.settings.typingCooldownMs = Number(value);
+        await this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian2.Setting(containerEl).setName("On focus loss").setDesc(
+      "What should happen when you switch apps while recording?"
+    ).addDropdown((drop) => {
+      drop.addOption("pause", "Pause immediately");
+      drop.addOption(
+        "pause-after-delay",
+        "Pause after delay"
+      );
+      drop.addOption("keep-recording", "Keep recording");
+      drop.setValue(this.plugin.settings.focusBehavior).onChange(
+        async (value) => {
+          this.plugin.settings.focusBehavior = value;
+          await this.plugin.saveSettings();
+          this.display();
+        }
+      );
+    });
+    if (this.plugin.settings.focusBehavior === "pause-after-delay") {
+      new import_obsidian2.Setting(containerEl).setName("Pause delay (seconds)").setDesc(
+        "How long to wait in the background before pausing the recording"
+      ).addDropdown((drop) => {
+        const options = {
+          "10": "10 sec",
+          "30": "30 sec (default)",
+          "60": "1 minute",
+          "120": "2 minutes",
+          "300": "5 minutes"
+        };
+        for (const [value, label] of Object.entries(options)) {
+          drop.addOption(value, label);
+        }
+        drop.setValue(
+          String(this.plugin.settings.focusPauseDelaySec)
+        ).onChange(async (value) => {
+          this.plugin.settings.focusPauseDelaySec = Number(value);
+          await this.plugin.saveSettings();
+        });
+      });
+    }
+    new import_obsidian2.Setting(containerEl).setName("Language").setDesc("Language for transcription (ISO 639-1 code, e.g. 'en', 'nl', 'de')").addText(
+      (text) => text.setPlaceholder("nl").setValue(this.plugin.settings.language).onChange(async (value) => {
+        this.plugin.settings.language = value.trim();
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Auto-correct").setDesc(
+      "Automatically correct spelling, capitalization, and punctuation after recording"
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.autoCorrect).onChange(async (value) => {
+        this.plugin.settings.autoCorrect = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Streaming delay").setDesc(
+      "Delay in ms for realtime mode. Lower = faster but less accurate."
+    ).addDropdown((drop) => {
+      const options = {
+        "240": "240 ms (fastest)",
+        "480": "480 ms (default)",
+        "640": "640 ms",
+        "800": "800 ms",
+        "1200": "1200 ms",
+        "1600": "1600 ms",
+        "2400": "2400 ms (most accurate)"
+      };
+      for (const [value, label] of Object.entries(options)) {
+        drop.addOption(value, label);
+      }
+      drop.setValue(
+        String(this.plugin.settings.streamingDelayMs)
+      ).onChange(async (value) => {
+        this.plugin.settings.streamingDelayMs = Number(value);
+        await this.plugin.saveSettings();
+      });
+    });
+    containerEl.createEl("h3", { text: "Keyboard shortcuts" });
+    new import_obsidian2.Setting(containerEl).setName("Customize hotkeys").setDesc(
+      `You can assign keyboard shortcuts to all Voxtral commands (start/stop recording, correct selection, correct note, etc.) via Obsidian's Settings \u2192 Hotkeys. Search for "Voxtral".`
+    ).addButton(
+      (btn) => btn.setButtonText("Open Hotkeys").onClick(() => {
+        var _a, _b, _c, _d;
+        (_b = (_a = this.app.setting) == null ? void 0 : _a.openTabById) == null ? void 0 : _b.call(_a, "hotkeys");
+        const tab = (_c = this.app.setting) == null ? void 0 : _c.activeTab;
+        if (tab == null ? void 0 : tab.searchComponent) {
+          tab.searchComponent.setValue("Voxtral");
+          (_d = tab.updateHotkeyVisibility) == null ? void 0 : _d.call(tab);
+        }
+      })
+    );
+    containerEl.createEl("h3", { text: "Support this project" });
+    new import_obsidian2.Setting(containerEl).setName("Buy Me a Coffee").setDesc("Find this plugin useful? Consider a donation!").addButton(
+      (btn) => btn.setButtonText("Buy Me a Coffee").onClick(() => {
+        window.open("https://buymeacoffee.com/maxonamission");
+      })
+    );
+    containerEl.createEl("h3", { text: "Advanced" });
+    this.addModelDropdown(
+      containerEl,
+      "Realtime model",
+      "Model for real-time streaming transcription",
+      this.plugin.settings.realtimeModel,
+      async (value) => {
+        this.plugin.settings.realtimeModel = value.trim();
+        await this.plugin.saveSettings();
+      }
+    );
+    this.addModelDropdown(
+      containerEl,
+      "Batch model",
+      "Model for batch transcription",
+      this.plugin.settings.batchModel,
+      async (value) => {
+        this.plugin.settings.batchModel = value.trim();
+        await this.plugin.saveSettings();
+      }
+    );
+    this.addModelDropdown(
+      containerEl,
+      "Correction model",
+      "Model for text correction",
+      this.plugin.settings.correctModel,
+      async (value) => {
+        this.plugin.settings.correctModel = value.trim();
+        await this.plugin.saveSettings();
+      }
+    );
+    new import_obsidian2.Setting(containerEl).setName("Correction system prompt").setDesc("Leave empty to use the default prompt").addTextArea(
+      (text) => text.setPlaceholder("Default correction prompt will be used...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
+        this.plugin.settings.systemPrompt = value;
+        await this.plugin.saveSettings();
+      })
+    ).then((setting) => {
+      const textarea = setting.controlEl.querySelector("textarea");
+      if (textarea) {
+        textarea.rows = 6;
+        textarea.style.width = "100%";
+      }
+    });
+  }
+  /**
+   * Add a model dropdown that fetches options from the Mistral API.
+   * Falls back to a text field if no API key is set or the fetch fails.
+   * The current value is always shown, even if not in the fetched list.
+   */
+  addModelDropdown(containerEl, name, desc, currentValue, onChange) {
+    const setting = new import_obsidian2.Setting(containerEl).setName(name).setDesc(desc);
+    setting.addDropdown((drop) => {
+      if (currentValue) {
+        drop.addOption(currentValue, currentValue);
+      }
+      drop.setValue(currentValue);
+      drop.onChange(async (value) => {
+        await onChange(value);
+      });
+      this.getModels().then((models) => {
+        if (models.length === 0) return;
+        const selectEl = drop.selectEl;
+        selectEl.empty();
+        const ids = models.map((m) => m.id);
+        if (currentValue && !ids.includes(currentValue)) {
+          drop.addOption(currentValue, `${currentValue} (current)`);
+        }
+        for (const model of models) {
+          drop.addOption(model.id, model.id);
+        }
+        drop.setValue(currentValue);
+      });
+    });
+  }
+  async getModels() {
+    if (this.cachedModels) return this.cachedModels;
+    const models = await listModels(this.plugin.settings.apiKey);
+    if (models.length > 0) {
+      this.cachedModels = models;
+    }
+    return models;
+  }
+};
+
+// src/help-view.ts
+var import_obsidian3 = require("obsidian");
+
+// src/voice-commands.ts
+function normalizeCommand(text) {
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-/g, " ").replace(/[.,!?;:'"()[\]{}]/g, "").toLowerCase().trim();
+}
+function fixMishearings(text) {
+  return text.replace(/\bniveau\b/g, "nieuwe").replace(/\bnieuw alinea\b/g, "nieuwe alinea").replace(/\bnieuw regel\b/g, "nieuwe regel").replace(/\bnieuw punt\b/g, "nieuw punt");
+}
+function insertAtCursor(editor, text) {
+  const cursor = editor.getCursor();
+  if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
+    const charBefore = editor.getRange(
+      { line: cursor.line, ch: cursor.ch - 1 },
+      cursor
+    );
+    if (charBefore && /\S/.test(charBefore)) {
+      text = " " + text;
+    }
+  }
+  editor.replaceRange(text, cursor);
+  const lines = text.split("\n");
+  const lastLine = lines[lines.length - 1];
+  const newLine = cursor.line + lines.length - 1;
+  const newCh = lines.length === 1 ? cursor.ch + lastLine.length : lastLine.length;
+  editor.setCursor({ line: newLine, ch: newCh });
+}
+function deleteLastParagraph(editor) {
+  const cursor = editor.getCursor();
+  const fullText = editor.getValue();
+  const offset = editor.posToOffset(cursor);
+  const textBefore = fullText.substring(0, offset);
+  const lastPara = textBefore.lastIndexOf("\n\n");
+  if (lastPara >= 0) {
+    const from = editor.offsetToPos(lastPara);
+    editor.replaceRange("", from, cursor);
+  } else {
+    editor.replaceRange("", { line: 0, ch: 0 }, cursor);
+  }
+}
+function deleteLastSentence(editor) {
+  const cursor = editor.getCursor();
+  const fullText = editor.getValue();
+  const offset = editor.posToOffset(cursor);
+  const textBefore = fullText.substring(0, offset).trimEnd();
+  const sentenceEnd = Math.max(
+    textBefore.lastIndexOf(". "),
+    textBefore.lastIndexOf("! "),
+    textBefore.lastIndexOf("? "),
+    textBefore.lastIndexOf(".\n"),
+    textBefore.lastIndexOf("!\n"),
+    textBefore.lastIndexOf("?\n")
+  );
+  if (sentenceEnd >= 0) {
+    const from = editor.offsetToPos(sentenceEnd + 1);
+    editor.replaceRange("", from, cursor);
+  } else {
+    editor.replaceRange("", { line: cursor.line, ch: 0 }, cursor);
+  }
+}
+var COMMANDS = [
+  {
+    label: "New paragraph",
+    patterns: [
+      "nieuwe alinea",
+      "nieuw alinea",
+      "nieuwe paragraaf",
+      "nieuw paragraaf",
+      "nieuwe linie",
+      "new paragraph"
+    ],
+    action: (editor) => insertAtCursor(editor, "\n\n")
+  },
+  {
+    label: "New line",
+    patterns: ["nieuwe regel", "nieuwe lijn", "new line", "volgende regel"],
+    action: (editor) => insertAtCursor(editor, "\n")
+  },
+  {
+    label: "Heading 1",
+    patterns: ["kop een", "kop 1", "kop een", "heading one", "heading 1"],
+    action: (editor) => insertAtCursor(editor, "\n\n# ")
+  },
+  {
+    label: "Heading 2",
+    patterns: ["kop twee", "kop 2", "heading two", "heading 2"],
+    action: (editor) => insertAtCursor(editor, "\n\n## ")
+  },
+  {
+    label: "Heading 3",
+    patterns: ["kop drie", "kop 3", "heading three", "heading 3"],
+    action: (editor) => insertAtCursor(editor, "\n\n### ")
+  },
+  {
+    label: "Bullet point",
+    patterns: [
+      "nieuw punt",
+      "nieuw lijstpunt",
+      "nieuw lijstitem",
+      "lijst punt",
+      "nieuw bullet",
+      "nieuw item",
+      "nieuwe item",
+      "volgend item",
+      "new item",
+      "next item",
+      "bullet",
+      "bullet point",
+      "volgend punt"
+    ],
+    action: (editor) => insertAtCursor(editor, "\n- ")
+  },
+  {
+    label: "To-do item",
+    patterns: [
+      "nieuw to do item",
+      "nieuw todo item",
+      "nieuw todo",
+      "nieuwe to do",
+      "nieuwe todo",
+      "nieuw taak",
+      "nieuwe taak",
+      "new todo",
+      "new to do",
+      "to do item",
+      "todo item"
+    ],
+    action: (editor) => insertAtCursor(editor, "\n- [ ] ")
+  },
+  {
+    label: "Numbered item",
+    patterns: [
+      "nieuw genummerd item",
+      "nieuw genummerd punt",
+      "genummerd punt",
+      "genummerd item",
+      "volgend nummer",
+      "nummer punt",
+      "numbered item",
+      "new numbered item"
+    ],
+    action: (editor) => {
+      const cursor = editor.getCursor();
+      const lineText = editor.getLine(cursor.line);
+      const match = lineText.match(/^(\d+)\.\s/);
+      const nextNum = match ? parseInt(match[1], 10) + 1 : 1;
+      insertAtCursor(editor, `
+${nextNum}. `);
+    }
+  },
+  {
+    label: "Delete last paragraph",
+    patterns: [
+      "verwijder laatste alinea",
+      "verwijder laatste paragraaf",
+      "wis laatste alinea",
+      "delete last paragraph"
+    ],
+    action: (editor) => deleteLastParagraph(editor)
+  },
+  {
+    label: "Delete last line",
+    patterns: [
+      "verwijder laatste regel",
+      "verwijder laatste zin",
+      "wis laatste regel",
+      "wist laatste regel",
+      "delete last line"
+    ],
+    action: (editor) => deleteLastSentence(editor)
+  },
+  {
+    label: "Undo",
+    patterns: ["herstel", "ongedaan maken", "undo"],
+    action: (editor) => {
+      editor.undo();
+    }
+  }
+];
+function matchCommand(rawText) {
+  const normalized = fixMishearings(normalizeCommand(rawText));
+  for (const cmd of COMMANDS) {
+    for (const pattern of cmd.patterns) {
+      if (normalized.endsWith(pattern)) {
+        const patternWordCount = pattern.split(/\s+/).length;
+        const rawWords = rawText.trimEnd().split(/\s+/);
+        const textBefore = rawWords.slice(0, -patternWordCount).join(" ").trimEnd();
+        return { command: cmd, textBefore };
+      }
+    }
+  }
+  return null;
+}
+function processText(editor, text) {
+  const segments = text.match(/[^.!?]+[.!?]+\s*/g);
+  if (!segments) {
+    processSegment(editor, text);
+    return;
+  }
+  const joined = segments.join("");
+  const remainder = text.slice(joined.length);
+  for (const segment of segments) {
+    processSegment(editor, segment);
+  }
+  if (remainder.trim()) {
+    processSegment(editor, remainder);
+  }
+}
+function processSegment(editor, text) {
+  const match = matchCommand(text);
+  if (match) {
+    if (match.textBefore) {
+      insertAtCursor(editor, match.textBefore);
+    }
+    match.command.action(editor);
+  } else {
+    insertAtCursor(editor, text);
+  }
+}
+function getCommandList() {
+  return COMMANDS.map((c) => ({
+    label: c.label,
+    patterns: c.patterns
+  }));
+}
+
+// src/help-view.ts
+var VIEW_TYPE_VOXTRAL_HELP = "voxtral-help";
+var VoxtralHelpView = class extends import_obsidian3.ItemView {
+  constructor(leaf) {
+    super(leaf);
+  }
+  getViewType() {
+    return VIEW_TYPE_VOXTRAL_HELP;
+  }
+  getDisplayText() {
+    return "Voice Commands";
+  }
+  getIcon() {
+    return "mic";
+  }
+  async onOpen() {
+    const container = this.contentEl;
+    container.empty();
+    container.addClass("voxtral-help-view");
+    container.createEl("h3", { text: "Voxtral Voice Commands" });
+    const commands = getCommandList();
+    const table = container.createEl("table", {
+      cls: "voxtral-help-table"
+    });
+    const thead = table.createEl("thead");
+    const headerRow = thead.createEl("tr");
+    headerRow.createEl("th", { text: "Command" });
+    headerRow.createEl("th", { text: "Say..." });
+    const tbody = table.createEl("tbody");
+    for (const cmd of commands) {
+      const row = tbody.createEl("tr");
+      row.createEl("td", {
+        text: cmd.label,
+        cls: "voxtral-help-label"
+      });
+      row.createEl("td", {
+        text: cmd.patterns.slice(0, 2).map((p) => `"${p}"`).join(" or "),
+        cls: "voxtral-help-patterns"
+      });
+    }
+    container.createEl("h4", { text: "Tips" });
+    const tips = container.createEl("ul", { cls: "voxtral-help-tips" });
+    tips.createEl("li", {
+      text: "Commands are recognized at the end of a sentence."
+    });
+    tips.createEl("li", {
+      text: 'Say "for the correction: ..." to give inline instructions to the corrector.'
+    });
+    tips.createEl("li", {
+      text: "Spelled-out words (V-O-X-T-R-A-L) are merged automatically."
+    });
+    tips.createEl("li", {
+      text: 'Self-corrections ("no not X but Y") are recognized.'
+    });
+  }
+  async onClose() {
+    this.contentEl.empty();
+  }
+};
 
 // src/main.ts
 var LOG_BUFFER_SIZE = 500;
