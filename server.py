@@ -351,9 +351,11 @@ async def ws_transcribe(websocket: WebSocket):
 # ── Shutdown endpoint (for windowed/PyInstaller builds) ──
 
 @app.post("/api/shutdown")
-@limiter(max_calls=2, period=60)
 async def shutdown():
-    """Gracefully shut down the server. Only works on localhost."""
+    """Gracefully shut down the server."""
+    if not rate_limiter.is_allowed("shutdown", max_requests=2, window_seconds=60):
+        return JSONResponse({"error": "Te veel verzoeken"}, status_code=429)
+
     import signal
     import threading
 
