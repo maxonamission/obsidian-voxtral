@@ -10,6 +10,8 @@ interface VoiceCommand {
 	patterns: string[];
 	action: (editor: Editor) => void;
 	label: string;
+	/** If true, trailing punctuation is stripped from preceding text before inserting */
+	punctuation?: boolean;
 }
 
 // Normalize text for command matching: remove diacritics, hyphens, punctuation
@@ -224,13 +226,26 @@ const COMMANDS: VoiceCommand[] = [
 	{
 		label: "Colon",
 		patterns: ["dubbele punt", "double punt", "dubbelepunt", "colon"],
+		punctuation: true,
 		action: (editor) => {
 			// Insert colon directly against preceding text (no leading space)
+			// First strip any trailing punctuation before the cursor
 			const cursor = editor.getCursor();
-			editor.replaceRange(": ", cursor);
+			if (cursor.ch > 0) {
+				const lineText = editor.getLine(cursor.line);
+				const before = lineText.substring(0, cursor.ch);
+				const cleaned = before.replace(/[,;.!?]+\s*$/, "");
+				if (cleaned.length < before.length) {
+					const from = { line: cursor.line, ch: cleaned.length };
+					editor.replaceRange("", from, cursor);
+					editor.setCursor(from);
+				}
+			}
+			const pos = editor.getCursor();
+			editor.replaceRange(": ", pos);
 			editor.setCursor({
-				line: cursor.line,
-				ch: cursor.ch + 2,
+				line: pos.line,
+				ch: pos.ch + 2,
 			});
 		},
 	},
@@ -306,7 +321,12 @@ function processSegment(editor: Editor, text: string): void {
 	const match = matchCommand(text);
 	if (match) {
 		if (match.textBefore) {
-			insertAtCursor(editor, match.textBefore);
+			let before = match.textBefore;
+			// Strip trailing punctuation to avoid ",:" or ".:" combos
+			if (match.command.punctuation) {
+				before = before.replace(/[,;.!?]+\s*$/, "");
+			}
+			insertAtCursor(editor, before);
 		}
 		match.command.action(editor);
 	} else {
