@@ -3,3 +3,5 @@ uvicorn[standard]
 mistralai[realtime]
 python-dotenv
 python-multipart
+pystray
+Pillow

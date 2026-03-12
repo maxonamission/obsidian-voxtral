@@ -371,6 +371,7 @@ async def shutdown():
 app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")
 
 if __name__ == "__main__":
+    import signal
     import threading
     import webbrowser
 
@@ -387,20 +388,85 @@ if __name__ == "__main__":
     # In windowed mode (no console), redirect crash logs to a file
     _LOG_FILE = os.path.join(_SCRIPT_DIR, "error.log")
 
-    try:
-        port = int(os.environ.get("PORT", 8000))
-        url = f"http://127.0.0.1:{port}"
+    port = int(os.environ.get("PORT", 8000))
+    url = f"http://127.0.0.1:{port}"
 
-        # Open browser after a short delay (gives uvicorn time to start)
-        # Skip if VOXTRAL_NO_BROWSER is set (e.g. launcher .bat handles it)
+    # ── System tray icon ──
+
+    def _create_tray_icon():
+        """Create a system tray icon with Open/Quit menu.
+
+        Falls back gracefully if pystray is not installed (e.g. dev mode
+        without Pillow/pystray) — the server still runs, just without tray.
+        """
+        try:
+            import pystray
+            from PIL import Image, ImageDraw
+        except ImportError:
+            logger.info("pystray/Pillow not installed, skipping tray icon")
+            return None
+
+        # Draw a simple microphone-style icon (green circle)
+        size = 64
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([8, 8, size - 8, size - 8], fill=(76, 175, 80))
+        # White mic shape (simplified)
+        cx, cy = size // 2, size // 2
+        draw.rounded_rectangle(
+            [cx - 6, cy - 16, cx + 6, cy + 4],
+            radius=6,
+            fill="white",
+        )
+        draw.rectangle([cx - 1, cy + 4, cx + 1, cy + 12], fill="white")
+        draw.rectangle([cx - 8, cy + 12, cx + 8, cy + 14], fill="white")
+
+        def on_open(_icon, _item):
+            webbrowser.open(url)
+
+        def on_quit(_icon, _item):
+            logger.info("Quit requested from system tray")
+            _icon.stop()
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        icon = pystray.Icon(
+            "voxtral",
+            img,
+            "Voxtral Transcribe",
+            menu=pystray.Menu(
+                pystray.MenuItem("Openen in browser", on_open, default=True),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Afsluiten", on_quit),
+            ),
+        )
+        return icon
+
+    try:
+        # Start uvicorn in a daemon thread
+        server_config = uvicorn.Config(
+            app, host="127.0.0.1", port=port, log_level="info"
+        )
+        server = uvicorn.Server(server_config)
+
+        server_thread = threading.Thread(target=server.run, daemon=True)
+        server_thread.start()
+
+        # Open browser after a short delay
         if os.environ.get("VOXTRAL_NO_BROWSER") != "1":
             threading.Timer(1.5, webbrowser.open, args=[url]).start()
             logger.info(f"Opening browser at {url}")
 
-        uvicorn.run(app, host="127.0.0.1", port=port)
+        # Run system tray on the main thread (required by Windows)
+        tray_icon = _create_tray_icon()
+        if tray_icon:
+            logger.info("System tray icon active — right-click to quit")
+            tray_icon.run()
+        else:
+            # No tray available — just wait for the server thread
+            server_thread.join()
+
     except Exception:
         traceback.print_exc()
-        # Also write to error.log for windowed mode (no console visible)
         try:
             with open(_LOG_FILE, "a", encoding="utf-8") as f:
                 f.write(f"\n{'='*60}\n")
@@ -408,7 +474,6 @@ if __name__ == "__main__":
                 traceback.print_exc(file=f)
         except Exception:
             pass
-        # If console is available, pause so user can read the error
         try:
             input("\nDruk op Enter om te sluiten...")
         except (EOFError, RuntimeError):
