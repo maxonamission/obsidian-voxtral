@@ -3,6 +3,56 @@ import { VoxtralSettings, DEFAULT_CORRECT_PROMPT } from "./types";
 
 const BASE_URL = "https://api.mistral.ai";
 
+// ── Model listing ──
+
+export interface MistralModel {
+	id: string;
+	type?: string;
+	capabilities?: Record<string, boolean>;
+}
+
+/**
+ * Fetch available models from the Mistral API.
+ * Returns model IDs sorted alphabetically.
+ */
+export async function listModels(
+	apiKey: string
+): Promise<MistralModel[]> {
+	if (!apiKey) return [];
+
+	try {
+		const response = await requestUrl({
+			url: `${BASE_URL}/v1/models`,
+			method: "GET",
+			headers: {
+				Authorization: `Bearer ${apiKey}`,
+			},
+		});
+
+		if (response.status !== 200) {
+			console.warn(
+				`Voxtral: Failed to list models (${response.status})`
+			);
+			return [];
+		}
+
+		const data = response.json;
+		const models: MistralModel[] = (data.data || []).map(
+			(m: { id: string; type?: string; capabilities?: Record<string, boolean> }) => ({
+				id: m.id,
+				type: m.type,
+				capabilities: m.capabilities,
+			})
+		);
+
+		models.sort((a, b) => a.id.localeCompare(b.id));
+		return models;
+	} catch (e) {
+		console.warn("Voxtral: Could not fetch models", e);
+		return [];
+	}
+}
+
 // ── Hallucination detection ──
 
 /**
