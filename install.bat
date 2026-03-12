@@ -4,10 +4,21 @@ title Voxtral Obsidian Plugin — Install
 setlocal
 
 :: ── Configuration ──────────────────────────────────────────────
-:: Change this path to your Obsidian vault:
-set VAULT=C:\Users\MaxKloosterman\Documents\Obisidan\Persoonlijk_EU
+:: Pass your vault path as first argument, or set it here:
+if "%~1"=="" (
+    set VAULT=
+) else (
+    set VAULT=%~1
+)
+if "%VAULT%"=="" (
+    echo  [!] Geef je Obsidian vault pad op als argument:
+    echo      install.bat "C:\pad\naar\je\vault"
+    echo.
+    pause
+    exit /b 1
+)
 set PLUGIN_DIR=%VAULT%\.obsidian\plugins\voxtral-transcribe
-set BRANCH=claude/obsidian-plugin-creation-e2x79
+set BRANCH=main
 
 echo.
 echo  ╔══════════════════════════════════════════╗
