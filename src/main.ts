@@ -22,6 +22,7 @@ import {
 	normalizeCommand,
 	processText,
 	matchCommand,
+	setLanguage,
 } from "./voice-commands";
 
 // ── In-memory log buffer (ring buffer, last 500 entries) ──
@@ -193,10 +194,23 @@ export default class VoxtralPlugin extends Plugin {
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
+		setLanguage(this.settings.language);
 	}
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
+		setLanguage(this.settings.language);
+		this.refreshHelpView();
+	}
+
+	/** Re-render the help panel with the current language. */
+	private refreshHelpView(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_VOXTRAL_HELP)) {
+			const view = leaf.view;
+			if (view instanceof VoxtralHelpView) {
+				view.setLanguage(this.settings.language);
+			}
+		}
 	}
 
 	// ── Send button (shown during batch recording) ──

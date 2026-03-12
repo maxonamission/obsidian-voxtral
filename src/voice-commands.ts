@@ -1,15 +1,28 @@
 import { Editor } from "obsidian";
+import {
+	CommandId,
+	getPatternsForCommand,
+	getLabel,
+	getMishearings,
+} from "./lang";
 
 /**
- * Voice command processing — ported from the webapp's app.js.
- * Recognizes Dutch voice commands at the end of transcribed sentences
- * and executes them as Obsidian editor actions.
+ * Voice command processing — recognizes voice commands at the end of
+ * transcribed sentences and executes them as Obsidian editor actions.
+ * Patterns are loaded from lang.ts based on the active language.
  */
 
-interface VoiceCommand {
-	patterns: string[];
+/** Currently active language (set via setLanguage) */
+let activeLang = "nl";
+
+/** Update the active language for command matching. */
+export function setLanguage(lang: string): void {
+	activeLang = lang;
+}
+
+interface CommandDef {
+	id: CommandId;
 	action: (editor: Editor) => void;
-	label: string;
 	/** If true, trailing punctuation is stripped from preceding text before inserting */
 	punctuation?: boolean;
 }
@@ -25,21 +38,18 @@ export function normalizeCommand(text: string): string {
 		.trim();
 }
 
-// Fix common misrecognitions
+// Apply language-specific mishearing corrections
 function fixMishearings(text: string): string {
-	return text
-		.replace(/\bniveau\b/g, "nieuwe")
-		.replace(/\bnieuw alinea\b/g, "nieuwe alinea")
-		.replace(/\bnieuw regel\b/g, "nieuwe regel")
-		.replace(/\bnieuw punt\b/g, "nieuw punt");
+	for (const [pattern, replacement] of getMishearings(activeLang)) {
+		text = text.replace(pattern, replacement);
+	}
+	return text;
 }
 
 function insertAtCursor(editor: Editor, text: string): void {
 	const cursor = editor.getCursor();
 
 	// Ensure a space between existing text and new text when needed.
-	// Voxtral transcriptions often lack a leading space, causing
-	// "sentence.Next" instead of "sentence. Next".
 	if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
 		const charBefore = editor.getRange(
 			{ line: cursor.line, ch: cursor.ch - 1 },
@@ -51,7 +61,6 @@ function insertAtCursor(editor: Editor, text: string): void {
 	}
 
 	editor.replaceRange(text, cursor);
-	// Move cursor to end of inserted text
 	const lines = text.split("\n");
 	const lastLine = lines[lines.length - 1];
 	const newLine = cursor.line + lines.length - 1;
@@ -68,13 +77,11 @@ function deleteLastParagraph(editor: Editor): void {
 	const offset = editor.posToOffset(cursor);
 	const textBefore = fullText.substring(0, offset);
 
-	// Find the last double-newline (paragraph break)
 	const lastPara = textBefore.lastIndexOf("\n\n");
 	if (lastPara >= 0) {
 		const from = editor.offsetToPos(lastPara);
 		editor.replaceRange("", from, cursor);
 	} else {
-		// Delete everything up to cursor
 		editor.replaceRange("", { line: 0, ch: 0 }, cursor);
 	}
 }
@@ -85,7 +92,6 @@ function deleteLastSentence(editor: Editor): void {
 	const offset = editor.posToOffset(cursor);
 	const textBefore = fullText.substring(0, offset).trimEnd();
 
-	// Find the last sentence ending (. ! ?)
 	const sentenceEnd = Math.max(
 		textBefore.lastIndexOf(". "),
 		textBefore.lastIndexOf("! "),
@@ -96,95 +102,45 @@ function deleteLastSentence(editor: Editor): void {
 	);
 
 	if (sentenceEnd >= 0) {
-		const from = editor.offsetToPos(sentenceEnd + 1); // Keep the punctuation of previous sentence
+		const from = editor.offsetToPos(sentenceEnd + 1);
 		editor.replaceRange("", from, cursor);
 	} else {
-		// Delete to start of line
 		editor.replaceRange("", { line: cursor.line, ch: 0 }, cursor);
 	}
 }
 
-const COMMANDS: VoiceCommand[] = [
+function colonAction(editor: Editor): void {
+	// Strip any trailing punctuation before the cursor
+	const cursor = editor.getCursor();
+	if (cursor.ch > 0) {
+		const lineText = editor.getLine(cursor.line);
+		const before = lineText.substring(0, cursor.ch);
+		const cleaned = before.replace(/[,;.!?]+\s*$/, "");
+		if (cleaned.length < before.length) {
+			const from = { line: cursor.line, ch: cleaned.length };
+			editor.replaceRange("", from, cursor);
+			editor.setCursor(from);
+		}
+	}
+	const pos = editor.getCursor();
+	editor.replaceRange(": ", pos);
+	editor.setCursor({ line: pos.line, ch: pos.ch + 2 });
+}
+
+/**
+ * Command definitions — the action logic is language-independent.
+ * Patterns are resolved at runtime from lang.ts.
+ */
+const COMMAND_DEFS: CommandDef[] = [
+	{ id: "newParagraph", action: (editor) => insertAtCursor(editor, "\n\n") },
+	{ id: "newLine", action: (editor) => insertAtCursor(editor, "\n") },
+	{ id: "heading1", action: (editor) => insertAtCursor(editor, "\n\n# ") },
+	{ id: "heading2", action: (editor) => insertAtCursor(editor, "\n\n## ") },
+	{ id: "heading3", action: (editor) => insertAtCursor(editor, "\n\n### ") },
+	{ id: "bulletPoint", action: (editor) => insertAtCursor(editor, "\n- ") },
+	{ id: "todoItem", action: (editor) => insertAtCursor(editor, "\n- [ ] ") },
 	{
-		label: "New paragraph",
-		patterns: [
-			"nieuwe alinea",
-			"nieuw alinea",
-			"nieuwe paragraaf",
-			"nieuw paragraaf",
-			"nieuwe linie",
-			"new paragraph",
-		],
-		action: (editor) => insertAtCursor(editor, "\n\n"),
-	},
-	{
-		label: "New line",
-		patterns: ["nieuwe regel", "nieuwe lijn", "new line", "volgende regel"],
-		action: (editor) => insertAtCursor(editor, "\n"),
-	},
-	{
-		label: "Heading 1",
-		patterns: ["kop een", "kop 1", "kop een", "heading one", "heading 1"],
-		action: (editor) => insertAtCursor(editor, "\n\n# "),
-	},
-	{
-		label: "Heading 2",
-		patterns: ["kop twee", "kop 2", "heading two", "heading 2"],
-		action: (editor) => insertAtCursor(editor, "\n\n## "),
-	},
-	{
-		label: "Heading 3",
-		patterns: ["kop drie", "kop 3", "heading three", "heading 3"],
-		action: (editor) => insertAtCursor(editor, "\n\n### "),
-	},
-	{
-		label: "Bullet point",
-		patterns: [
-			"nieuw punt",
-			"nieuw lijstpunt",
-			"nieuw lijstitem",
-			"lijst punt",
-			"nieuw bullet",
-			"nieuw item",
-			"nieuwe item",
-			"volgend item",
-			"new item",
-			"next item",
-			"bullet",
-			"bullet point",
-			"volgend punt",
-		],
-		action: (editor) => insertAtCursor(editor, "\n- "),
-	},
-	{
-		label: "To-do item",
-		patterns: [
-			"nieuw to do item",
-			"nieuw todo item",
-			"nieuw todo",
-			"nieuwe to do",
-			"nieuwe todo",
-			"nieuw taak",
-			"nieuwe taak",
-			"new todo",
-			"new to do",
-			"to do item",
-			"todo item",
-		],
-		action: (editor) => insertAtCursor(editor, "\n- [ ] "),
-	},
-	{
-		label: "Numbered item",
-		patterns: [
-			"nieuw genummerd item",
-			"nieuw genummerd punt",
-			"genummerd punt",
-			"genummerd item",
-			"volgend nummer",
-			"nummer punt",
-			"numbered item",
-			"new numbered item",
-		],
+		id: "numberedItem",
 		action: (editor) => {
 			const cursor = editor.getCursor();
 			const lineText = editor.getLine(cursor.line);
@@ -193,66 +149,21 @@ const COMMANDS: VoiceCommand[] = [
 			insertAtCursor(editor, `\n${nextNum}. `);
 		},
 	},
+	{ id: "deleteLastParagraph", action: (editor) => deleteLastParagraph(editor) },
+	{ id: "deleteLastLine", action: (editor) => deleteLastSentence(editor) },
 	{
-		label: "Delete last paragraph",
-		patterns: [
-			"verwijder laatste alinea",
-			"verwijder laatste paragraaf",
-			"wis laatste alinea",
-			"delete last paragraph",
-		],
-		action: (editor) => deleteLastParagraph(editor),
+		id: "undo",
+		action: (editor) => { (editor as any).undo(); },
 	},
 	{
-		label: "Delete last line",
-		patterns: [
-			"verwijder laatste regel",
-			"verwijder laatste zin",
-			"wis laatste regel",
-			"wist laatste regel",
-			"delete last line",
-		],
-		action: (editor) => deleteLastSentence(editor),
+		id: "stopRecording",
+		action: () => { /* handled by caller */ },
 	},
-	{
-		label: "Undo",
-		patterns: ["herstel", "ongedaan maken", "undo"],
-		action: (editor) => {
-			// Trigger Obsidian's built-in undo
-			(editor as any).undo();
-		},
-	},
-	// Punctuation
-	{
-		label: "Colon",
-		patterns: ["dubbele punt", "double punt", "dubbelepunt", "colon"],
-		punctuation: true,
-		action: (editor) => {
-			// Insert colon directly against preceding text (no leading space)
-			// First strip any trailing punctuation before the cursor
-			const cursor = editor.getCursor();
-			if (cursor.ch > 0) {
-				const lineText = editor.getLine(cursor.line);
-				const before = lineText.substring(0, cursor.ch);
-				const cleaned = before.replace(/[,;.!?]+\s*$/, "");
-				if (cleaned.length < before.length) {
-					const from = { line: cursor.line, ch: cleaned.length };
-					editor.replaceRange("", from, cursor);
-					editor.setCursor(from);
-				}
-			}
-			const pos = editor.getCursor();
-			editor.replaceRange(": ", pos);
-			editor.setCursor({
-				line: pos.line,
-				ch: pos.ch + 2,
-			});
-		},
-	},
+	{ id: "colon", punctuation: true, action: colonAction },
 ];
 
 export interface CommandMatch {
-	command: VoiceCommand;
+	command: CommandDef;
 	/** The text before the command (to be inserted as normal text) */
 	textBefore: string;
 }
@@ -264,16 +175,11 @@ export interface CommandMatch {
 export function matchCommand(rawText: string): CommandMatch | null {
 	const normalized = fixMishearings(normalizeCommand(rawText));
 
-	for (const cmd of COMMANDS) {
-		for (const pattern of cmd.patterns) {
+	for (const cmd of COMMAND_DEFS) {
+		const patterns = getPatternsForCommand(cmd.id, activeLang);
+		for (const pattern of patterns) {
 			if (normalized.endsWith(pattern)) {
-				// Find text before the command.  The pattern index comes
-				// from the *normalized* string, so we can't use it directly
-				// on rawText (normalization may remove characters like
-				// punctuation, hyphens or diacritics).  Instead, strip
-				// the same number of *words* from the end of rawText.
-				const patternWordCount =
-					pattern.split(/\s+/).length;
+				const patternWordCount = pattern.split(/\s+/).length;
 				const rawWords = rawText.trimEnd().split(/\s+/);
 				const textBefore = rawWords
 					.slice(0, -patternWordCount)
@@ -289,23 +195,15 @@ export function matchCommand(rawText: string): CommandMatch | null {
 /**
  * Process transcribed text: split into sentences, check each for voice
  * commands, and execute them or insert the text as-is.
- *
- * In realtime mode each call is typically one sentence. In batch mode
- * the text may contain multiple sentences, so we split on sentence
- * boundaries to catch commands like "nieuw punt" mid-text.
  */
 export function processText(editor: Editor, text: string): void {
-	// Split on sentence-ending punctuation, keeping the delimiter
-	// attached to the preceding segment.
 	const segments = text.match(/[^.!?]+[.!?]+\s*/g);
 
 	if (!segments) {
-		// No sentence boundaries found — process as a single block
 		processSegment(editor, text);
 		return;
 	}
 
-	// Check if there's trailing text after the last sentence-ending
 	const joined = segments.join("");
 	const remainder = text.slice(joined.length);
 
@@ -322,7 +220,6 @@ function processSegment(editor: Editor, text: string): void {
 	if (match) {
 		if (match.textBefore) {
 			let before = match.textBefore;
-			// Strip trailing punctuation to avoid ",:" or ".:" combos
 			if (match.command.punctuation) {
 				before = before.replace(/[,;.!?]+\s*$/, "");
 			}
@@ -335,11 +232,12 @@ function processSegment(editor: Editor, text: string): void {
 }
 
 /**
- * Get all commands for the cheat sheet.
+ * Get all commands for the help panel, with localized labels and
+ * patterns for the active language.
  */
 export function getCommandList(): { label: string; patterns: string[] }[] {
-	return COMMANDS.map((c) => ({
-		label: c.label,
-		patterns: c.patterns,
+	return COMMAND_DEFS.map((c) => ({
+		label: getLabel(c.id, activeLang),
+		patterns: getPatternsForCommand(c.id, activeLang),
 	}));
 }

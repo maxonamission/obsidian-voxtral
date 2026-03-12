@@ -4,6 +4,7 @@ import { AudioRecorder } from "./audio-recorder";
 import { listModels } from "./mistral-api";
 import type { MistralModel, } from "./mistral-api";
 import type { FocusBehavior } from "./types";
+import { SUPPORTED_LANGUAGES, LANGUAGE_NAMES, type LangCode } from "./lang";
 
 export class VoxtralSettingTab extends PluginSettingTab {
 	plugin: VoxtralPlugin;
@@ -185,16 +186,17 @@ export class VoxtralSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Language")
-			.setDesc("Language for transcription (ISO 639-1 code, e.g. 'en', 'nl', 'de')")
-			.addText((text) =>
-				text
-					.setPlaceholder("nl")
-					.setValue(this.plugin.settings.language)
-					.onChange(async (value) => {
-						this.plugin.settings.language = value.trim();
-						await this.plugin.saveSettings();
-					})
-			);
+			.setDesc("Language for transcription and voice commands")
+			.addDropdown((dropdown) => {
+				for (const code of SUPPORTED_LANGUAGES) {
+					dropdown.addOption(code, `${LANGUAGE_NAMES[code]} (${code})`);
+				}
+				dropdown.setValue(this.plugin.settings.language);
+				dropdown.onChange(async (value) => {
+					this.plugin.settings.language = value;
+					await this.plugin.saveSettings();
+				});
+			});
 
 		new Setting(containerEl)
 			.setName("Auto-correct")

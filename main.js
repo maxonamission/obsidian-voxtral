@@ -787,6 +787,297 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+// src/lang.ts
+var SUPPORTED_LANGUAGES = [
+  "nl",
+  "en",
+  "fr",
+  "de",
+  "es",
+  "pt",
+  "it",
+  "ru",
+  "zh",
+  "hi",
+  "ar",
+  "ja",
+  "ko"
+];
+var LANGUAGE_NAMES = {
+  nl: "Nederlands",
+  en: "English",
+  fr: "Fran\xE7ais",
+  de: "Deutsch",
+  es: "Espa\xF1ol",
+  pt: "Portugu\xEAs",
+  it: "Italiano",
+  ru: "\u0420\u0443\u0441\u0441\u043A\u0438\u0439",
+  zh: "\u4E2D\u6587",
+  hi: "\u0939\u093F\u0928\u094D\u0926\u0940",
+  ar: "\u0627\u0644\u0639\u0631\u0628\u064A\u0629",
+  ja: "\u65E5\u672C\u8A9E",
+  ko: "\uD55C\uAD6D\uC5B4"
+};
+var PATTERNS = {
+  // ── Dutch ──────────────────────────────────────────────────────
+  nl: {
+    newParagraph: ["nieuwe alinea", "nieuw alinea", "nieuwe paragraaf", "nieuw paragraaf", "nieuwe linie"],
+    newLine: ["nieuwe regel", "nieuwe lijn", "volgende regel"],
+    heading1: ["kop een", "kop 1"],
+    heading2: ["kop twee", "kop 2"],
+    heading3: ["kop drie", "kop 3"],
+    bulletPoint: ["nieuw punt", "nieuw lijstpunt", "nieuw lijstitem", "lijst punt", "nieuw bullet", "nieuw item", "nieuwe item", "volgend item", "volgend punt"],
+    todoItem: ["nieuw to do item", "nieuw todo item", "nieuw todo", "nieuwe to do", "nieuwe todo", "nieuw taak", "nieuwe taak"],
+    numberedItem: ["nieuw genummerd item", "nieuw genummerd punt", "genummerd punt", "genummerd item", "volgend nummer", "nummer punt"],
+    deleteLastParagraph: ["verwijder laatste alinea", "verwijder laatste paragraaf", "wis laatste alinea"],
+    deleteLastLine: ["verwijder laatste regel", "verwijder laatste zin", "wis laatste regel", "wist laatste regel"],
+    undo: ["herstel", "ongedaan maken"],
+    stopRecording: ["beeindig opname", "beeindig de opname", "stop opname", "stop de opname"],
+    colon: ["dubbele punt", "double punt", "dubbelepunt"]
+  },
+  // ── English ────────────────────────────────────────────────────
+  en: {
+    newParagraph: ["new paragraph"],
+    newLine: ["new line", "next line"],
+    heading1: ["heading one", "heading 1"],
+    heading2: ["heading two", "heading 2"],
+    heading3: ["heading three", "heading 3"],
+    bulletPoint: ["new item", "next item", "bullet", "bullet point", "new bullet"],
+    todoItem: ["new todo", "new to do", "todo item", "to do item"],
+    numberedItem: ["numbered item", "new numbered item", "next number"],
+    deleteLastParagraph: ["delete last paragraph"],
+    deleteLastLine: ["delete last line", "delete last sentence"],
+    undo: ["undo"],
+    stopRecording: ["stop recording"],
+    colon: ["colon"]
+  },
+  // ── French ─────────────────────────────────────────────────────
+  fr: {
+    newParagraph: ["nouveau paragraphe", "nouvelle section", "nouveau alinea"],
+    newLine: ["nouvelle ligne", "a la ligne", "retour a la ligne"],
+    heading1: ["titre un", "titre 1"],
+    heading2: ["titre deux", "titre 2"],
+    heading3: ["titre trois", "titre 3"],
+    bulletPoint: ["nouveau point", "nouvelle puce", "point suivant", "nouvel element", "nouvel item"],
+    todoItem: ["nouvelle tache", "nouveau todo", "nouveau to do"],
+    numberedItem: ["point numero", "element numero", "nouveau numero"],
+    deleteLastParagraph: ["supprimer dernier paragraphe", "effacer dernier paragraphe"],
+    deleteLastLine: ["supprimer derniere ligne", "effacer derniere ligne", "supprimer derniere phrase"],
+    undo: ["annuler"],
+    stopRecording: ["arreter enregistrement", "arreter l enregistrement", "stop enregistrement"],
+    colon: ["deux points"]
+  },
+  // ── German ─────────────────────────────────────────────────────
+  de: {
+    newParagraph: ["neuer absatz", "neuer paragraph"],
+    newLine: ["neue zeile", "nachste zeile"],
+    heading1: ["uberschrift eins", "uberschrift 1"],
+    heading2: ["uberschrift zwei", "uberschrift 2"],
+    heading3: ["uberschrift drei", "uberschrift 3"],
+    bulletPoint: ["neuer punkt", "neuer aufzahlungspunkt", "nachster punkt", "neues element"],
+    todoItem: ["neue aufgabe", "neues todo", "neues to do"],
+    numberedItem: ["nummerierter punkt", "neuer nummerierter punkt", "nachste nummer"],
+    deleteLastParagraph: ["letzten absatz loschen", "absatz loschen"],
+    deleteLastLine: ["letzte zeile loschen", "letzten satz loschen"],
+    undo: ["ruckgangig", "ruckgangig machen"],
+    stopRecording: ["aufnahme beenden", "aufnahme stoppen"],
+    colon: ["doppelpunkt"]
+  },
+  // ── Spanish ────────────────────────────────────────────────────
+  es: {
+    newParagraph: ["nuevo parrafo", "nueva seccion"],
+    newLine: ["nueva linea", "siguiente linea"],
+    heading1: ["titulo uno", "titulo 1"],
+    heading2: ["titulo dos", "titulo 2"],
+    heading3: ["titulo tres", "titulo 3"],
+    bulletPoint: ["nuevo punto", "nueva vineta", "siguiente punto", "nuevo elemento"],
+    todoItem: ["nueva tarea", "nuevo todo", "nuevo to do"],
+    numberedItem: ["punto numerado", "nuevo numero", "siguiente numero"],
+    deleteLastParagraph: ["borrar ultimo parrafo", "eliminar ultimo parrafo"],
+    deleteLastLine: ["borrar ultima linea", "eliminar ultima linea", "borrar ultima frase"],
+    undo: ["deshacer"],
+    stopRecording: ["parar grabacion", "detener grabacion"],
+    colon: ["dos puntos"]
+  },
+  // ── Portuguese ─────────────────────────────────────────────────
+  pt: {
+    newParagraph: ["novo paragrafo", "nova secao"],
+    newLine: ["nova linha", "proxima linha"],
+    heading1: ["titulo um", "titulo 1"],
+    heading2: ["titulo dois", "titulo 2"],
+    heading3: ["titulo tres", "titulo 3"],
+    bulletPoint: ["novo ponto", "novo item", "proximo ponto", "novo elemento"],
+    todoItem: ["nova tarefa", "novo todo", "novo to do"],
+    numberedItem: ["ponto numerado", "novo numero", "proximo numero"],
+    deleteLastParagraph: ["apagar ultimo paragrafo", "excluir ultimo paragrafo"],
+    deleteLastLine: ["apagar ultima linha", "excluir ultima linha", "apagar ultima frase"],
+    undo: ["desfazer"],
+    stopRecording: ["parar gravacao", "encerrar gravacao"],
+    colon: ["dois pontos"]
+  },
+  // ── Italian ────────────────────────────────────────────────────
+  it: {
+    newParagraph: ["nuovo paragrafo", "nuova sezione", "nuovo capoverso"],
+    newLine: ["nuova riga", "a capo", "riga successiva"],
+    heading1: ["titolo uno", "titolo 1"],
+    heading2: ["titolo due", "titolo 2"],
+    heading3: ["titolo tre", "titolo 3"],
+    bulletPoint: ["nuovo punto", "nuovo elemento", "punto successivo", "nuovo elenco"],
+    todoItem: ["nuovo compito", "nuova attivita", "nuovo todo", "nuovo to do"],
+    numberedItem: ["punto numerato", "nuovo numero", "numero successivo"],
+    deleteLastParagraph: ["cancella ultimo paragrafo", "elimina ultimo paragrafo"],
+    deleteLastLine: ["cancella ultima riga", "elimina ultima riga", "cancella ultima frase"],
+    undo: ["annulla"],
+    stopRecording: ["ferma registrazione", "interrompi registrazione", "stop registrazione"],
+    colon: ["due punti"]
+  }
+};
+var LABELS = {
+  nl: {
+    newParagraph: "Nieuwe alinea",
+    newLine: "Nieuwe regel",
+    heading1: "Kop 1",
+    heading2: "Kop 2",
+    heading3: "Kop 3",
+    bulletPoint: "Lijstpunt",
+    todoItem: "To-do item",
+    numberedItem: "Genummerd punt",
+    deleteLastParagraph: "Verwijder laatste alinea",
+    deleteLastLine: "Verwijder laatste regel",
+    undo: "Ongedaan maken",
+    stopRecording: "Stop opname",
+    colon: "Dubbele punt"
+  },
+  en: {
+    newParagraph: "New paragraph",
+    newLine: "New line",
+    heading1: "Heading 1",
+    heading2: "Heading 2",
+    heading3: "Heading 3",
+    bulletPoint: "Bullet point",
+    todoItem: "To-do item",
+    numberedItem: "Numbered item",
+    deleteLastParagraph: "Delete last paragraph",
+    deleteLastLine: "Delete last line",
+    undo: "Undo",
+    stopRecording: "Stop recording",
+    colon: "Colon"
+  },
+  fr: {
+    newParagraph: "Nouveau paragraphe",
+    newLine: "Nouvelle ligne",
+    heading1: "Titre 1",
+    heading2: "Titre 2",
+    heading3: "Titre 3",
+    bulletPoint: "Puce",
+    todoItem: "T\xE2che",
+    numberedItem: "Point num\xE9rot\xE9",
+    deleteLastParagraph: "Supprimer dernier paragraphe",
+    deleteLastLine: "Supprimer derni\xE8re ligne",
+    undo: "Annuler",
+    stopRecording: "Arr\xEAter l'enregistrement",
+    colon: "Deux-points"
+  },
+  de: {
+    newParagraph: "Neuer Absatz",
+    newLine: "Neue Zeile",
+    heading1: "\xDCberschrift 1",
+    heading2: "\xDCberschrift 2",
+    heading3: "\xDCberschrift 3",
+    bulletPoint: "Aufz\xE4hlungspunkt",
+    todoItem: "Aufgabe",
+    numberedItem: "Nummerierter Punkt",
+    deleteLastParagraph: "Letzten Absatz l\xF6schen",
+    deleteLastLine: "Letzte Zeile l\xF6schen",
+    undo: "R\xFCckg\xE4ngig",
+    stopRecording: "Aufnahme beenden",
+    colon: "Doppelpunkt"
+  },
+  es: {
+    newParagraph: "Nuevo p\xE1rrafo",
+    newLine: "Nueva l\xEDnea",
+    heading1: "T\xEDtulo 1",
+    heading2: "T\xEDtulo 2",
+    heading3: "T\xEDtulo 3",
+    bulletPoint: "Vi\xF1eta",
+    todoItem: "Tarea",
+    numberedItem: "Punto numerado",
+    deleteLastParagraph: "Borrar \xFAltimo p\xE1rrafo",
+    deleteLastLine: "Borrar \xFAltima l\xEDnea",
+    undo: "Deshacer",
+    stopRecording: "Parar grabaci\xF3n",
+    colon: "Dos puntos"
+  },
+  pt: {
+    newParagraph: "Novo par\xE1grafo",
+    newLine: "Nova linha",
+    heading1: "T\xEDtulo 1",
+    heading2: "T\xEDtulo 2",
+    heading3: "T\xEDtulo 3",
+    bulletPoint: "Ponto",
+    todoItem: "Tarefa",
+    numberedItem: "Ponto numerado",
+    deleteLastParagraph: "Apagar \xFAltimo par\xE1grafo",
+    deleteLastLine: "Apagar \xFAltima linha",
+    undo: "Desfazer",
+    stopRecording: "Parar grava\xE7\xE3o",
+    colon: "Dois pontos"
+  },
+  it: {
+    newParagraph: "Nuovo paragrafo",
+    newLine: "Nuova riga",
+    heading1: "Titolo 1",
+    heading2: "Titolo 2",
+    heading3: "Titolo 3",
+    bulletPoint: "Punto elenco",
+    todoItem: "Attivit\xE0",
+    numberedItem: "Punto numerato",
+    deleteLastParagraph: "Cancella ultimo paragrafo",
+    deleteLastLine: "Cancella ultima riga",
+    undo: "Annulla",
+    stopRecording: "Ferma registrazione",
+    colon: "Due punti"
+  }
+};
+var MISHEARINGS = {
+  nl: [
+    [/\bniveau\b/g, "nieuwe"],
+    [/\bnieuw alinea\b/g, "nieuwe alinea"],
+    [/\bnieuw regel\b/g, "nieuwe regel"],
+    [/\bnieuw punt\b/g, "nieuw punt"]
+  ],
+  fr: [
+    [/\bnouveau ligne\b/g, "nouvelle ligne"],
+    [/\bnouvelle paragraphe\b/g, "nouveau paragraphe"]
+  ],
+  de: [
+    [/\bneue absatz\b/g, "neuer absatz"],
+    [/\bneues zeile\b/g, "neue zeile"]
+  ]
+};
+function getPatternsForCommand(commandId, lang) {
+  var _a, _b, _c, _d;
+  const langPatterns = (_b = (_a = PATTERNS[lang]) == null ? void 0 : _a[commandId]) != null ? _b : [];
+  const enPatterns = lang === "en" ? [] : (_d = (_c = PATTERNS.en) == null ? void 0 : _c[commandId]) != null ? _d : [];
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const p of [...langPatterns, ...enPatterns]) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      result.push(p);
+    }
+  }
+  return result;
+}
+function getLabel(commandId, lang) {
+  var _a, _b, _c, _d;
+  return (_d = (_c = (_a = LABELS[lang]) == null ? void 0 : _a[commandId]) != null ? _c : (_b = LABELS.en) == null ? void 0 : _b[commandId]) != null ? _d : commandId;
+}
+function getMishearings(lang) {
+  var _a;
+  return (_a = MISHEARINGS[lang]) != null ? _a : [];
+}
+
 // src/settings-tab.ts
 var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
   constructor(app, plugin) {
@@ -904,12 +1195,16 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         });
       });
     }
-    new import_obsidian2.Setting(containerEl).setName("Language").setDesc("Language for transcription (ISO 639-1 code, e.g. 'en', 'nl', 'de')").addText(
-      (text) => text.setPlaceholder("nl").setValue(this.plugin.settings.language).onChange(async (value) => {
-        this.plugin.settings.language = value.trim();
+    new import_obsidian2.Setting(containerEl).setName("Language").setDesc("Language for transcription and voice commands").addDropdown((dropdown) => {
+      for (const code of SUPPORTED_LANGUAGES) {
+        dropdown.addOption(code, `${LANGUAGE_NAMES[code]} (${code})`);
+      }
+      dropdown.setValue(this.plugin.settings.language);
+      dropdown.onChange(async (value) => {
+        this.plugin.settings.language = value;
         await this.plugin.saveSettings();
-      })
-    );
+      });
+    });
     new import_obsidian2.Setting(containerEl).setName("Auto-correct").setDesc(
       "Automatically correct spelling, capitalization, and punctuation after recording"
     ).addToggle(
@@ -1048,11 +1343,18 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
 var import_obsidian3 = require("obsidian");
 
 // src/voice-commands.ts
+var activeLang = "nl";
+function setLanguage(lang) {
+  activeLang = lang;
+}
 function normalizeCommand(text) {
   return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-/g, " ").replace(/[.,!?;:'"()[\]{}]/g, "").toLowerCase().trim();
 }
 function fixMishearings(text) {
-  return text.replace(/\bniveau\b/g, "nieuwe").replace(/\bnieuw alinea\b/g, "nieuwe alinea").replace(/\bnieuw regel\b/g, "nieuwe regel").replace(/\bnieuw punt\b/g, "nieuw punt");
+  for (const [pattern, replacement] of getMishearings(activeLang)) {
+    text = text.replace(pattern, replacement);
+  }
+  return text;
 }
 function insertAtCursor(editor, text) {
   const cursor = editor.getCursor();
@@ -1105,87 +1407,32 @@ function deleteLastSentence(editor) {
     editor.replaceRange("", { line: cursor.line, ch: 0 }, cursor);
   }
 }
-var COMMANDS = [
+function colonAction(editor) {
+  const cursor = editor.getCursor();
+  if (cursor.ch > 0) {
+    const lineText = editor.getLine(cursor.line);
+    const before = lineText.substring(0, cursor.ch);
+    const cleaned = before.replace(/[,;.!?]+\s*$/, "");
+    if (cleaned.length < before.length) {
+      const from = { line: cursor.line, ch: cleaned.length };
+      editor.replaceRange("", from, cursor);
+      editor.setCursor(from);
+    }
+  }
+  const pos = editor.getCursor();
+  editor.replaceRange(": ", pos);
+  editor.setCursor({ line: pos.line, ch: pos.ch + 2 });
+}
+var COMMAND_DEFS = [
+  { id: "newParagraph", action: (editor) => insertAtCursor(editor, "\n\n") },
+  { id: "newLine", action: (editor) => insertAtCursor(editor, "\n") },
+  { id: "heading1", action: (editor) => insertAtCursor(editor, "\n\n# ") },
+  { id: "heading2", action: (editor) => insertAtCursor(editor, "\n\n## ") },
+  { id: "heading3", action: (editor) => insertAtCursor(editor, "\n\n### ") },
+  { id: "bulletPoint", action: (editor) => insertAtCursor(editor, "\n- ") },
+  { id: "todoItem", action: (editor) => insertAtCursor(editor, "\n- [ ] ") },
   {
-    label: "New paragraph",
-    patterns: [
-      "nieuwe alinea",
-      "nieuw alinea",
-      "nieuwe paragraaf",
-      "nieuw paragraaf",
-      "nieuwe linie",
-      "new paragraph"
-    ],
-    action: (editor) => insertAtCursor(editor, "\n\n")
-  },
-  {
-    label: "New line",
-    patterns: ["nieuwe regel", "nieuwe lijn", "new line", "volgende regel"],
-    action: (editor) => insertAtCursor(editor, "\n")
-  },
-  {
-    label: "Heading 1",
-    patterns: ["kop een", "kop 1", "kop een", "heading one", "heading 1"],
-    action: (editor) => insertAtCursor(editor, "\n\n# ")
-  },
-  {
-    label: "Heading 2",
-    patterns: ["kop twee", "kop 2", "heading two", "heading 2"],
-    action: (editor) => insertAtCursor(editor, "\n\n## ")
-  },
-  {
-    label: "Heading 3",
-    patterns: ["kop drie", "kop 3", "heading three", "heading 3"],
-    action: (editor) => insertAtCursor(editor, "\n\n### ")
-  },
-  {
-    label: "Bullet point",
-    patterns: [
-      "nieuw punt",
-      "nieuw lijstpunt",
-      "nieuw lijstitem",
-      "lijst punt",
-      "nieuw bullet",
-      "nieuw item",
-      "nieuwe item",
-      "volgend item",
-      "new item",
-      "next item",
-      "bullet",
-      "bullet point",
-      "volgend punt"
-    ],
-    action: (editor) => insertAtCursor(editor, "\n- ")
-  },
-  {
-    label: "To-do item",
-    patterns: [
-      "nieuw to do item",
-      "nieuw todo item",
-      "nieuw todo",
-      "nieuwe to do",
-      "nieuwe todo",
-      "nieuw taak",
-      "nieuwe taak",
-      "new todo",
-      "new to do",
-      "to do item",
-      "todo item"
-    ],
-    action: (editor) => insertAtCursor(editor, "\n- [ ] ")
-  },
-  {
-    label: "Numbered item",
-    patterns: [
-      "nieuw genummerd item",
-      "nieuw genummerd punt",
-      "genummerd punt",
-      "genummerd item",
-      "volgend nummer",
-      "nummer punt",
-      "numbered item",
-      "new numbered item"
-    ],
+    id: "numberedItem",
     action: (editor) => {
       const cursor = editor.getCursor();
       const lineText = editor.getLine(cursor.line);
@@ -1195,64 +1442,26 @@ var COMMANDS = [
 ${nextNum}. `);
     }
   },
+  { id: "deleteLastParagraph", action: (editor) => deleteLastParagraph(editor) },
+  { id: "deleteLastLine", action: (editor) => deleteLastSentence(editor) },
   {
-    label: "Delete last paragraph",
-    patterns: [
-      "verwijder laatste alinea",
-      "verwijder laatste paragraaf",
-      "wis laatste alinea",
-      "delete last paragraph"
-    ],
-    action: (editor) => deleteLastParagraph(editor)
-  },
-  {
-    label: "Delete last line",
-    patterns: [
-      "verwijder laatste regel",
-      "verwijder laatste zin",
-      "wis laatste regel",
-      "wist laatste regel",
-      "delete last line"
-    ],
-    action: (editor) => deleteLastSentence(editor)
-  },
-  {
-    label: "Undo",
-    patterns: ["herstel", "ongedaan maken", "undo"],
+    id: "undo",
     action: (editor) => {
       editor.undo();
     }
   },
-  // Punctuation
   {
-    label: "Colon",
-    patterns: ["dubbele punt", "double punt", "dubbelepunt", "colon"],
-    punctuation: true,
-    action: (editor) => {
-      const cursor = editor.getCursor();
-      if (cursor.ch > 0) {
-        const lineText = editor.getLine(cursor.line);
-        const before = lineText.substring(0, cursor.ch);
-        const cleaned = before.replace(/[,;.!?]+\s*$/, "");
-        if (cleaned.length < before.length) {
-          const from = { line: cursor.line, ch: cleaned.length };
-          editor.replaceRange("", from, cursor);
-          editor.setCursor(from);
-        }
-      }
-      const pos = editor.getCursor();
-      editor.replaceRange(": ", pos);
-      editor.setCursor({
-        line: pos.line,
-        ch: pos.ch + 2
-      });
+    id: "stopRecording",
+    action: () => {
     }
-  }
+  },
+  { id: "colon", punctuation: true, action: colonAction }
 ];
 function matchCommand(rawText) {
   const normalized = fixMishearings(normalizeCommand(rawText));
-  for (const cmd of COMMANDS) {
-    for (const pattern of cmd.patterns) {
+  for (const cmd of COMMAND_DEFS) {
+    const patterns = getPatternsForCommand(cmd.id, activeLang);
+    for (const pattern of patterns) {
       if (normalized.endsWith(pattern)) {
         const patternWordCount = pattern.split(/\s+/).length;
         const rawWords = rawText.trimEnd().split(/\s+/);
@@ -1294,17 +1503,108 @@ function processSegment(editor, text) {
   }
 }
 function getCommandList() {
-  return COMMANDS.map((c) => ({
-    label: c.label,
-    patterns: c.patterns
+  return COMMAND_DEFS.map((c) => ({
+    label: getLabel(c.id, activeLang),
+    patterns: getPatternsForCommand(c.id, activeLang)
   }));
 }
 
 // src/help-view.ts
 var VIEW_TYPE_VOXTRAL_HELP = "voxtral-help";
+var UI_STRINGS = {
+  nl: {
+    title: "Voxtral Stemcommando's",
+    command: "Commando",
+    say: "Zeg...",
+    tips: "Tips",
+    tipItems: [
+      "Commando's worden herkend aan het einde van een zin.",
+      'Zeg "voor de correctie: ..." om instructies aan de corrector te geven.',
+      "Gespelde woorden (V-O-X-T-R-A-L) worden automatisch samengevoegd.",
+      'Zelfcorrecties ("nee niet X maar Y") worden herkend.'
+    ]
+  },
+  en: {
+    title: "Voxtral Voice Commands",
+    command: "Command",
+    say: "Say...",
+    tips: "Tips",
+    tipItems: [
+      "Commands are recognized at the end of a sentence.",
+      'Say "for the correction: ..." to give inline instructions to the corrector.',
+      "Spelled-out words (V-O-X-T-R-A-L) are merged automatically.",
+      'Self-corrections ("no not X but Y") are recognized.'
+    ]
+  },
+  fr: {
+    title: "Commandes vocales Voxtral",
+    command: "Commande",
+    say: "Dites...",
+    tips: "Conseils",
+    tipItems: [
+      "Les commandes sont reconnues \xE0 la fin d'une phrase.",
+      'Dites "pour la correction : ..." pour donner des instructions au correcteur.',
+      "Les mots \xE9pel\xE9s (V-O-X-T-R-A-L) sont fusionn\xE9s automatiquement.",
+      'Les auto-corrections ("non pas X mais Y") sont reconnues.'
+    ]
+  },
+  de: {
+    title: "Voxtral Sprachbefehle",
+    command: "Befehl",
+    say: "Sagen Sie...",
+    tips: "Tipps",
+    tipItems: [
+      "Befehle werden am Ende eines Satzes erkannt.",
+      'Sagen Sie "f\xFCr die Korrektur: ..." um dem Korrektor Anweisungen zu geben.',
+      "Buchstabierte W\xF6rter (V-O-X-T-R-A-L) werden automatisch zusammengef\xFChrt.",
+      'Selbstkorrekturen ("nein nicht X sondern Y") werden erkannt.'
+    ]
+  },
+  es: {
+    title: "Comandos de voz Voxtral",
+    command: "Comando",
+    say: "Diga...",
+    tips: "Consejos",
+    tipItems: [
+      "Los comandos se reconocen al final de una oraci\xF3n.",
+      'Diga "para la correcci\xF3n: ..." para dar instrucciones al corrector.',
+      "Las palabras deletreadas (V-O-X-T-R-A-L) se fusionan autom\xE1ticamente.",
+      'Las autocorrecciones ("no, no X sino Y") se reconocen.'
+    ]
+  },
+  pt: {
+    title: "Comandos de voz Voxtral",
+    command: "Comando",
+    say: "Diga...",
+    tips: "Dicas",
+    tipItems: [
+      "Os comandos s\xE3o reconhecidos no final de uma frase.",
+      'Diga "para a corre\xE7\xE3o: ..." para dar instru\xE7\xF5es ao corretor.',
+      "Palavras soletradas (V-O-X-T-R-A-L) s\xE3o mescladas automaticamente.",
+      'Autocorre\xE7\xF5es ("n\xE3o, n\xE3o X mas Y") s\xE3o reconhecidas.'
+    ]
+  },
+  it: {
+    title: "Comandi vocali Voxtral",
+    command: "Comando",
+    say: "D\xEC...",
+    tips: "Suggerimenti",
+    tipItems: [
+      "I comandi vengono riconosciuti alla fine di una frase.",
+      'D\xEC "per la correzione: ..." per dare istruzioni al correttore.',
+      "Le parole compitate (V-O-X-T-R-A-L) vengono unite automaticamente.",
+      'Le autocorrezioni ("no non X ma Y") vengono riconosciute.'
+    ]
+  }
+};
+function getStrings(lang) {
+  var _a;
+  return (_a = UI_STRINGS[lang]) != null ? _a : UI_STRINGS.en;
+}
 var VoxtralHelpView = class extends import_obsidian3.ItemView {
   constructor(leaf) {
     super(leaf);
+    this.lang = "nl";
   }
   getViewType() {
     return VIEW_TYPE_VOXTRAL_HELP;
@@ -1315,19 +1615,28 @@ var VoxtralHelpView = class extends import_obsidian3.ItemView {
   getIcon() {
     return "mic";
   }
+  /** Call this to update the language and re-render. */
+  setLanguage(lang) {
+    this.lang = lang;
+    this.render();
+  }
   async onOpen() {
+    this.render();
+  }
+  render() {
     const container = this.contentEl;
     container.empty();
     container.addClass("voxtral-help-view");
-    container.createEl("h3", { text: "Voxtral Voice Commands" });
+    const strings = getStrings(this.lang);
+    container.createEl("h3", { text: strings.title });
     const commands = getCommandList();
     const table = container.createEl("table", {
       cls: "voxtral-help-table"
     });
     const thead = table.createEl("thead");
     const headerRow = thead.createEl("tr");
-    headerRow.createEl("th", { text: "Command" });
-    headerRow.createEl("th", { text: "Say..." });
+    headerRow.createEl("th", { text: strings.command });
+    headerRow.createEl("th", { text: strings.say });
     const tbody = table.createEl("tbody");
     for (const cmd of commands) {
       const row = tbody.createEl("tr");
@@ -1336,24 +1645,15 @@ var VoxtralHelpView = class extends import_obsidian3.ItemView {
         cls: "voxtral-help-label"
       });
       row.createEl("td", {
-        text: cmd.patterns.slice(0, 2).map((p) => `"${p}"`).join(" or "),
+        text: cmd.patterns.slice(0, 2).map((p) => `"${p}"`).join(" / "),
         cls: "voxtral-help-patterns"
       });
     }
-    container.createEl("h4", { text: "Tips" });
+    container.createEl("h4", { text: strings.tips });
     const tips = container.createEl("ul", { cls: "voxtral-help-tips" });
-    tips.createEl("li", {
-      text: "Commands are recognized at the end of a sentence."
-    });
-    tips.createEl("li", {
-      text: 'Say "for the correction: ..." to give inline instructions to the corrector.'
-    });
-    tips.createEl("li", {
-      text: "Spelled-out words (V-O-X-T-R-A-L) are merged automatically."
-    });
-    tips.createEl("li", {
-      text: 'Self-corrections ("no not X but Y") are recognized.'
-    });
+    for (const tip of strings.tipItems) {
+      tips.createEl("li", { text: tip });
+    }
   }
   async onClose() {
     this.contentEl.empty();
@@ -1492,9 +1792,21 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       DEFAULT_SETTINGS,
       await this.loadData()
     );
+    setLanguage(this.settings.language);
   }
   async saveSettings() {
     await this.saveData(this.settings);
+    setLanguage(this.settings.language);
+    this.refreshHelpView();
+  }
+  /** Re-render the help panel with the current language. */
+  refreshHelpView() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_VOXTRAL_HELP)) {
+      const view = leaf.view;
+      if (view instanceof VoxtralHelpView) {
+        view.setLanguage(this.settings.language);
+      }
+    }
   }
   // ── Send button (shown during batch recording) ──
   addSendButton() {
