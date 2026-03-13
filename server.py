@@ -145,7 +145,35 @@ async def get_settings():
         masked = key[:4] + "•" * (len(key) - 8) + key[-4:] if len(key) > 8 else "••••"
     else:
         masked = ""
-    return {"has_key": bool(key), "masked_key": masked, "language": get_language()}
+    return {
+        "has_key": bool(key),
+        "masked_key": masked,
+        "language": get_language(),
+        "realtime_model": get_realtime_model(),
+        "batch_model": get_batch_model(),
+        "correct_model": get_correct_model(),
+    }
+
+
+@app.get("/api/models")
+async def list_models():
+    """Return available Mistral models with their capabilities."""
+    key = get_api_key()
+    if not key:
+        return JSONResponse({"error": "Geen API key ingesteld"}, status_code=400)
+    try:
+        client = Mistral(api_key=key)
+        result = client.models.list()
+        models = []
+        for m in result.data:
+            caps = {}
+            if hasattr(m, "capabilities") and m.capabilities:
+                caps = {k: v for k, v in vars(m.capabilities).items() if isinstance(v, bool)}
+            models.append({"id": m.id, "capabilities": caps})
+        models.sort(key=lambda x: x["id"])
+        return {"models": models}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/api/settings")
@@ -160,6 +188,16 @@ async def save_settings(body: dict):
     if language:
         cfg["language"] = language
 
+    # Save model selections if provided
+    for cfg_key, body_key in [
+        ("realtime_model", "realtime_model"),
+        ("batch_model", "batch_model"),
+        ("correct_model", "correct_model"),
+    ]:
+        val = body.get(body_key, "").strip()
+        if val:
+            cfg[cfg_key] = val
+
     # Save API key if provided (with validation)
     api_key = body.get("api_key", "").strip()
     if api_key:
@@ -170,7 +208,8 @@ async def save_settings(body: dict):
             return JSONResponse({"error": f"Ongeldige API key: {e}"}, status_code=400)
         cfg["api_key"] = api_key
 
-    if not api_key and not language:
+    has_model_change = any(body.get(k, "").strip() for k in ("realtime_model", "batch_model", "correct_model"))
+    if not api_key and not language and not has_model_change:
         return JSONResponse({"error": "Geen instellingen opgegeven"}, status_code=400)
 
     save_config(cfg)
