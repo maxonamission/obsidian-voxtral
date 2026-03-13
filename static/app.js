@@ -120,6 +120,12 @@ const inputApiKey = document.getElementById("input-apikey");
 const settingsStatus = document.getElementById("settings-status");
 const selectLanguage = document.getElementById("select-language");
 
+const LANG_NAMES = {
+    nl: "Nederlands", en: "English", fr: "Français", de: "Deutsch",
+    es: "Español", pt: "Português", it: "Italiano",
+    ru: "Русский", zh: "中文", hi: "हिन्दी", ar: "العربية", ja: "日本語", ko: "한국어",
+};
+
 // Populate language dropdown
 for (const [code, name] of Object.entries(LANG_NAMES)) {
     const opt = document.createElement("option");
@@ -368,12 +374,6 @@ const LANG_MISHEARINGS = {
     nl: [[/\bniveau\b/g, "nieuwe"]],
     fr: [[/\bnouveau ligne\b/g, "nouvelle ligne"], [/\bnouvelle paragraphe\b/g, "nouveau paragraphe"]],
     de: [[/\bneue absatz\b/g, "neuer absatz"], [/\bneues zeile\b/g, "neue zeile"]],
-};
-
-const LANG_NAMES = {
-    nl: "Nederlands", en: "English", fr: "Français", de: "Deutsch",
-    es: "Español", pt: "Português", it: "Italiano",
-    ru: "Русский", zh: "中文", hi: "हिन्दी", ar: "العربية", ja: "日本語", ko: "한국어",
 };
 
 // Command definitions: id → {insert/action, punctuation, toast}
