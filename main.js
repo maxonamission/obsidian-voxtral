@@ -1256,6 +1256,14 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       })
     );
     containerEl.createEl("h3", { text: "Advanced" });
+    const isTranscriptionModel = (m) => {
+      var _a;
+      return !((_a = m.capabilities) == null ? void 0 : _a.completion_chat);
+    };
+    const isChatModel = (m) => {
+      var _a;
+      return !!((_a = m.capabilities) == null ? void 0 : _a.completion_chat);
+    };
     this.addModelDropdown(
       containerEl,
       "Realtime model",
@@ -1264,7 +1272,8 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       async (value) => {
         this.plugin.settings.realtimeModel = value.trim();
         await this.plugin.saveSettings();
-      }
+      },
+      isTranscriptionModel
     );
     this.addModelDropdown(
       containerEl,
@@ -1274,7 +1283,8 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       async (value) => {
         this.plugin.settings.batchModel = value.trim();
         await this.plugin.saveSettings();
-      }
+      },
+      isTranscriptionModel
     );
     this.addModelDropdown(
       containerEl,
@@ -1284,7 +1294,8 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       async (value) => {
         this.plugin.settings.correctModel = value.trim();
         await this.plugin.saveSettings();
-      }
+      },
+      isChatModel
     );
     new import_obsidian2.Setting(containerEl).setName("Correction system prompt").setDesc("Leave empty to use the default prompt").addTextArea(
       (text) => text.setPlaceholder("Default correction prompt will be used...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
@@ -1304,7 +1315,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
    * Falls back to a text field if no API key is set or the fetch fails.
    * The current value is always shown, even if not in the fetched list.
    */
-  addModelDropdown(containerEl, name, desc, currentValue, onChange) {
+  addModelDropdown(containerEl, name, desc, currentValue, onChange, filter) {
     const setting = new import_obsidian2.Setting(containerEl).setName(name).setDesc(desc);
     setting.addDropdown((drop) => {
       if (currentValue) {
@@ -1316,13 +1327,14 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       });
       this.getModels().then((models) => {
         if (models.length === 0) return;
+        const filtered = filter ? models.filter(filter) : models;
         const selectEl = drop.selectEl;
         selectEl.empty();
-        const ids = models.map((m) => m.id);
+        const ids = filtered.map((m) => m.id);
         if (currentValue && !ids.includes(currentValue)) {
           drop.addOption(currentValue, `${currentValue} (current)`);
         }
-        for (const model of models) {
+        for (const model of filtered) {
           drop.addOption(model.id, model.id);
         }
         drop.setValue(currentValue);

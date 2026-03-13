@@ -279,6 +279,12 @@ export class VoxtralSettingTab extends PluginSettingTab {
 		// Advanced settings
 		containerEl.createEl("h3", { text: "Advanced" });
 
+		// Filter helpers based on model capabilities
+		const isTranscriptionModel = (m: MistralModel) =>
+			!m.capabilities?.completion_chat;
+		const isChatModel = (m: MistralModel) =>
+			!!m.capabilities?.completion_chat;
+
 		this.addModelDropdown(
 			containerEl,
 			"Realtime model",
@@ -287,7 +293,8 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			async (value) => {
 				this.plugin.settings.realtimeModel = value.trim();
 				await this.plugin.saveSettings();
-			}
+			},
+			isTranscriptionModel
 		);
 
 		this.addModelDropdown(
@@ -298,7 +305,8 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			async (value) => {
 				this.plugin.settings.batchModel = value.trim();
 				await this.plugin.saveSettings();
-			}
+			},
+			isTranscriptionModel
 		);
 
 		this.addModelDropdown(
@@ -309,7 +317,8 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			async (value) => {
 				this.plugin.settings.correctModel = value.trim();
 				await this.plugin.saveSettings();
-			}
+			},
+			isChatModel
 		);
 
 		new Setting(containerEl)
@@ -343,7 +352,8 @@ export class VoxtralSettingTab extends PluginSettingTab {
 		name: string,
 		desc: string,
 		currentValue: string,
-		onChange: (value: string) => Promise<void>
+		onChange: (value: string) => Promise<void>,
+		filter?: (model: MistralModel) => boolean
 	): void {
 		const setting = new Setting(containerEl).setName(name).setDesc(desc);
 
@@ -362,16 +372,19 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			this.getModels().then((models) => {
 				if (models.length === 0) return;
 
+				// Apply capability filter if provided
+				const filtered = filter ? models.filter(filter) : models;
+
 				// Clear and repopulate
 				const selectEl = drop.selectEl;
 				selectEl.empty();
 
 				// Add all models, marking current value if present
-				const ids = models.map((m) => m.id);
+				const ids = filtered.map((m) => m.id);
 				if (currentValue && !ids.includes(currentValue)) {
 					drop.addOption(currentValue, `${currentValue} (current)`);
 				}
-				for (const model of models) {
+				for (const model of filtered) {
 					drop.addOption(model.id, model.id);
 				}
 				drop.setValue(currentValue);
