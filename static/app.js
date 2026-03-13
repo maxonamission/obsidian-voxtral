@@ -1379,7 +1379,11 @@ queueInfo.addEventListener("click", () => {
 const toggleAutocorrect = document.getElementById("toggle-autocorrect");
 const inputSystemPrompt = document.getElementById("input-system-prompt");
 const selectMicrophone = document.getElementById("select-microphone");
+const selectRealtimeModel = document.getElementById("select-realtime-model");
+const selectBatchModel = document.getElementById("select-batch-model");
+const selectCorrectModel = document.getElementById("select-correct-model");
 let selectedMicId = localStorage.getItem("voxtral-mic") || "";
+let cachedModels = null;
 
 async function loadMicrophones() {
     try {
@@ -1404,6 +1408,62 @@ async function loadMicrophones() {
     }
 }
 
+async function loadModels(currentSettings) {
+    const realtimeVal = currentSettings?.realtime_model || "";
+    const batchVal = currentSettings?.batch_model || "";
+    const correctVal = currentSettings?.correct_model || "";
+
+    // Show current values immediately
+    function setInitial(select, val) {
+        select.innerHTML = "";
+        if (val) {
+            const opt = document.createElement("option");
+            opt.value = val;
+            opt.textContent = val;
+            select.appendChild(opt);
+        }
+    }
+    setInitial(selectRealtimeModel, realtimeVal);
+    setInitial(selectBatchModel, batchVal);
+    setInitial(selectCorrectModel, correctVal);
+
+    try {
+        if (!cachedModels) {
+            const resp = await fetch("/api/models");
+            if (!resp.ok) return;
+            const data = await resp.json();
+            cachedModels = data.models || [];
+        }
+
+        const transcriptionModels = cachedModels.filter(m => !!m.capabilities?.audio_transcription);
+        const chatModels = cachedModels.filter(m => !!m.capabilities?.completion_chat);
+
+        function populate(select, models, currentVal) {
+            select.innerHTML = "";
+            const ids = models.map(m => m.id);
+            if (currentVal && !ids.includes(currentVal)) {
+                const opt = document.createElement("option");
+                opt.value = currentVal;
+                opt.textContent = currentVal + " (huidig)";
+                select.appendChild(opt);
+            }
+            for (const model of models) {
+                const opt = document.createElement("option");
+                opt.value = model.id;
+                opt.textContent = model.id;
+                select.appendChild(opt);
+            }
+            if (currentVal) select.value = currentVal;
+        }
+
+        populate(selectRealtimeModel, transcriptionModels, realtimeVal);
+        populate(selectBatchModel, transcriptionModels, batchVal);
+        populate(selectCorrectModel, chatModels, correctVal);
+    } catch {
+        // Keep current values shown
+    }
+}
+
 function openSettings() {
     settingsOverlay.classList.remove("hidden");
     settingsStatus.textContent = "";
@@ -1415,6 +1475,7 @@ function openSettings() {
         if (data.language) {
             selectLanguage.value = data.language;
         }
+        loadModels(data);
     }).catch(() => {});
     // Load correction settings
     toggleAutocorrect.checked = autoCorrect;
@@ -1457,9 +1518,14 @@ document.getElementById("btn-save-key").addEventListener("click", async () => {
         VOICE_COMMANDS = buildVoiceCommands(activeLang);
     }
 
-    // Build the server payload: language always, API key only if entered
+    // Build the server payload: language + models always, API key only if entered
     const key = inputApiKey.value.trim();
-    const payload = { language: activeLang };
+    const payload = {
+        language: activeLang,
+        realtime_model: selectRealtimeModel.value,
+        batch_model: selectBatchModel.value,
+        correct_model: selectCorrectModel.value,
+    };
     if (key) payload.api_key = key;
 
     if (!key) {

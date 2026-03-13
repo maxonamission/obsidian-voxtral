@@ -1258,7 +1258,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
     containerEl.createEl("h3", { text: "Advanced" });
     const isTranscriptionModel = (m) => {
       var _a;
-      return !((_a = m.capabilities) == null ? void 0 : _a.completion_chat);
+      return !!((_a = m.capabilities) == null ? void 0 : _a.audio_transcription);
     };
     const isChatModel = (m) => {
       var _a;
