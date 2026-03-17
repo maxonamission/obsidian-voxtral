@@ -81,8 +81,8 @@ export default class VoxtralPlugin extends Plugin {
 	private maxConsecutiveFailures = 5;
 	private currentEditor: Editor | null = null;
 	private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
-	/** Editor offset where the current dictation session started */
-	private dictationStartOffset: number | null = null;
+	/** Snapshot of the note text at the moment recording started */
+	private preDictationText: string | null = null;
 
 	/** Whether realtime mode is available on this platform */
 	get canRealtime(): boolean {
@@ -515,7 +515,7 @@ export default class VoxtralPlugin extends Plugin {
 		}
 
 		this.currentEditor = null;
-		this.dictationStartOffset = null;
+		this.preDictationText = null;
 		this.updateStatusBar("idle");
 		new Notice("Voxtral: Recording stopped");
 	}
@@ -580,7 +580,7 @@ export default class VoxtralPlugin extends Plugin {
 
 	private async startRealtimeRecording(editor: Editor): Promise<void> {
 		this.pendingText = "";
-		this.dictationStartOffset = editor.posToOffset(editor.getCursor());
+		this.preDictationText = editor.getValue();
 
 		await this.connectRealtimeWebSocket(editor);
 
@@ -786,14 +786,24 @@ export default class VoxtralPlugin extends Plugin {
 
 	private async autoCorrectAfterStop(editor: Editor): Promise<void> {
 		const fullText = editor.getValue();
-		const startOff = this.dictationStartOffset ?? 0;
-		const dictated = fullText.substring(startOff);
+		const before = this.preDictationText ?? "";
+
+		// Find how much of the pre-existing text still matches at the
+		// start of the current content.  Everything after that boundary
+		// is new (dictated + any edits the user made mid-session).
+		let shared = 0;
+		const limit = Math.min(before.length, fullText.length);
+		while (shared < limit && before[shared] === fullText[shared]) {
+			shared++;
+		}
+
+		const dictated = fullText.substring(shared);
 		if (!dictated.trim()) return;
 
 		try {
 			const corrected = await correctText(dictated, this.settings);
 			if (corrected && corrected !== dictated) {
-				const from = editor.offsetToPos(startOff);
+				const from = editor.offsetToPos(shared);
 				const to = editor.offsetToPos(fullText.length);
 				editor.replaceRange(corrected, from, to);
 			}
