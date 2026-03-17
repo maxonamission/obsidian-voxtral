@@ -1,3 +1,6 @@
+// Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
+// Licensed under GPL-3.0 — see LICENSE for details
+// https://github.com/maxonamission/voxtral-transcribe
 import { App, Platform, PluginSettingTab, Setting } from "obsidian";
 import type VoxtralPlugin from "./main";
 import { AudioRecorder } from "./audio-recorder";
