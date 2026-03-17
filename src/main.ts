@@ -56,16 +56,6 @@ for (const level of ["log", "warn", "error"] as const) {
 	};
 }
 
-/** Check if Node.js APIs are available (desktop Electron only) */
-function hasNodeJs(): boolean {
-	try {
-		require("https");
-		return true;
-	} catch {
-		return false;
-	}
-}
-
 export default class VoxtralPlugin extends Plugin {
 	settings: VoxtralSettings;
 	private recorder: AudioRecorder;
@@ -89,7 +79,7 @@ export default class VoxtralPlugin extends Plugin {
 
 	/** Whether realtime mode is available on this platform */
 	get canRealtime(): boolean {
-		return !Platform.isMobile && hasNodeJs();
+		return !Platform.isMobile;
 	}
 
 	/** Effective mode: fall back to batch on mobile */
