@@ -312,12 +312,18 @@ interface WsConnection {
 const WS_OPEN = 1;
 
 /**
- * Create a WebSocket connection using the browser-native WebSocket API.
- * Authentication is passed via query parameter since the browser
- * WebSocket API does not support custom headers.
+ * Create a WebSocket connection using Node.js builtins (https + crypto).
+ *
+ * The Mistral realtime API requires authentication via the Authorization
+ * header.  The browser-native WebSocket API does not support custom
+ * headers, so we perform a manual HTTP upgrade on Obsidian desktop
+ * (Electron / Node.js).  The require() calls are inside this function
+ * body so they only execute on desktop — mobile uses batch mode and
+ * never reaches this code path.
  */
 function createWebSocket(
 	url: string,
+	headers: Record<string, string>,
 	callbacks: {
 		onOpen: () => void;
 		onMessage: (data: string) => void;
@@ -325,31 +331,206 @@ function createWebSocket(
 		onClose: () => void;
 	}
 ): WsConnection {
-	const ws = new WebSocket(url);
+	// Lazy-require Node.js builtins — only executes on desktop where
+	// realtime mode is available.  Mobile uses batch mode exclusively.
+	// eslint-disable-next-line @typescript-eslint/no-require-imports -- desktop-only: browser WebSocket cannot send Authorization headers required by Mistral API
+	const https = require("https") as typeof import("https");
+	// eslint-disable-next-line @typescript-eslint/no-require-imports -- desktop-only: needed for WebSocket handshake key and frame masking (RFC 6455)
+	const crypto = require("crypto") as typeof import("crypto");
+
+	const parsed = new URL(url);
+	const wsKey = crypto.randomBytes(16).toString("base64");
 
 	const conn: WsConnection = {
 		readyState: 0,
-		send: (data: string) => ws.send(data),
-		close: () => ws.close(),
+		send: () => {},
+		close: () => {},
 	};
 
-	ws.addEventListener("open", () => {
+	const req = https.request(
+		{
+			hostname: parsed.hostname,
+			port: parsed.port || 443,
+			path: parsed.pathname + parsed.search,
+			method: "GET",
+			headers: {
+				...headers,
+				Connection: "Upgrade",
+				Upgrade: "websocket",
+				"Sec-WebSocket-Version": "13",
+				"Sec-WebSocket-Key": wsKey,
+			},
+		},
+		(res) => {
+			callbacks.onError(
+				new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
+			);
+		}
+	);
+
+	req.on("upgrade", (_res: unknown, socket: import("net").Socket) => {
 		conn.readyState = WS_OPEN;
+
+		conn.send = (data: string) => {
+			const payload = Buffer.from(data, "utf-8");
+			const mask = crypto.randomBytes(4);
+			let header: Buffer;
+
+			if (payload.length < 126) {
+				header = Buffer.alloc(6);
+				header[0] = 0x81;
+				header[1] = 0x80 | payload.length;
+				mask.copy(header, 2);
+			} else if (payload.length < 65536) {
+				header = Buffer.alloc(8);
+				header[0] = 0x81;
+				header[1] = 0x80 | 126;
+				header.writeUInt16BE(payload.length, 2);
+				mask.copy(header, 4);
+			} else {
+				header = Buffer.alloc(14);
+				header[0] = 0x81;
+				header[1] = 0x80 | 127;
+				header.writeBigUInt64BE(BigInt(payload.length), 2);
+				mask.copy(header, 10);
+			}
+
+			const masked = Buffer.alloc(payload.length);
+			for (let i = 0; i < payload.length; i++) {
+				masked[i] = payload[i] ^ mask[i % 4];
+			}
+
+			socket.write(Buffer.concat([header, masked]));
+		};
+
+		conn.close = () => {
+			conn.readyState = 3;
+			const closeFrame = Buffer.alloc(6);
+			closeFrame[0] = 0x88;
+			closeFrame[1] = 0x80;
+			const closeMask = crypto.randomBytes(4);
+			closeMask.copy(closeFrame, 2);
+			try {
+				socket.write(closeFrame);
+			} catch {
+				// Socket may already be closed
+			}
+			socket.end();
+		};
+
+		// Client-side ping every 15s to keep the connection alive
+		const pingInterval = setInterval(() => {
+			if (conn.readyState !== WS_OPEN) {
+				clearInterval(pingInterval);
+				return;
+			}
+			try {
+				const pingFrame = Buffer.alloc(6);
+				pingFrame[0] = 0x89; // FIN + ping opcode
+				pingFrame[1] = 0x80; // MASK + 0 length
+				const pingMask = crypto.randomBytes(4);
+				pingMask.copy(pingFrame, 2);
+				socket.write(pingFrame);
+			} catch {
+				// Socket may be dead
+			}
+		}, 15000);
+
 		callbacks.onOpen();
+
+		let buffer = Buffer.alloc(0);
+
+		socket.on("data", (chunk: Buffer) => {
+			buffer = Buffer.concat([buffer, chunk]);
+
+			while (buffer.length >= 2) {
+				const firstByte = buffer[0];
+				const secondByte = buffer[1];
+				const opcode = firstByte & 0x0f;
+				const isMasked = (secondByte & 0x80) !== 0;
+				let payloadLength = secondByte & 0x7f;
+				let offset = 2;
+
+				if (payloadLength === 126) {
+					if (buffer.length < 4) return;
+					payloadLength = buffer.readUInt16BE(2);
+					offset = 4;
+				} else if (payloadLength === 127) {
+					if (buffer.length < 10) return;
+					payloadLength = Number(buffer.readBigUInt64BE(2));
+					offset = 10;
+				}
+
+				if (isMasked) offset += 4;
+
+				if (buffer.length < offset + payloadLength) return;
+
+				let payload = buffer.subarray(offset, offset + payloadLength);
+
+				if (isMasked) {
+					const maskKey = buffer.subarray(offset - 4, offset);
+					payload = Buffer.from(payload);
+					for (let i = 0; i < payload.length; i++) {
+						payload[i] ^= maskKey[i % 4];
+					}
+				}
+
+				buffer = buffer.subarray(offset + payloadLength);
+
+				if (opcode === 0x01) {
+					// Text frame
+					callbacks.onMessage(payload.toString("utf-8"));
+				} else if (opcode === 0x08) {
+					// Close frame
+					conn.readyState = 3;
+					clearInterval(pingInterval);
+					socket.end();
+					callbacks.onClose();
+					return;
+				} else if (opcode === 0x09) {
+					// Ping — send pong (RFC 6455 §5.5.3)
+					const pongMask = crypto.randomBytes(4);
+					const pongLen = payload.length;
+					let pongHeader: Buffer;
+					if (pongLen < 126) {
+						pongHeader = Buffer.alloc(6);
+						pongHeader[0] = 0x8a;
+						pongHeader[1] = 0x80 | pongLen;
+						pongMask.copy(pongHeader, 2);
+					} else {
+						pongHeader = Buffer.alloc(8);
+						pongHeader[0] = 0x8a;
+						pongHeader[1] = 0x80 | 126;
+						pongHeader.writeUInt16BE(pongLen, 2);
+						pongMask.copy(pongHeader, 4);
+					}
+					const maskedPong = Buffer.from(payload);
+					for (let i = 0; i < maskedPong.length; i++) {
+						maskedPong[i] ^= pongMask[i % 4];
+					}
+					socket.write(Buffer.concat([pongHeader, maskedPong]));
+				}
+				// opcode 0x0a (pong) — silently ignore
+			}
+		});
+
+		socket.on("close", () => {
+			conn.readyState = 3;
+			clearInterval(pingInterval);
+			callbacks.onClose();
+		});
+
+		socket.on("error", (err: Error) => {
+			clearInterval(pingInterval);
+			callbacks.onError(err);
+		});
 	});
 
-	ws.addEventListener("message", (event: MessageEvent) => {
-		callbacks.onMessage(event.data as string);
+	req.on("error", (err: Error) => {
+		callbacks.onError(err);
 	});
 
-	ws.addEventListener("error", () => {
-		callbacks.onError(new Error("WebSocket connection error"));
-	});
-
-	ws.addEventListener("close", () => {
-		conn.readyState = 3;
-		callbacks.onClose();
-	});
+	req.end();
 
 	return conn;
 }
@@ -370,7 +551,6 @@ export class RealtimeTranscriber {
 
 		const params = new URLSearchParams({
 			model: this.settings.realtimeModel,
-			api_key: this.settings.apiKey,
 		});
 
 		const url = `wss://api.mistral.ai/v1/audio/transcriptions/realtime?${params}`;
@@ -383,6 +563,7 @@ export class RealtimeTranscriber {
 
 			this.ws = createWebSocket(
 				url,
+				{ Authorization: `Bearer ${this.settings.apiKey}` },
 				{
 					onOpen: () => {
 						// Wait for session.created
