@@ -9,7 +9,7 @@ Dictate directly into Markdown — insert headings, lists, and to-dos by voice, 
 - **Real-time streaming** (desktop) — text appears as you speak
 - **Batch mode with tap-to-send** (desktop + mobile) — send audio chunks while you keep talking
 - **Voice commands** — insert headings, bullet points, to-do items, numbered lists, and more by voice
-- **13 languages** — voice commands automatically adapt to the selected language (Dutch, English, French, German, Spanish, Portuguese, Italian, Russian, Chinese, Hindi, Arabic, Japanese, Korean)
+- **13 languages** — voice commands automatically adapt to the selected language; English always works as fallback (Dutch, English, French, German, Spanish, Portuguese, Italian, Russian, Chinese, Hindi, Arabic, Japanese, Korean)
 - **Voice command help panel** — shows available commands and trigger phrases for the active language
 - **Auto-correction** — spelling, capitalization, and punctuation are automatically corrected after recording
 - **Inline correction instructions** — say "for the correction: ..." and the corrector will follow your instructions
