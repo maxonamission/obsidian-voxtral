@@ -1767,7 +1767,7 @@ for (const level of ["debug", "warn", "error"]) {
     original(...args);
   };
 }
-var VoxtralPlugin = class extends import_obsidian4.Plugin {
+var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
     this.realtimeTranscriber = null;
@@ -1785,9 +1785,10 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.maxConsecutiveFailures = 5;
     this.currentEditor = null;
     this.keydownHandler = null;
-    /** Snapshot of the note at recording start — used to isolate
-     *  dictated text for auto-correction after stopping. */
-    this.preDictationSnapshot = null;
+    /** Ranges of text inserted during realtime dictation.
+     *  Offsets are always in the current document coordinate system —
+     *  existing ranges are adjusted when a new insertion happens. */
+    this.dictatedRanges = [];
   }
   /** Whether realtime mode is available on this platform */
   get canRealtime() {
@@ -2116,7 +2117,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       new import_obsidian4.Notice(`Error stopping recording: ${e}`);
     }
     this.currentEditor = null;
-    this.preDictationSnapshot = null;
+    this.dictatedRanges = [];
     this.updateStatusBar("idle");
     new import_obsidian4.Notice("Recording stopped");
   }
@@ -2162,7 +2163,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
   // ── Realtime recording ──
   async startRealtimeRecording(editor) {
     this.pendingText = "";
-    this.preDictationSnapshot = editor.getValue();
+    this.dictatedRanges = [];
     await this.connectRealtimeWebSocket(editor);
     const deviceId = this.settings.microphoneDeviceId || void 0;
     await this.recorder.start(deviceId, (pcmData) => {
@@ -2262,12 +2263,12 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
         void this.stopRecording();
         return;
       }
-      processText(editor, sentence + " ");
+      this.trackProcessText(editor, sentence + " ");
     }
   }
   handleRealtimeDone(editor, _text) {
     if (this.pendingText.trim()) {
-      processText(editor, this.pendingText.trim() + " ");
+      this.trackProcessText(editor, this.pendingText.trim() + " ");
       this.pendingText = "";
     }
   }
@@ -2277,7 +2278,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     await new Promise((resolve) => setTimeout(resolve, 1e3));
     const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
     if (view && this.pendingText.trim()) {
-      processText(view.editor, this.pendingText.trim());
+      this.trackProcessText(view.editor, this.pendingText.trim());
       this.pendingText = "";
     }
     (_b = this.realtimeTranscriber) == null ? void 0 : _b.close();
@@ -2325,41 +2326,100 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       new import_obsidian4.Notice(`Transcription failed: ${e}`);
     }
   }
+  // ── Dictation range tracking ──
+  /**
+   * Wrap processText to track what was inserted in the editor.
+   * Records the cursor offset before and after to determine the
+   * range of inserted text, and adjusts existing ranges when an
+   * insertion shifts them.
+   */
+  trackProcessText(editor, text) {
+    const offsetBefore = editor.posToOffset(editor.getCursor());
+    processText(editor, text);
+    const offsetAfter = editor.posToOffset(editor.getCursor());
+    const delta = offsetAfter - offsetBefore;
+    if (delta > 0) {
+      for (const range of this.dictatedRanges) {
+        if (range.from >= offsetBefore) {
+          range.from += delta;
+          range.to += delta;
+        } else if (range.to > offsetBefore) {
+          range.to += delta;
+        }
+      }
+      this.dictatedRanges.push({ from: offsetBefore, to: offsetAfter });
+    } else if (delta < 0) {
+      const deletedLen = -delta;
+      const deletedFrom = offsetAfter;
+      const deletedTo = offsetBefore;
+      for (const range of this.dictatedRanges) {
+        if (range.from >= deletedTo) {
+          range.from -= deletedLen;
+          range.to -= deletedLen;
+        } else if (range.from >= deletedFrom) {
+          range.from = deletedFrom;
+          range.to = range.to <= deletedTo ? deletedFrom : range.to - deletedLen;
+        } else if (range.to > deletedFrom) {
+          range.to = range.to <= deletedTo ? deletedFrom : range.to - deletedLen;
+        }
+      }
+      this.dictatedRanges = this.dictatedRanges.filter(
+        (r) => r.to > r.from
+      );
+    }
+  }
   // ── Text correction ──
   /**
-   * After stopping realtime recording, correct only the text that
-   * was added during dictation.  We diff the pre-recording snapshot
-   * against the current note to find the longest common prefix and
-   * suffix — the middle part is what was dictated.
-   *
-   * This works regardless of where in the note the cursor was when
-   * dictation started, or if the user moved the cursor mid-session.
+   * Merge overlapping or adjacent dictated ranges into a minimal set.
+   */
+  static mergeRanges(ranges) {
+    if (ranges.length === 0) return [];
+    const sorted = [...ranges].sort((a, b) => a.from - b.from);
+    const merged = [sorted[0]];
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = merged[merged.length - 1];
+      const cur = sorted[i];
+      if (cur.from <= prev.to) {
+        prev.to = Math.max(prev.to, cur.to);
+      } else {
+        merged.push({ ...cur });
+      }
+    }
+    return merged;
+  }
+  /**
+   * After stopping realtime recording, correct only the text
+   * that was actually dictated.  Each tracked range is corrected
+   * independently, processed from end to start so that earlier
+   * offsets remain valid after replacements.
    */
   async autoCorrectAfterStop(editor) {
-    if (this.preDictationSnapshot === null) return;
-    const before = this.preDictationSnapshot;
-    const after = editor.getValue();
-    if (before === after) return;
-    let prefixLen = 0;
-    const minLen = Math.min(before.length, after.length);
-    while (prefixLen < minLen && before[prefixLen] === after[prefixLen]) {
-      prefixLen++;
-    }
-    let suffixLen = 0;
-    while (suffixLen < minLen - prefixLen && before[before.length - 1 - suffixLen] === after[after.length - 1 - suffixLen]) {
-      suffixLen++;
-    }
-    const dictated = after.substring(prefixLen, after.length - suffixLen);
-    if (!dictated.trim()) return;
-    try {
-      const corrected = await correctText(dictated, this.settings);
-      if (corrected && corrected !== dictated) {
-        const from = editor.offsetToPos(prefixLen);
-        const to = editor.offsetToPos(after.length - suffixLen);
-        editor.replaceRange(corrected, from, to);
+    if (this.dictatedRanges.length === 0) return;
+    const merged = _VoxtralPlugin.mergeRanges(this.dictatedRanges);
+    merged.sort((a, b) => b.from - a.from);
+    const fullText = editor.getValue();
+    const corrections = [];
+    for (const range of merged) {
+      if (range.from >= fullText.length || range.to > fullText.length) {
+        continue;
       }
-    } catch (e) {
-      console.error("Voxtral: Auto-correct failed", e);
+      const text = fullText.substring(range.from, range.to);
+      if (!text.trim()) continue;
+      corrections.push({
+        from: editor.offsetToPos(range.from),
+        to: editor.offsetToPos(range.to),
+        text
+      });
+    }
+    for (const c of corrections) {
+      try {
+        const corrected = await correctText(c.text, this.settings);
+        if (corrected && corrected !== c.text) {
+          editor.replaceRange(corrected, c.from, c.to);
+        }
+      } catch (e) {
+        console.error("Voxtral: Auto-correct failed", e);
+      }
     }
   }
   async exportLogs() {
