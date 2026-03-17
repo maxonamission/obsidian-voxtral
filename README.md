@@ -17,9 +17,7 @@ Lokale spraak-naar-tekst applicatie met realtime streaming via de [Mistral](http
 - **Microfoon status** — statuslampje met stabiele beoordeling van je microfoonniveau
 - **Slim scrollen** — scroll omhoog om terug te lezen terwijl je dicteert, auto-scroll hervat als je terug naar beneden scrollt
 
-## Steun dit project
-
-Dit hele project is gebouwd met de stem — en eerlijk gezegd ook met een flinke dosis hulp van AI, want ik spreek wel Nederlands maar geen TypeScript. Als je het resultaat waardeert, houd ik me warm met koffie.
+Need coffee to process all this? Me too.
 
 <a href="https://buymeacoffee.com/maxonamission" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
 
