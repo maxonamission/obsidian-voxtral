@@ -23,7 +23,7 @@ Dictate directly into Markdown — insert headings, lists, and to-dos by voice, 
 ## Requirements
 
 - **Obsidian** v1.0.0 or newer
-- **Mistral API key** — free to create at [platform.mistral.ai](https://console.mistral.ai/)
+- **Mistral API key** — free to create at [console.mistral.ai](https://console.mistral.ai/)
 
 ## Installation
 
@@ -96,7 +96,7 @@ When switching apps on mobile, you can configure what happens to an active recor
 
 | Setting | Description |
 |---|---|
-| Mistral API key | Your API key from platform.mistral.ai |
+| Mistral API key | Your API key from console.mistral.ai |
 | Microphone | Which microphone to use |
 | Mode | Realtime (desktop only) or Batch |
 | Enter = tap-to-send | Use Enter to send audio chunks when mic is live (batch mode, default: on) |
