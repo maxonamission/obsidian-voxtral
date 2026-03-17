@@ -110,7 +110,7 @@ export class VoxtralHelpView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Voice Commands";
+		return "Voice commands";
 	}
 
 	getIcon(): string {
@@ -123,6 +123,7 @@ export class VoxtralHelpView extends ItemView {
 		this.render();
 	}
 
+	// eslint-disable-next-line @typescript-eslint/require-await -- base class requires async signature
 	async onOpen(): Promise<void> {
 		this.render();
 	}
@@ -169,6 +170,7 @@ export class VoxtralHelpView extends ItemView {
 		}
 	}
 
+	// eslint-disable-next-line @typescript-eslint/require-await -- base class requires async signature
 	async onClose(): Promise<void> {
 		this.contentEl.empty();
 	}

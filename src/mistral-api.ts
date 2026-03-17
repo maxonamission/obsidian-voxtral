@@ -1,7 +1,7 @@
 // Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
 // Licensed under GPL-3.0 — see LICENSE for details
 // https://github.com/maxonamission/voxtral-transcribe
-import { Platform, requestUrl } from "obsidian";
+import { requestUrl } from "obsidian";
 import { VoxtralSettings, DEFAULT_CORRECT_PROMPT } from "./types";
 
 const BASE_URL = "https://api.mistral.ai";
@@ -167,87 +167,52 @@ export async function transcribeBatch(
 			: "webm";
 	const mimeType = audioBlob.type || `audio/${ext}`;
 
-	// On mobile, use Obsidian's requestUrl (bypasses CORS / platform
-	// restrictions) with a manually built multipart body, since
-	// requestUrl does not support FormData.
-	if (Platform.isMobile) {
-		const boundary = `----VoxtralBoundary${Date.now()}`;
-		const arrayBuf = await audioBlob.arrayBuffer();
-		const fileBytes = new Uint8Array(arrayBuf);
+	// Use Obsidian's requestUrl with a manually built multipart body,
+	// since requestUrl does not support FormData.
+	const boundary = `----VoxtralBoundary${Date.now()}`;
+	const arrayBuf = await audioBlob.arrayBuffer();
+	const fileBytes = new Uint8Array(arrayBuf);
 
-		// Build multipart parts as text
-		let textParts = "";
-		textParts += `--${boundary}\r\n`;
-		textParts += `Content-Disposition: form-data; name="file"; filename="recording.${ext}"\r\n`;
-		textParts += `Content-Type: ${mimeType}\r\n\r\n`;
+	let textParts = "";
+	textParts += `--${boundary}\r\n`;
+	textParts += `Content-Disposition: form-data; name="file"; filename="recording.${ext}"\r\n`;
+	textParts += `Content-Type: ${mimeType}\r\n\r\n`;
 
-		// We'll append the binary after the text header
-		const afterFile = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${settings.batchModel}\r\n`;
+	const afterFile = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${settings.batchModel}\r\n`;
 
-		let extraFields = "";
-		if (settings.language) {
-			extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${settings.language}\r\n`;
-		}
-		if (diarize) {
-			extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="diarize"\r\n\r\ntrue\r\n`;
-		}
-		extraFields += `--${boundary}--\r\n`;
-
-		// Combine text + binary + text into a single ArrayBuffer
-		const enc = new TextEncoder();
-		const headerBuf = enc.encode(textParts);
-		const tailBuf = enc.encode(afterFile + extraFields);
-		const body = new Uint8Array(headerBuf.length + fileBytes.length + tailBuf.length);
-		body.set(headerBuf, 0);
-		body.set(fileBytes, headerBuf.length);
-		body.set(tailBuf, headerBuf.length + fileBytes.length);
-
-		const response = await requestUrl({
-			url: `${BASE_URL}/v1/audio/transcriptions`,
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${settings.apiKey}`,
-				"Content-Type": `multipart/form-data; boundary=${boundary}`,
-			},
-			body: body.buffer,
-		});
-
-		if (response.status !== 200) {
-			throw new Error(
-				`Transcription failed: ${sanitizeApiError(response.status, response.text)}`
-			);
-		}
-		return response.json?.text || "";
-	}
-
-	// Desktop: use standard fetch + FormData
-	const formData = new FormData();
-	formData.append("file", audioBlob, `recording.${ext}`);
-	formData.append("model", settings.batchModel);
+	let extraFields = "";
 	if (settings.language) {
-		formData.append("language", settings.language);
+		extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${settings.language}\r\n`;
 	}
 	if (diarize) {
-		formData.append("diarize", "true");
+		extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="diarize"\r\n\r\ntrue\r\n`;
 	}
+	extraFields += `--${boundary}--\r\n`;
 
-	const response = await fetch(`${BASE_URL}/v1/audio/transcriptions`, {
+	const enc = new TextEncoder();
+	const headerBuf = enc.encode(textParts);
+	const tailBuf = enc.encode(afterFile + extraFields);
+	const body = new Uint8Array(headerBuf.length + fileBytes.length + tailBuf.length);
+	body.set(headerBuf, 0);
+	body.set(fileBytes, headerBuf.length);
+	body.set(tailBuf, headerBuf.length + fileBytes.length);
+
+	const response = await requestUrl({
+		url: `${BASE_URL}/v1/audio/transcriptions`,
 		method: "POST",
 		headers: {
 			Authorization: `Bearer ${settings.apiKey}`,
+			"Content-Type": `multipart/form-data; boundary=${boundary}`,
 		},
-		body: formData,
+		body: body.buffer,
 	});
 
-	if (!response.ok) {
-		const err = await response.text();
+	if (response.status !== 200) {
 		throw new Error(
-			`Transcription failed: ${sanitizeApiError(response.status, err)}`
+			`Transcription failed: ${sanitizeApiError(response.status, response.text)}`
 		);
 	}
-
-	const data = await response.json();
-	return data.text || "";
+	return response.json?.text || "";
 }
 
 // ── Text correction ──
@@ -425,7 +390,7 @@ export class RealtimeTranscriber {
 					onMessage: (data: string) => {
 						try {
 							const msg = JSON.parse(data);
-							console.log(
+							console.debug(
 								`Voxtral WS ← ${msg.type}`,
 								msg.type === "transcription.text.delta"
 									? msg.text?.slice(0, 50)
@@ -439,7 +404,7 @@ export class RealtimeTranscriber {
 									resolve();
 									break;
 								case "session.updated":
-									console.log(
+									console.debug(
 										"Voxtral WS: session updated",
 										JSON.stringify(msg.session || {})
 									);
@@ -448,7 +413,7 @@ export class RealtimeTranscriber {
 									this.callbacks.onDelta(msg.text || "");
 									break;
 								case "transcription.done":
-									console.log(
+									console.debug(
 										"Voxtral WS: transcription.done — full text:",
 										msg.text?.slice(0, 200)
 									);
@@ -464,7 +429,7 @@ export class RealtimeTranscriber {
 									);
 									break;
 								default:
-									console.log(
+									console.debug(
 										"Voxtral WS: unknown message type:",
 										msg.type,
 										data.slice(0, 300)
@@ -489,7 +454,7 @@ export class RealtimeTranscriber {
 						);
 					},
 					onClose: () => {
-						console.log(
+						console.debug(
 							`Voxtral WS: connection closed (intentional=${this.intentionallyClosed})`
 						);
 						this.ws = null;
