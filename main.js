@@ -88,33 +88,36 @@ var AudioRecorder = class {
       audio: deviceId ? { deviceId: { exact: deviceId } } : true
     };
     this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-    const audioTrack = this.stream.getAudioTracks()[0];
-    this.activeMicLabel = (audioTrack == null ? void 0 : audioTrack.label) || "Onbekende microfoon";
-    this.audioContext = new AudioContext({ sampleRate: 16e3 });
-    this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
-    if (this.onPcmChunk) {
-      this.processorNode = this.audioContext.createScriptProcessor(
-        4096,
-        1,
-        1
+    try {
+      const audioTrack = this.stream.getAudioTracks()[0];
+      this.activeMicLabel = (audioTrack == null ? void 0 : audioTrack.label) || "Onbekende microfoon";
+      this.audioContext = new AudioContext({ sampleRate: 16e3 });
+      this.sourceNode = this.audioContext.createMediaStreamSource(
+        this.stream
       );
-      this.processorNode.onaudioprocess = (e) => {
-        this.processAudio(e);
-      };
-      this.sourceNode.connect(this.processorNode);
-      this.processorNode.connect(this.audioContext.destination);
-    }
-    this.chunks = [];
-    this.mediaRecorder = new MediaRecorder(this.stream, {
-      mimeType: this.getSupportedMimeType()
-    });
-    this.mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        this.chunks.push(e.data);
+      if (this.onPcmChunk) {
+        this.processorNode = this.audioContext.createScriptProcessor(4096, 1, 1);
+        this.processorNode.onaudioprocess = (e) => {
+          this.processAudio(e);
+        };
+        this.sourceNode.connect(this.processorNode);
+        this.processorNode.connect(this.audioContext.destination);
       }
-    };
-    this.mediaRecorder.start(1e3);
-    this.lastFlushTime = Date.now();
+      this.chunks = [];
+      this.mediaRecorder = new MediaRecorder(this.stream, {
+        mimeType: this.getSupportedMimeType()
+      });
+      this.mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          this.chunks.push(e.data);
+        }
+      };
+      this.mediaRecorder.start(1e3);
+      this.lastFlushTime = Date.now();
+    } catch (e) {
+      this.cleanup();
+      throw e;
+    }
   }
   processAudio(e) {
     var _a;
@@ -137,7 +140,16 @@ var AudioRecorder = class {
         resolve(new Blob([]));
         return;
       }
+      const timeout = setTimeout(() => {
+        console.warn("Voxtral: flushChunk timed out after 5s");
+        const blob = new Blob(this.chunks, {
+          type: this.getSupportedMimeType()
+        });
+        this.chunks = [];
+        resolve(blob);
+      }, 5e3);
       this.mediaRecorder.onstop = () => {
+        clearTimeout(timeout);
         const now = Date.now();
         this.lastChunkDurationSec = (now - this.lastFlushTime) / 1e3;
         this.lastFlushTime = now;
@@ -247,6 +259,35 @@ var AudioRecorder = class {
 // src/mistral-api.ts
 var import_obsidian = require("obsidian");
 var BASE_URL = "https://api.mistral.ai";
+function sanitizeApiError(status, rawBody) {
+  var _a;
+  try {
+    const parsed = JSON.parse(rawBody);
+    const msg = (parsed == null ? void 0 : parsed.message) || ((_a = parsed == null ? void 0 : parsed.error) == null ? void 0 : _a.message);
+    if (typeof msg === "string" && msg.length < 200) {
+      return `HTTP ${status}: ${msg}`;
+    }
+  } catch (e) {
+  }
+  switch (status) {
+    case 401:
+      return "HTTP 401: Invalid or expired API key";
+    case 403:
+      return "HTTP 403: Access denied";
+    case 404:
+      return "HTTP 404: API endpoint not found (check model name)";
+    case 413:
+      return "HTTP 413: Audio file too large";
+    case 429:
+      return "HTTP 429: Rate limit exceeded \u2014 try again later";
+    case 500:
+    case 502:
+    case 503:
+      return `HTTP ${status}: Mistral API server error \u2014 try again later`;
+    default:
+      return `HTTP ${status}: Request failed`;
+  }
+}
 async function listModels(apiKey) {
   if (!apiKey) return [];
   try {
@@ -372,7 +413,7 @@ true\r
     });
     if (response2.status !== 200) {
       throw new Error(
-        `Transcription failed (${response2.status}): ${response2.text}`
+        `Transcription failed: ${sanitizeApiError(response2.status, response2.text)}`
       );
     }
     return ((_a = response2.json) == null ? void 0 : _a.text) || "";
@@ -395,7 +436,9 @@ true\r
   });
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Transcription failed (${response.status}): ${err}`);
+    throw new Error(
+      `Transcription failed: ${sanitizeApiError(response.status, err)}`
+    );
   }
   const data = await response.json();
   return data.text || "";
@@ -422,7 +465,7 @@ async function correctText(text, settings) {
   });
   if (response.status !== 200) {
     throw new Error(
-      `Correction failed (${response.status}): ${response.text}`
+      `Correction failed: ${sanitizeApiError(response.status, response.text)}`
     );
   }
   const data = response.json;
