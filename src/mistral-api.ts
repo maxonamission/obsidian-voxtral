@@ -1,3 +1,6 @@
+// Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
+// Licensed under GPL-3.0 — see LICENSE for details
+// https://github.com/maxonamission/voxtral-transcribe
 import { Platform, requestUrl } from "obsidian";
 import { VoxtralSettings, DEFAULT_CORRECT_PROMPT } from "./types";
 

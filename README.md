@@ -116,4 +116,4 @@ npm run build  # production build
 
 ## License
 
-[MIT](LICENSE)
+[GPL-3.0](LICENSE) — Copyright (c) 2026 Max Kloosterman
