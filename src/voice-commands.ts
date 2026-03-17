@@ -178,7 +178,8 @@ export function matchCommand(rawText: string): CommandMatch | null {
 	for (const cmd of COMMAND_DEFS) {
 		const patterns = getPatternsForCommand(cmd.id, activeLang);
 		for (const pattern of patterns) {
-			if (normalized.endsWith(pattern)) {
+			const normPattern = normalizeCommand(pattern);
+			if (normalized.endsWith(normPattern)) {
 				const patternWordCount = pattern.split(/\s+/).length;
 				const rawWords = rawText.trimEnd().split(/\s+/);
 				const textBefore = rawWords

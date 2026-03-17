@@ -3,6 +3,44 @@ import { VoxtralSettings, DEFAULT_CORRECT_PROMPT } from "./types";
 
 const BASE_URL = "https://api.mistral.ai";
 
+/**
+ * Extract a user-friendly error message from an API response.
+ * Avoids leaking raw response bodies (which may contain internal
+ * details, stack traces, or echoed credentials) to the UI.
+ */
+function sanitizeApiError(status: number, rawBody: string): string {
+	// Try to extract a clean "message" field from JSON error responses
+	try {
+		const parsed = JSON.parse(rawBody);
+		const msg = parsed?.message || parsed?.error?.message;
+		if (typeof msg === "string" && msg.length < 200) {
+			return `HTTP ${status}: ${msg}`;
+		}
+	} catch {
+		// Not JSON — fall through
+	}
+
+	// Common status codes with human-readable descriptions
+	switch (status) {
+		case 401:
+			return "HTTP 401: Invalid or expired API key";
+		case 403:
+			return "HTTP 403: Access denied";
+		case 404:
+			return "HTTP 404: API endpoint not found (check model name)";
+		case 413:
+			return "HTTP 413: Audio file too large";
+		case 429:
+			return "HTTP 429: Rate limit exceeded — try again later";
+		case 500:
+		case 502:
+		case 503:
+			return `HTTP ${status}: Mistral API server error — try again later`;
+		default:
+			return `HTTP ${status}: Request failed`;
+	}
+}
+
 // ── Model listing ──
 
 export interface MistralModel {
@@ -173,7 +211,7 @@ export async function transcribeBatch(
 
 		if (response.status !== 200) {
 			throw new Error(
-				`Transcription failed (${response.status}): ${response.text}`
+				`Transcription failed: ${sanitizeApiError(response.status, response.text)}`
 			);
 		}
 		return response.json?.text || "";
@@ -200,7 +238,9 @@ export async function transcribeBatch(
 
 	if (!response.ok) {
 		const err = await response.text();
-		throw new Error(`Transcription failed (${response.status}): ${err}`);
+		throw new Error(
+			`Transcription failed: ${sanitizeApiError(response.status, err)}`
+		);
 	}
 
 	const data = await response.json();
@@ -236,7 +276,7 @@ export async function correctText(
 
 	if (response.status !== 200) {
 		throw new Error(
-			`Correction failed (${response.status}): ${response.text}`
+			`Correction failed: ${sanitizeApiError(response.status, response.text)}`
 		);
 	}
 
