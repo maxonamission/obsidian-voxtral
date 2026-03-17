@@ -2,8 +2,6 @@
 
 Dictate directly into Markdown — insert headings, lists, and to-dos by voice, correct text on the fly, and keep talking while edits happen. Speech-to-text dictation for [Obsidian](https://obsidian.md) powered by [Mistral's Voxtral](https://mistral.ai/) models.
 
-<a href="https://buymeacoffee.com/maxonamission" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
-
 ## Features
 
 - **Real-time streaming** (desktop) — text appears as you speak
@@ -19,6 +17,10 @@ Dictate directly into Markdown — insert headings, lists, and to-dos by voice, 
 - **Auto-pause on focus loss** — configurable behavior when switching apps on mobile
 - **Configurable Enter-to-send** — optionally use Enter as tap-to-send when the mic is live (batch mode)
 - **Typing cooldown** — adjustable delay before the mic resumes after typing
+
+Need coffee to process all this? Me too.
+
+<a href="https://buymeacoffee.com/maxonamission" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
 
 ## Requirements
 
