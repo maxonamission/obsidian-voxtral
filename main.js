@@ -1785,9 +1785,9 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.maxConsecutiveFailures = 5;
     this.currentEditor = null;
     this.keydownHandler = null;
-    /** Cursor offset at the moment recording started — everything
-     *  inserted after this position is considered dictated text. */
-    this.dictationStartOffset = null;
+    /** Snapshot of the note at recording start — used to isolate
+     *  dictated text for auto-correction after stopping. */
+    this.preDictationSnapshot = null;
   }
   /** Whether realtime mode is available on this platform */
   get canRealtime() {
@@ -2116,7 +2116,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       new import_obsidian4.Notice(`Error stopping recording: ${e}`);
     }
     this.currentEditor = null;
-    this.dictationStartOffset = null;
+    this.preDictationSnapshot = null;
     this.updateStatusBar("idle");
     new import_obsidian4.Notice("Recording stopped");
   }
@@ -2162,7 +2162,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
   // ── Realtime recording ──
   async startRealtimeRecording(editor) {
     this.pendingText = "";
-    this.dictationStartOffset = editor.posToOffset(editor.getCursor());
+    this.preDictationSnapshot = editor.getValue();
     await this.connectRealtimeWebSocket(editor);
     const deviceId = this.settings.microphoneDeviceId || void 0;
     await this.recorder.start(deviceId, (pcmData) => {
@@ -2326,17 +2326,36 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     }
   }
   // ── Text correction ──
+  /**
+   * After stopping realtime recording, correct only the text that
+   * was added during dictation.  We diff the pre-recording snapshot
+   * against the current note to find the longest common prefix and
+   * suffix — the middle part is what was dictated.
+   *
+   * This works regardless of where in the note the cursor was when
+   * dictation started, or if the user moved the cursor mid-session.
+   */
   async autoCorrectAfterStop(editor) {
-    if (this.dictationStartOffset === null) return;
-    const fullText = editor.getValue();
-    const start = this.dictationStartOffset;
-    const dictated = fullText.substring(start);
+    if (this.preDictationSnapshot === null) return;
+    const before = this.preDictationSnapshot;
+    const after = editor.getValue();
+    if (before === after) return;
+    let prefixLen = 0;
+    const minLen = Math.min(before.length, after.length);
+    while (prefixLen < minLen && before[prefixLen] === after[prefixLen]) {
+      prefixLen++;
+    }
+    let suffixLen = 0;
+    while (suffixLen < minLen - prefixLen && before[before.length - 1 - suffixLen] === after[after.length - 1 - suffixLen]) {
+      suffixLen++;
+    }
+    const dictated = after.substring(prefixLen, after.length - suffixLen);
     if (!dictated.trim()) return;
     try {
       const corrected = await correctText(dictated, this.settings);
       if (corrected && corrected !== dictated) {
-        const from = editor.offsetToPos(start);
-        const to = editor.offsetToPos(fullText.length);
+        const from = editor.offsetToPos(prefixLen);
+        const to = editor.offsetToPos(after.length - suffixLen);
         editor.replaceRange(corrected, from, to);
       }
     } catch (e) {

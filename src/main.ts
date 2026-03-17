@@ -74,9 +74,9 @@ export default class VoxtralPlugin extends Plugin {
 	private maxConsecutiveFailures = 5;
 	private currentEditor: Editor | null = null;
 	private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
-	/** Cursor offset at the moment recording started — everything
-	 *  inserted after this position is considered dictated text. */
-	private dictationStartOffset: number | null = null;
+	/** Snapshot of the note at recording start — used to isolate
+	 *  dictated text for auto-correction after stopping. */
+	private preDictationSnapshot: string | null = null;
 
 	/** Whether realtime mode is available on this platform */
 	get canRealtime(): boolean {
@@ -508,7 +508,7 @@ export default class VoxtralPlugin extends Plugin {
 		}
 
 		this.currentEditor = null;
-		this.dictationStartOffset = null;
+		this.preDictationSnapshot = null;
 		this.updateStatusBar("idle");
 		new Notice("Recording stopped");
 	}
@@ -573,7 +573,7 @@ export default class VoxtralPlugin extends Plugin {
 
 	private async startRealtimeRecording(editor: Editor): Promise<void> {
 		this.pendingText = "";
-		this.dictationStartOffset = editor.posToOffset(editor.getCursor());
+		this.preDictationSnapshot = editor.getValue();
 
 		await this.connectRealtimeWebSocket(editor);
 
@@ -777,22 +777,49 @@ export default class VoxtralPlugin extends Plugin {
 
 	// ── Text correction ──
 
+	/**
+	 * After stopping realtime recording, correct only the text that
+	 * was added during dictation.  We diff the pre-recording snapshot
+	 * against the current note to find the longest common prefix and
+	 * suffix — the middle part is what was dictated.
+	 *
+	 * This works regardless of where in the note the cursor was when
+	 * dictation started, or if the user moved the cursor mid-session.
+	 */
 	private async autoCorrectAfterStop(editor: Editor): Promise<void> {
-		if (this.dictationStartOffset === null) return;
+		if (this.preDictationSnapshot === null) return;
 
-		const fullText = editor.getValue();
-		const start = this.dictationStartOffset;
+		const before = this.preDictationSnapshot;
+		const after = editor.getValue();
 
-		// Everything from the cursor position at recording start to the
-		// current end of the note is considered dictated text.
-		const dictated = fullText.substring(start);
+		// Nothing changed
+		if (before === after) return;
+
+		// Find the longest common prefix
+		let prefixLen = 0;
+		const minLen = Math.min(before.length, after.length);
+		while (prefixLen < minLen && before[prefixLen] === after[prefixLen]) {
+			prefixLen++;
+		}
+
+		// Find the longest common suffix (don't overlap with prefix)
+		let suffixLen = 0;
+		while (
+			suffixLen < (minLen - prefixLen) &&
+			before[before.length - 1 - suffixLen] === after[after.length - 1 - suffixLen]
+		) {
+			suffixLen++;
+		}
+
+		// The dictated (inserted) text sits between prefix and suffix
+		const dictated = after.substring(prefixLen, after.length - suffixLen);
 		if (!dictated.trim()) return;
 
 		try {
 			const corrected = await correctText(dictated, this.settings);
 			if (corrected && corrected !== dictated) {
-				const from = editor.offsetToPos(start);
-				const to = editor.offsetToPos(fullText.length);
+				const from = editor.offsetToPos(prefixLen);
+				const to = editor.offsetToPos(after.length - suffixLen);
 				editor.replaceRange(corrected, from, to);
 			}
 		} catch (e) {
