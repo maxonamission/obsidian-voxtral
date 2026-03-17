@@ -1,3 +1,6 @@
+// Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
+// Licensed under GPL-3.0 — see LICENSE for details
+// https://github.com/maxonamission/voxtral-transcribe
 import {
 	Editor,
 	MarkdownView,
@@ -81,6 +84,8 @@ export default class VoxtralPlugin extends Plugin {
 	private maxConsecutiveFailures = 5;
 	private currentEditor: Editor | null = null;
 	private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
+	/** Snapshot of the note text at the moment recording started */
+	private preDictationText: string | null = null;
 
 	/** Whether realtime mode is available on this platform */
 	get canRealtime(): boolean {
@@ -513,6 +518,7 @@ export default class VoxtralPlugin extends Plugin {
 		}
 
 		this.currentEditor = null;
+		this.preDictationText = null;
 		this.updateStatusBar("idle");
 		new Notice("Voxtral: Recording stopped");
 	}
@@ -577,6 +583,7 @@ export default class VoxtralPlugin extends Plugin {
 
 	private async startRealtimeRecording(editor: Editor): Promise<void> {
 		this.pendingText = "";
+		this.preDictationText = editor.getValue();
 
 		await this.connectRealtimeWebSocket(editor);
 
@@ -781,13 +788,27 @@ export default class VoxtralPlugin extends Plugin {
 	// ── Text correction ──
 
 	private async autoCorrectAfterStop(editor: Editor): Promise<void> {
-		const text = editor.getValue();
-		if (!text.trim()) return;
+		const fullText = editor.getValue();
+		const before = this.preDictationText ?? "";
+
+		// Find how much of the pre-existing text still matches at the
+		// start of the current content.  Everything after that boundary
+		// is new (dictated + any edits the user made mid-session).
+		let shared = 0;
+		const limit = Math.min(before.length, fullText.length);
+		while (shared < limit && before[shared] === fullText[shared]) {
+			shared++;
+		}
+
+		const dictated = fullText.substring(shared);
+		if (!dictated.trim()) return;
 
 		try {
-			const corrected = await correctText(text, this.settings);
-			if (corrected && corrected !== text) {
-				editor.setValue(corrected);
+			const corrected = await correctText(dictated, this.settings);
+			if (corrected && corrected !== dictated) {
+				const from = editor.offsetToPos(shared);
+				const to = editor.offsetToPos(fullText.length);
+				editor.replaceRange(corrected, from, to);
 			}
 		} catch (e) {
 			console.error("Voxtral: Auto-correct failed", e);

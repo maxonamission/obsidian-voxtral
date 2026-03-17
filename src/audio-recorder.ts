@@ -1,3 +1,6 @@
+// Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
+// Licensed under GPL-3.0 — see LICENSE for details
+// https://github.com/maxonamission/voxtral-transcribe
 /**
  * Audio recording with two outputs:
  * 1. PCM 16-bit 16kHz mono stream (for realtime WebSocket)
@@ -63,39 +66,44 @@ export class AudioRecorder {
 
 		this.stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-		// Determine active mic label from stream track
-		const audioTrack = this.stream.getAudioTracks()[0];
-		this.activeMicLabel = audioTrack?.label || "Onbekende microfoon";
+		try {
+			// Determine active mic label from stream track
+			const audioTrack = this.stream.getAudioTracks()[0];
+			this.activeMicLabel = audioTrack?.label || "Onbekende microfoon";
 
-		this.audioContext = new AudioContext({ sampleRate: 16000 });
-		this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
-
-		// ScriptProcessor for PCM capture (realtime mode)
-		if (this.onPcmChunk) {
-			this.processorNode = this.audioContext.createScriptProcessor(
-				4096,
-				1,
-				1
+			this.audioContext = new AudioContext({ sampleRate: 16000 });
+			this.sourceNode = this.audioContext.createMediaStreamSource(
+				this.stream
 			);
-			this.processorNode.onaudioprocess = (e) => {
-				this.processAudio(e);
-			};
-			this.sourceNode.connect(this.processorNode);
-			this.processorNode.connect(this.audioContext.destination);
-		}
 
-		// MediaRecorder for batch mode (WebM/Opus)
-		this.chunks = [];
-		this.mediaRecorder = new MediaRecorder(this.stream, {
-			mimeType: this.getSupportedMimeType(),
-		});
-		this.mediaRecorder.ondataavailable = (e) => {
-			if (e.data.size > 0) {
-				this.chunks.push(e.data);
+			// ScriptProcessor for PCM capture (realtime mode)
+			if (this.onPcmChunk) {
+				this.processorNode =
+					this.audioContext.createScriptProcessor(4096, 1, 1);
+				this.processorNode.onaudioprocess = (e) => {
+					this.processAudio(e);
+				};
+				this.sourceNode.connect(this.processorNode);
+				this.processorNode.connect(this.audioContext.destination);
 			}
-		};
-		this.mediaRecorder.start(1000); // Collect in 1s chunks
-		this.lastFlushTime = Date.now();
+
+			// MediaRecorder for batch mode (WebM/Opus)
+			this.chunks = [];
+			this.mediaRecorder = new MediaRecorder(this.stream, {
+				mimeType: this.getSupportedMimeType(),
+			});
+			this.mediaRecorder.ondataavailable = (e) => {
+				if (e.data.size > 0) {
+					this.chunks.push(e.data);
+				}
+			};
+			this.mediaRecorder.start(1000); // Collect in 1s chunks
+			this.lastFlushTime = Date.now();
+		} catch (e) {
+			// Clean up already-acquired resources on failure
+			this.cleanup();
+			throw e;
+		}
 	}
 
 	private processAudio(e: AudioProcessingEvent): void {
@@ -120,7 +128,19 @@ export class AudioRecorder {
 				return;
 			}
 
+			// Safety timeout: if onstop never fires, resolve with
+			// whatever we have and restart the recorder.
+			const timeout = setTimeout(() => {
+				console.warn("Voxtral: flushChunk timed out after 5s");
+				const blob = new Blob(this.chunks, {
+					type: this.getSupportedMimeType(),
+				});
+				this.chunks = [];
+				resolve(blob);
+			}, 5000);
+
 			this.mediaRecorder.onstop = () => {
+				clearTimeout(timeout);
 				const now = Date.now();
 				this.lastChunkDurationSec = (now - this.lastFlushTime) / 1000;
 				this.lastFlushTime = now;

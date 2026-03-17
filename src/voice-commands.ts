@@ -1,3 +1,6 @@
+// Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
+// Licensed under GPL-3.0 — see LICENSE for details
+// https://github.com/maxonamission/voxtral-transcribe
 import { Editor } from "obsidian";
 import {
 	CommandId,
@@ -178,7 +181,8 @@ export function matchCommand(rawText: string): CommandMatch | null {
 	for (const cmd of COMMAND_DEFS) {
 		const patterns = getPatternsForCommand(cmd.id, activeLang);
 		for (const pattern of patterns) {
-			if (normalized.endsWith(pattern)) {
+			const normPattern = normalizeCommand(pattern);
+			if (normalized.endsWith(normPattern)) {
 				const patternWordCount = pattern.split(/\s+/).length;
 				const rawWords = rawText.trimEnd().split(/\s+/);
 				const textBefore = rawWords
