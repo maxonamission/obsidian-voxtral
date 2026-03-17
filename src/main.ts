@@ -74,8 +74,9 @@ export default class VoxtralPlugin extends Plugin {
 	private maxConsecutiveFailures = 5;
 	private currentEditor: Editor | null = null;
 	private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
-	/** Snapshot of the note text at the moment recording started */
-	private preDictationText: string | null = null;
+	/** Cursor offset at the moment recording started — everything
+	 *  inserted after this position is considered dictated text. */
+	private dictationStartOffset: number | null = null;
 
 	/** Whether realtime mode is available on this platform */
 	get canRealtime(): boolean {
@@ -507,7 +508,7 @@ export default class VoxtralPlugin extends Plugin {
 		}
 
 		this.currentEditor = null;
-		this.preDictationText = null;
+		this.dictationStartOffset = null;
 		this.updateStatusBar("idle");
 		new Notice("Recording stopped");
 	}
@@ -572,7 +573,7 @@ export default class VoxtralPlugin extends Plugin {
 
 	private async startRealtimeRecording(editor: Editor): Promise<void> {
 		this.pendingText = "";
-		this.preDictationText = editor.getValue();
+		this.dictationStartOffset = editor.posToOffset(editor.getCursor());
 
 		await this.connectRealtimeWebSocket(editor);
 
@@ -777,25 +778,20 @@ export default class VoxtralPlugin extends Plugin {
 	// ── Text correction ──
 
 	private async autoCorrectAfterStop(editor: Editor): Promise<void> {
+		if (this.dictationStartOffset === null) return;
+
 		const fullText = editor.getValue();
-		const before = this.preDictationText ?? "";
+		const start = this.dictationStartOffset;
 
-		// Find how much of the pre-existing text still matches at the
-		// start of the current content.  Everything after that boundary
-		// is new (dictated + any edits the user made mid-session).
-		let shared = 0;
-		const limit = Math.min(before.length, fullText.length);
-		while (shared < limit && before[shared] === fullText[shared]) {
-			shared++;
-		}
-
-		const dictated = fullText.substring(shared);
+		// Everything from the cursor position at recording start to the
+		// current end of the note is considered dictated text.
+		const dictated = fullText.substring(start);
 		if (!dictated.trim()) return;
 
 		try {
 			const corrected = await correctText(dictated, this.settings);
 			if (corrected && corrected !== dictated) {
-				const from = editor.offsetToPos(shared);
+				const from = editor.offsetToPos(start);
 				const to = editor.offsetToPos(fullText.length);
 				editor.replaceRange(corrected, from, to);
 			}
