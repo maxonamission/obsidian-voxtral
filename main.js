@@ -490,172 +490,42 @@ function stripLlmCommentary(corrected, original) {
 }
 var WS_OPEN = 1;
 function createWebSocket(url, headers, callbacks) {
-  const https = require("https");
-  const crypto = require("crypto");
-  const parsed = new URL(url);
-  const wsKey = crypto.randomBytes(16).toString("base64");
+  let wsUrl = url;
+  const authHeader = headers["Authorization"] || headers["authorization"];
+  if (authHeader) {
+    const token = authHeader.replace(/^Bearer\s+/i, "");
+    const separator = wsUrl.includes("?") ? "&" : "?";
+    wsUrl = `${wsUrl}${separator}api_key=${encodeURIComponent(token)}`;
+  }
+  const ws = new WebSocket(wsUrl);
   const conn = {
     readyState: 0,
-    send: () => {
+    send: (data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
     },
     close: () => {
+      conn.readyState = 3;
+      ws.close();
     }
   };
-  const req = https.request(
-    {
-      hostname: parsed.hostname,
-      port: parsed.port || 443,
-      path: parsed.pathname + parsed.search,
-      method: "GET",
-      headers: {
-        ...headers,
-        Connection: "Upgrade",
-        Upgrade: "websocket",
-        "Sec-WebSocket-Version": "13",
-        "Sec-WebSocket-Key": wsKey
-      }
-    },
-    (res) => {
-      callbacks.onError(
-        new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
-      );
-    }
-  );
-  req.on("upgrade", (_res, socket) => {
+  ws.addEventListener("open", () => {
     conn.readyState = WS_OPEN;
-    conn.send = (data) => {
-      const payload = Buffer.from(data, "utf-8");
-      const mask = crypto.randomBytes(4);
-      let header;
-      if (payload.length < 126) {
-        header = Buffer.alloc(6);
-        header[0] = 129;
-        header[1] = 128 | payload.length;
-        mask.copy(header, 2);
-      } else if (payload.length < 65536) {
-        header = Buffer.alloc(8);
-        header[0] = 129;
-        header[1] = 128 | 126;
-        header.writeUInt16BE(payload.length, 2);
-        mask.copy(header, 4);
-      } else {
-        header = Buffer.alloc(14);
-        header[0] = 129;
-        header[1] = 128 | 127;
-        header.writeBigUInt64BE(BigInt(payload.length), 2);
-        mask.copy(header, 10);
-      }
-      const masked = Buffer.alloc(payload.length);
-      for (let i = 0; i < payload.length; i++) {
-        masked[i] = payload[i] ^ mask[i % 4];
-      }
-      socket.write(Buffer.concat([header, masked]));
-    };
-    conn.close = () => {
-      conn.readyState = 3;
-      const closeFrame = Buffer.alloc(6);
-      closeFrame[0] = 136;
-      closeFrame[1] = 128;
-      const closeMask = crypto.randomBytes(4);
-      closeMask.copy(closeFrame, 2);
-      try {
-        socket.write(closeFrame);
-      } catch (e) {
-      }
-      socket.end();
-    };
-    const pingInterval = setInterval(() => {
-      if (conn.readyState !== WS_OPEN) {
-        clearInterval(pingInterval);
-        return;
-      }
-      try {
-        const pingFrame = Buffer.alloc(6);
-        pingFrame[0] = 137;
-        pingFrame[1] = 128;
-        const pingMask = crypto.randomBytes(4);
-        pingMask.copy(pingFrame, 2);
-        socket.write(pingFrame);
-      } catch (e) {
-      }
-    }, 15e3);
     callbacks.onOpen();
-    let buffer = Buffer.alloc(0);
-    socket.on("data", (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      while (buffer.length >= 2) {
-        const firstByte = buffer[0];
-        const secondByte = buffer[1];
-        const opcode = firstByte & 15;
-        const isMasked = (secondByte & 128) !== 0;
-        let payloadLength = secondByte & 127;
-        let offset = 2;
-        if (payloadLength === 126) {
-          if (buffer.length < 4) return;
-          payloadLength = buffer.readUInt16BE(2);
-          offset = 4;
-        } else if (payloadLength === 127) {
-          if (buffer.length < 10) return;
-          payloadLength = Number(buffer.readBigUInt64BE(2));
-          offset = 10;
-        }
-        if (isMasked) offset += 4;
-        if (buffer.length < offset + payloadLength) return;
-        let payload = buffer.subarray(offset, offset + payloadLength);
-        if (isMasked) {
-          const maskKey = buffer.subarray(offset - 4, offset);
-          payload = Buffer.from(payload);
-          for (let i = 0; i < payload.length; i++) {
-            payload[i] ^= maskKey[i % 4];
-          }
-        }
-        buffer = buffer.subarray(offset + payloadLength);
-        if (opcode === 1) {
-          callbacks.onMessage(payload.toString("utf-8"));
-        } else if (opcode === 8) {
-          conn.readyState = 3;
-          clearInterval(pingInterval);
-          socket.end();
-          callbacks.onClose();
-          return;
-        } else if (opcode === 9) {
-          const pongMask = crypto.randomBytes(4);
-          const pongLen = payload.length;
-          let pongHeader;
-          if (pongLen < 126) {
-            pongHeader = Buffer.alloc(6);
-            pongHeader[0] = 138;
-            pongHeader[1] = 128 | pongLen;
-            pongMask.copy(pongHeader, 2);
-          } else {
-            pongHeader = Buffer.alloc(8);
-            pongHeader[0] = 138;
-            pongHeader[1] = 128 | 126;
-            pongHeader.writeUInt16BE(pongLen, 2);
-            pongMask.copy(pongHeader, 4);
-          }
-          const maskedPong = Buffer.from(payload);
-          for (let i = 0; i < maskedPong.length; i++) {
-            maskedPong[i] ^= pongMask[i % 4];
-          }
-          socket.write(Buffer.concat([pongHeader, maskedPong]));
-        }
-      }
-    });
-    socket.on("close", () => {
-      conn.readyState = 3;
-      clearInterval(pingInterval);
-      callbacks.onClose();
-    });
-    socket.on("error", (err) => {
-      clearInterval(pingInterval);
-      callbacks.onError(err);
-    });
   });
-  req.on("error", (err) => {
-    callbacks.onError(err);
+  ws.addEventListener("message", (event) => {
+    if (typeof event.data === "string") {
+      callbacks.onMessage(event.data);
+    }
   });
-  req.end();
+  ws.addEventListener("error", () => {
+    callbacks.onError(new Error("WebSocket connection error"));
+  });
+  ws.addEventListener("close", () => {
+    conn.readyState = 3;
+    callbacks.onClose();
+  });
   return conn;
 }
 var RealtimeTranscriber = class {
@@ -1302,7 +1172,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
     containerEl.empty();
     ;
     new import_obsidian2.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai").addText(
-      (text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
+      (text) => text.setPlaceholder("Enter your API key").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value.trim();
         await this.plugin.saveSettings();
       })
@@ -1903,16 +1773,20 @@ function pushLog(level, args) {
     logBuffer.shift();
   }
 }
-for (const level of ["debug", "warn", "error"]) {
-  const original = console[level].bind(console);
-  console[level] = (...args) => {
-    const first = args[0];
-    if (typeof first === "string" && first.startsWith("Voxtral:")) {
-      pushLog(level.toUpperCase(), args);
-    }
-    original(...args);
-  };
-}
+var vlog = {
+  debug: (...args) => {
+    pushLog("DEBUG", args);
+    console.debug(...args);
+  },
+  warn: (...args) => {
+    pushLog("WARN", args);
+    console.warn(...args);
+  },
+  error: (...args) => {
+    pushLog("ERROR", args);
+    console.error(...args);
+  }
+};
 var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
@@ -2089,7 +1963,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
     if (document.hidden) {
       this.clearFocusPauseTimer();
       if (behavior === "keep-recording") {
-        console.debug("Voxtral: App backgrounded, recording continues");
+        vlog.debug("Voxtral: App backgrounded, recording continues");
       } else if (behavior === "pause-after-delay") {
         const delaySec = this.settings.focusPauseDelaySec;
         console.debug(
@@ -2114,14 +1988,14 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
     this.isPaused = true;
     this.recorder.pause();
     this.updateStatusBar("paused");
-    console.debug("Voxtral: Recording paused (app backgrounded)");
+    vlog.debug("Voxtral: Recording paused (app backgrounded)");
   }
   resumeRecording() {
     this.isPaused = false;
     this.recorder.resume();
     this.updateStatusBar("recording");
     new import_obsidian4.Notice("Recording resumed");
-    console.debug("Voxtral: Recording resumed (app foregrounded)");
+    vlog.debug("Voxtral: Recording resumed (app foregrounded)");
   }
   clearFocusPauseTimer() {
     if (this.focusPauseTimer) {
@@ -2178,10 +2052,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
   }
   async startRecording() {
     if (!this.settings.apiKey) {
-      new import_obsidian4.Notice(
-        // eslint-disable-next-line obsidianmd/ui/sentence-case -- Mistral is a proper noun
-        "Please set your Mistral API key in the plugin settings."
-      );
+      new import_obsidian4.Notice("Please set your API key in the plugin settings.");
       return;
     }
     const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
@@ -2236,7 +2107,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
         new import_obsidian4.Notice(`Recording started (${micName})`);
       }
     } catch (e) {
-      console.error("Voxtral: Failed to start recording", e);
+      vlog.error("Voxtral: Failed to start recording", e);
       new import_obsidian4.Notice(`Could not start recording: ${e}`);
       this.updateStatusBar("idle");
     }
@@ -2259,7 +2130,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
         await this.stopBatchRecording();
       }
     } catch (e) {
-      console.error("Voxtral: Failed to stop recording", e);
+      vlog.error("Voxtral: Failed to stop recording", e);
       new import_obsidian4.Notice(`Error stopping recording: ${e}`);
     }
     this.currentEditor = null;
@@ -2288,7 +2159,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
         text,
         this.recorder.lastChunkDurationSec
       )) {
-        console.warn("Voxtral: Discarding hallucinated chunk");
+        vlog.warn("Voxtral: Discarding hallucinated chunk");
         this.updateStatusBar("recording");
         return;
       }
@@ -2301,7 +2172,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
         processText(editor, text);
       }
     } catch (e) {
-      console.error("Voxtral: Chunk transcription failed", e);
+      vlog.error("Voxtral: Chunk transcription failed", e);
       this.updateStatusBar("recording");
       new import_obsidian4.Notice(`Chunk failed: ${e}`);
     }
@@ -2320,7 +2191,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
   async connectRealtimeWebSocket(editor) {
     this.realtimeTranscriber = new RealtimeTranscriber(this.settings, {
       onSessionCreated: () => {
-        console.debug("Voxtral: Realtime session created");
+        vlog.debug("Voxtral: Realtime session created");
       },
       onDelta: (text) => {
         this.handleRealtimeDelta(editor, text);
@@ -2329,7 +2200,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
         this.handleRealtimeDone(editor, text);
       },
       onError: (message) => {
-        console.error("Voxtral: Realtime error:", message);
+        vlog.error("Voxtral: Realtime error:", message);
         new import_obsidian4.Notice(`Streaming error: ${message}`);
       },
       onDisconnect: () => {
@@ -2356,11 +2227,11 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
       void this.stopRecording();
       return;
     }
-    console.debug("Voxtral: Session ended, reconnecting silently...");
+    vlog.debug("Voxtral: Session ended, reconnecting silently...");
     try {
       await this.connectRealtimeWebSocket(editor);
       this.consecutiveFailures = 0;
-      console.debug("Voxtral: Session reconnected");
+      vlog.debug("Voxtral: Session reconnected");
     } catch (e) {
       this.consecutiveFailures++;
       console.error(
@@ -2457,7 +2328,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
         text,
         this.recorder.lastChunkDurationSec
       )) {
-        console.warn("Voxtral: Discarding hallucinated batch");
+        vlog.warn("Voxtral: Discarding hallucinated batch");
         return;
       }
       const hasCommand = text ? matchCommand(text) !== null : false;
@@ -2468,7 +2339,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
         processText(editor, text);
       }
     } catch (e) {
-      console.error("Voxtral: Batch transcription failed", e);
+      vlog.error("Voxtral: Batch transcription failed", e);
       new import_obsidian4.Notice(`Transcription failed: ${e}`);
     }
   }
@@ -2564,7 +2435,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian4.Plugin {
           editor.replaceRange(corrected, c.from, c.to);
         }
       } catch (e) {
-        console.error("Voxtral: Auto-correct failed", e);
+        vlog.error("Voxtral: Auto-correct failed", e);
       }
     }
   }

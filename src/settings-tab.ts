@@ -29,8 +29,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			.setDesc("Your API key from platform.mistral.ai")
 			.addText((text) =>
 				text
-					// eslint-disable-next-line obsidianmd/ui/sentence-case -- API key prefix
-					.setPlaceholder("sk-...")
+					.setPlaceholder("Enter your API key")
 					.setValue(this.plugin.settings.apiKey)
 					.onChange(async (value) => {
 						this.plugin.settings.apiKey = value.trim();

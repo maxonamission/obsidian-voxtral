@@ -44,17 +44,21 @@ function pushLog(level: string, args: unknown[]): void {
 	}
 }
 
-// Intercept console.debug/warn/error for Voxtral messages
-for (const level of ["debug", "warn", "error"] as const) {
-	const original = console[level].bind(console);
-	console[level] = (...args: unknown[]) => {
-		const first = args[0];
-		if (typeof first === "string" && first.startsWith("Voxtral:")) {
-			pushLog(level.toUpperCase(), args);
-		}
-		original(...args);
-	};
-}
+/** Voxtral-specific logger that stores entries in the ring buffer. */
+const vlog = {
+	debug: (...args: unknown[]): void => {
+		pushLog("DEBUG", args);
+		console.debug(...args);
+	},
+	warn: (...args: unknown[]): void => {
+		pushLog("WARN", args);
+		console.warn(...args);
+	},
+	error: (...args: unknown[]): void => {
+		pushLog("ERROR", args);
+		console.error(...args);
+	},
+};
 
 export default class VoxtralPlugin extends Plugin {
 	settings: VoxtralSettings;
@@ -262,7 +266,7 @@ export default class VoxtralPlugin extends Plugin {
 
 			if (behavior === "keep-recording") {
 				// Do nothing — keep recording in background
-				console.debug("Voxtral: App backgrounded, recording continues");
+				vlog.debug("Voxtral: App backgrounded, recording continues");
 			} else if (behavior === "pause-after-delay") {
 				const delaySec = this.settings.focusPauseDelaySec;
 				console.debug(
@@ -290,7 +294,7 @@ export default class VoxtralPlugin extends Plugin {
 		this.isPaused = true;
 		this.recorder.pause();
 		this.updateStatusBar("paused");
-		console.debug("Voxtral: Recording paused (app backgrounded)");
+		vlog.debug("Voxtral: Recording paused (app backgrounded)");
 	}
 
 	private resumeRecording(): void {
@@ -298,7 +302,7 @@ export default class VoxtralPlugin extends Plugin {
 		this.recorder.resume();
 		this.updateStatusBar("recording");
 		new Notice("Recording resumed");
-		console.debug("Voxtral: Recording resumed (app foregrounded)");
+		vlog.debug("Voxtral: Recording resumed (app foregrounded)");
 	}
 
 	private clearFocusPauseTimer(): void {
@@ -406,10 +410,7 @@ export default class VoxtralPlugin extends Plugin {
 
 	private async startRecording(): Promise<void> {
 		if (!this.settings.apiKey) {
-			new Notice(
-				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Mistral is a proper noun
-				"Please set your Mistral API key in the plugin settings."
-			);
+			new Notice("Please set your API key in the plugin settings.");
 			return;
 		}
 
@@ -479,7 +480,7 @@ export default class VoxtralPlugin extends Plugin {
 				new Notice(`Recording started (${micName})`);
 			}
 		} catch (e) {
-			console.error("Voxtral: Failed to start recording", e);
+			vlog.error("Voxtral: Failed to start recording", e);
 			new Notice(`Could not start recording: ${e}`);
 			this.updateStatusBar("idle");
 		}
@@ -504,7 +505,7 @@ export default class VoxtralPlugin extends Plugin {
 				await this.stopBatchRecording();
 			}
 		} catch (e) {
-			console.error("Voxtral: Failed to stop recording", e);
+			vlog.error("Voxtral: Failed to stop recording", e);
 			new Notice(`Error stopping recording: ${e}`);
 		}
 
@@ -545,7 +546,7 @@ export default class VoxtralPlugin extends Plugin {
 					this.recorder.lastChunkDurationSec
 				)
 			) {
-				console.warn("Voxtral: Discarding hallucinated chunk");
+				vlog.warn("Voxtral: Discarding hallucinated chunk");
 				this.updateStatusBar("recording");
 				return;
 			}
@@ -564,7 +565,7 @@ export default class VoxtralPlugin extends Plugin {
 				processText(editor, text);
 			}
 		} catch (e) {
-			console.error("Voxtral: Chunk transcription failed", e);
+			vlog.error("Voxtral: Chunk transcription failed", e);
 			this.updateStatusBar("recording");
 			new Notice(`Chunk failed: ${e}`);
 		}
@@ -587,7 +588,7 @@ export default class VoxtralPlugin extends Plugin {
 	private async connectRealtimeWebSocket(editor: Editor): Promise<void> {
 		this.realtimeTranscriber = new RealtimeTranscriber(this.settings, {
 			onSessionCreated: () => {
-				console.debug("Voxtral: Realtime session created");
+				vlog.debug("Voxtral: Realtime session created");
 			},
 			onDelta: (text) => {
 				this.handleRealtimeDelta(editor, text);
@@ -596,7 +597,7 @@ export default class VoxtralPlugin extends Plugin {
 				this.handleRealtimeDone(editor, text);
 			},
 			onError: (message) => {
-				console.error("Voxtral: Realtime error:", message);
+				vlog.error("Voxtral: Realtime error:", message);
 				new Notice(`Streaming error: ${message}`);
 			},
 			onDisconnect: () => {
@@ -629,12 +630,12 @@ export default class VoxtralPlugin extends Plugin {
 		}
 
 		// Silent, immediate reconnect — this is expected API behavior
-		console.debug("Voxtral: Session ended, reconnecting silently...");
+		vlog.debug("Voxtral: Session ended, reconnecting silently...");
 
 		try {
 			await this.connectRealtimeWebSocket(editor);
 			this.consecutiveFailures = 0;
-			console.debug("Voxtral: Session reconnected");
+			vlog.debug("Voxtral: Session reconnected");
 		} catch (e) {
 			this.consecutiveFailures++;
 			console.error(
@@ -757,7 +758,7 @@ export default class VoxtralPlugin extends Plugin {
 					this.recorder.lastChunkDurationSec
 				)
 			) {
-				console.warn("Voxtral: Discarding hallucinated batch");
+				vlog.warn("Voxtral: Discarding hallucinated batch");
 				return;
 			}
 
@@ -771,7 +772,7 @@ export default class VoxtralPlugin extends Plugin {
 				processText(editor, text);
 			}
 		} catch (e) {
-			console.error("Voxtral: Batch transcription failed", e);
+			vlog.error("Voxtral: Batch transcription failed", e);
 			new Notice(`Transcription failed: ${e}`);
 		}
 	}
@@ -897,7 +898,7 @@ export default class VoxtralPlugin extends Plugin {
 					editor.replaceRange(corrected, c.from, c.to);
 				}
 			} catch (e) {
-				console.error("Voxtral: Auto-correct failed", e);
+				vlog.error("Voxtral: Auto-correct failed", e);
 			}
 		}
 	}
