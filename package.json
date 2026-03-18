@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-voxtral-transcribe",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Speech-to-text dictation for Obsidian using Mistral Voxtral",
 	"main": "main.js",
 	"scripts": {
