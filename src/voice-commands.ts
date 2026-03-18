@@ -156,7 +156,7 @@ const COMMAND_DEFS: CommandDef[] = [
 	{ id: "deleteLastLine", action: (editor) => deleteLastSentence(editor) },
 	{
 		id: "undo",
-		action: (editor) => { (editor as any).undo(); },
+		action: (editor) => { editor.undo(); },
 	},
 	{
 		id: "stopRecording",

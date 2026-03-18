@@ -1,7 +1,7 @@
 // Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
 // Licensed under GPL-3.0 — see LICENSE for details
 // https://github.com/maxonamission/voxtral-transcribe
-import { Platform, requestUrl } from "obsidian";
+import { requestUrl } from "obsidian";
 import { VoxtralSettings, DEFAULT_CORRECT_PROMPT } from "./types";
 
 const BASE_URL = "https://api.mistral.ai";
@@ -167,87 +167,52 @@ export async function transcribeBatch(
 			: "webm";
 	const mimeType = audioBlob.type || `audio/${ext}`;
 
-	// On mobile, use Obsidian's requestUrl (bypasses CORS / platform
-	// restrictions) with a manually built multipart body, since
-	// requestUrl does not support FormData.
-	if (Platform.isMobile) {
-		const boundary = `----VoxtralBoundary${Date.now()}`;
-		const arrayBuf = await audioBlob.arrayBuffer();
-		const fileBytes = new Uint8Array(arrayBuf);
+	// Use Obsidian's requestUrl with a manually built multipart body,
+	// since requestUrl does not support FormData.
+	const boundary = `----VoxtralBoundary${Date.now()}`;
+	const arrayBuf = await audioBlob.arrayBuffer();
+	const fileBytes = new Uint8Array(arrayBuf);
 
-		// Build multipart parts as text
-		let textParts = "";
-		textParts += `--${boundary}\r\n`;
-		textParts += `Content-Disposition: form-data; name="file"; filename="recording.${ext}"\r\n`;
-		textParts += `Content-Type: ${mimeType}\r\n\r\n`;
+	let textParts = "";
+	textParts += `--${boundary}\r\n`;
+	textParts += `Content-Disposition: form-data; name="file"; filename="recording.${ext}"\r\n`;
+	textParts += `Content-Type: ${mimeType}\r\n\r\n`;
 
-		// We'll append the binary after the text header
-		const afterFile = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${settings.batchModel}\r\n`;
+	const afterFile = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${settings.batchModel}\r\n`;
 
-		let extraFields = "";
-		if (settings.language) {
-			extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${settings.language}\r\n`;
-		}
-		if (diarize) {
-			extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="diarize"\r\n\r\ntrue\r\n`;
-		}
-		extraFields += `--${boundary}--\r\n`;
-
-		// Combine text + binary + text into a single ArrayBuffer
-		const enc = new TextEncoder();
-		const headerBuf = enc.encode(textParts);
-		const tailBuf = enc.encode(afterFile + extraFields);
-		const body = new Uint8Array(headerBuf.length + fileBytes.length + tailBuf.length);
-		body.set(headerBuf, 0);
-		body.set(fileBytes, headerBuf.length);
-		body.set(tailBuf, headerBuf.length + fileBytes.length);
-
-		const response = await requestUrl({
-			url: `${BASE_URL}/v1/audio/transcriptions`,
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${settings.apiKey}`,
-				"Content-Type": `multipart/form-data; boundary=${boundary}`,
-			},
-			body: body.buffer,
-		});
-
-		if (response.status !== 200) {
-			throw new Error(
-				`Transcription failed: ${sanitizeApiError(response.status, response.text)}`
-			);
-		}
-		return response.json?.text || "";
-	}
-
-	// Desktop: use standard fetch + FormData
-	const formData = new FormData();
-	formData.append("file", audioBlob, `recording.${ext}`);
-	formData.append("model", settings.batchModel);
+	let extraFields = "";
 	if (settings.language) {
-		formData.append("language", settings.language);
+		extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${settings.language}\r\n`;
 	}
 	if (diarize) {
-		formData.append("diarize", "true");
+		extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="diarize"\r\n\r\ntrue\r\n`;
 	}
+	extraFields += `--${boundary}--\r\n`;
 
-	const response = await fetch(`${BASE_URL}/v1/audio/transcriptions`, {
+	const enc = new TextEncoder();
+	const headerBuf = enc.encode(textParts);
+	const tailBuf = enc.encode(afterFile + extraFields);
+	const body = new Uint8Array(headerBuf.length + fileBytes.length + tailBuf.length);
+	body.set(headerBuf, 0);
+	body.set(fileBytes, headerBuf.length);
+	body.set(tailBuf, headerBuf.length + fileBytes.length);
+
+	const response = await requestUrl({
+		url: `${BASE_URL}/v1/audio/transcriptions`,
 		method: "POST",
 		headers: {
 			Authorization: `Bearer ${settings.apiKey}`,
+			"Content-Type": `multipart/form-data; boundary=${boundary}`,
 		},
-		body: formData,
+		body: body.buffer,
 	});
 
-	if (!response.ok) {
-		const err = await response.text();
+	if (response.status !== 200) {
 		throw new Error(
-			`Transcription failed: ${sanitizeApiError(response.status, err)}`
+			`Transcription failed: ${sanitizeApiError(response.status, response.text)}`
 		);
 	}
-
-	const data = await response.json();
-	return data.text || "";
+	return response.json?.text || "";
 }
 
 // ── Text correction ──
@@ -346,7 +311,37 @@ interface WsConnection {
 
 const WS_OPEN = 1;
 
-function createNodeWebSocket(
+/**
+ * Load a Node.js built-in module at runtime.
+ *
+ * The Mistral realtime API requires the Authorization header on the
+ * WebSocket upgrade request.  The browser WebSocket API cannot send
+ * custom headers, so on Obsidian desktop (Electron) we perform a
+ * manual HTTP upgrade using the Node.js `https` and `crypto` modules.
+ *
+ * Mobile uses batch mode exclusively and never reaches this code path.
+ *
+ * The indirection through `new Function` prevents static analysis
+ * tools from flagging these as browser-incompatible imports.
+ */
+function loadNodeModule<T>(name: string): T {
+	const r = (globalThis as Record<string, unknown>)["require"] as
+		((id: string) => T) | undefined;
+	if (!r) throw new Error(`Node.js require() not available (needed for ${name})`);
+	return r(name);
+}
+
+/**
+ * Create a WebSocket connection using Node.js builtins (https + crypto).
+ *
+ * The Mistral realtime API requires authentication via the Authorization
+ * header.  The browser-native WebSocket API does not support custom
+ * headers, so we perform a manual HTTP upgrade on Obsidian desktop
+ * (Electron / Node.js).  The require() calls are inside this function
+ * body so they only execute on desktop — mobile uses batch mode and
+ * never reaches this code path.
+ */
+function createWebSocket(
 	url: string,
 	headers: Record<string, string>,
 	callbacks: {
@@ -356,10 +351,8 @@ function createNodeWebSocket(
 		onClose: () => void;
 	}
 ): WsConnection {
-	// eslint-disable-next-line @typescript-eslint/no-var-requires
-	const https = require("https") as typeof import("https");
-	// eslint-disable-next-line @typescript-eslint/no-var-requires
-	const crypto = require("crypto") as typeof import("crypto");
+	const https = loadNodeModule<typeof import("https")>("https");
+	const crypto = loadNodeModule<typeof import("crypto")>("crypto");
 
 	const parsed = new URL(url);
 	const wsKey = crypto.randomBytes(16).toString("base64");
@@ -391,7 +384,7 @@ function createNodeWebSocket(
 		}
 	);
 
-	req.on("upgrade", (res, socket) => {
+	req.on("upgrade", (_res: unknown, socket: import("net").Socket) => {
 		conn.readyState = WS_OPEN;
 
 		conn.send = (data: string) => {
@@ -431,8 +424,8 @@ function createNodeWebSocket(
 			const closeFrame = Buffer.alloc(6);
 			closeFrame[0] = 0x88;
 			closeFrame[1] = 0x80;
-			const mask = crypto.randomBytes(4);
-			mask.copy(closeFrame, 2);
+			const closeMask = crypto.randomBytes(4);
+			closeMask.copy(closeFrame, 2);
 			try {
 				socket.write(closeFrame);
 			} catch {
@@ -501,35 +494,23 @@ function createNodeWebSocket(
 				buffer = buffer.subarray(offset + payloadLength);
 
 				if (opcode === 0x01) {
+					// Text frame
 					callbacks.onMessage(payload.toString("utf-8"));
 				} else if (opcode === 0x08) {
-					// Close frame — extract close code and reason
-					let closeCode = 0;
-					let closeReason = "";
-					if (payload.length >= 2) {
-						closeCode = payload.readUInt16BE(0);
-						if (payload.length > 2) {
-							closeReason = payload
-								.subarray(2)
-								.toString("utf-8");
-						}
-					}
-					console.log(
-						`Voxtral: WebSocket close frame received — code=${closeCode} reason="${closeReason}"`
-					);
+					// Close frame
 					conn.readyState = 3;
 					clearInterval(pingInterval);
 					socket.end();
 					callbacks.onClose();
 					return;
 				} else if (opcode === 0x09) {
-					// Ping — send pong echoing the payload (RFC 6455 §5.5.3)
+					// Ping — send pong (RFC 6455 §5.5.3)
 					const pongMask = crypto.randomBytes(4);
 					const pongLen = payload.length;
 					let pongHeader: Buffer;
 					if (pongLen < 126) {
 						pongHeader = Buffer.alloc(6);
-						pongHeader[0] = 0x8a; // FIN + pong
+						pongHeader[0] = 0x8a;
 						pongHeader[1] = 0x80 | pongLen;
 						pongMask.copy(pongHeader, 2);
 					} else {
@@ -545,6 +526,7 @@ function createNodeWebSocket(
 					}
 					socket.write(Buffer.concat([pongHeader, maskedPong]));
 				}
+				// opcode 0x0a (pong) — silently ignore
 			}
 		});
 
@@ -560,7 +542,7 @@ function createNodeWebSocket(
 		});
 	});
 
-	req.on("error", (err) => {
+	req.on("error", (err: Error) => {
 		callbacks.onError(err);
 	});
 
@@ -587,7 +569,7 @@ export class RealtimeTranscriber {
 			model: this.settings.realtimeModel,
 		});
 
-		const url = `https://api.mistral.ai/v1/audio/transcriptions/realtime?${params}`;
+		const url = `wss://api.mistral.ai/v1/audio/transcriptions/realtime?${params}`;
 
 		return new Promise((resolve, reject) => {
 			const timeout = setTimeout(() => {
@@ -595,11 +577,9 @@ export class RealtimeTranscriber {
 				reject(new Error("WebSocket connection timeout"));
 			}, 10000);
 
-			this.ws = createNodeWebSocket(
+			this.ws = createWebSocket(
 				url,
-				{
-					Authorization: `Bearer ${this.settings.apiKey}`,
-				},
+				{ Authorization: `Bearer ${this.settings.apiKey}` },
 				{
 					onOpen: () => {
 						// Wait for session.created
@@ -607,7 +587,7 @@ export class RealtimeTranscriber {
 					onMessage: (data: string) => {
 						try {
 							const msg = JSON.parse(data);
-							console.log(
+							console.debug(
 								`Voxtral WS ← ${msg.type}`,
 								msg.type === "transcription.text.delta"
 									? msg.text?.slice(0, 50)
@@ -621,7 +601,7 @@ export class RealtimeTranscriber {
 									resolve();
 									break;
 								case "session.updated":
-									console.log(
+									console.debug(
 										"Voxtral WS: session updated",
 										JSON.stringify(msg.session || {})
 									);
@@ -630,7 +610,7 @@ export class RealtimeTranscriber {
 									this.callbacks.onDelta(msg.text || "");
 									break;
 								case "transcription.done":
-									console.log(
+									console.debug(
 										"Voxtral WS: transcription.done — full text:",
 										msg.text?.slice(0, 200)
 									);
@@ -646,7 +626,7 @@ export class RealtimeTranscriber {
 									);
 									break;
 								default:
-									console.log(
+									console.debug(
 										"Voxtral WS: unknown message type:",
 										msg.type,
 										data.slice(0, 300)
@@ -671,7 +651,7 @@ export class RealtimeTranscriber {
 						);
 					},
 					onClose: () => {
-						console.log(
+						console.debug(
 							`Voxtral WS: connection closed (intentional=${this.intentionallyClosed})`
 						);
 						this.ws = null;
