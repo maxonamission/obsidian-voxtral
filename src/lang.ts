@@ -51,7 +51,12 @@ export type CommandId =
 	| "deleteLastLine"
 	| "undo"
 	| "stopRecording"
-	| "colon";
+	| "colon"
+	| "wikilink"
+	| "bold"
+	| "italic"
+	| "inlineCode"
+	| "tag";
 
 /** Patterns per language per command */
 export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string[]>>>> = {
@@ -70,6 +75,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["herstel", "ongedaan maken"],
 		stopRecording: ["beeindig opname", "beeindig de opname",  "stop opname", "stop de opname"],
 		colon: ["dubbele punt", "double punt", "dubbelepunt"],
+		wikilink: ["wikilink", "wiki link", "link"],
+		bold: ["vet", "dikgedrukt"],
+		italic: ["cursief", "schuingedrukt"],
+		inlineCode: ["code"],
+		tag: ["tag", "label"],
 	},
 
 	// ── English ────────────────────────────────────────────────────
@@ -87,6 +97,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["undo"],
 		stopRecording: ["stop recording"],
 		colon: ["colon"],
+		wikilink: ["wiki link", "wikilink", "link"],
+		bold: ["bold"],
+		italic: ["italic"],
+		inlineCode: ["code", "inline code"],
+		tag: ["tag"],
 	},
 
 	// ── French ─────────────────────────────────────────────────────
@@ -104,6 +119,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["annuler"],
 		stopRecording: ["arreter enregistrement", "arreter l enregistrement", "stop enregistrement"],
 		colon: ["deux points"],
+		wikilink: ["wiki lien", "lien wiki"],
+		bold: ["gras"],
+		italic: ["italique"],
+		inlineCode: ["code"],
+		tag: ["etiquette", "tag"],
 	},
 
 	// ── German ─────────────────────────────────────────────────────
@@ -121,6 +141,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["ruckgangig", "ruckgangig machen"],
 		stopRecording: ["aufnahme beenden", "aufnahme stoppen"],
 		colon: ["doppelpunkt"],
+		wikilink: ["wikilink", "wiki link"],
+		bold: ["fett"],
+		italic: ["kursiv"],
+		inlineCode: ["code"],
+		tag: ["tag", "schlagwort"],
 	},
 
 	// ── Spanish ────────────────────────────────────────────────────
@@ -138,6 +163,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["deshacer"],
 		stopRecording: ["parar grabacion", "detener grabacion"],
 		colon: ["dos puntos"],
+		wikilink: ["wikilink", "enlace wiki"],
+		bold: ["negrita"],
+		italic: ["cursiva"],
+		inlineCode: ["codigo"],
+		tag: ["etiqueta", "tag"],
 	},
 
 	// ── Portuguese ─────────────────────────────────────────────────
@@ -155,6 +185,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["desfazer"],
 		stopRecording: ["parar gravacao", "encerrar gravacao"],
 		colon: ["dois pontos"],
+		wikilink: ["wikilink", "link wiki"],
+		bold: ["negrito"],
+		italic: ["italico"],
+		inlineCode: ["codigo"],
+		tag: ["etiqueta", "tag"],
 	},
 
 	// ── Russian ───────────────────────────────────────────────────
@@ -172,6 +207,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["отменить", "отмена"],
 		stopRecording: ["остановить запись", "стоп запись"],
 		colon: ["двоеточие"],
+		wikilink: ["вики ссылка", "вики линк"],
+		bold: ["жирный"],
+		italic: ["курсив"],
+		inlineCode: ["код"],
+		tag: ["тег", "метка"],
 	},
 
 	// ── Chinese ────────────────────────────────────────────────────
@@ -189,6 +229,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["撤销", "撤回"],
 		stopRecording: ["停止录音", "结束录音"],
 		colon: ["冒号"],
+		wikilink: ["维基链接", "链接"],
+		bold: ["加粗", "粗体"],
+		italic: ["斜体"],
+		inlineCode: ["代码"],
+		tag: ["标签"],
 	},
 
 	// ── Hindi ──────────────────────────────────────────────────────
@@ -206,6 +251,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["पूर्ववत", "अनडू"],
 		stopRecording: ["रिकॉर्डिंग बंद करो", "रिकॉर्डिंग रोको"],
 		colon: ["कोलन"],
+		wikilink: ["विकि लिंक", "लिंक"],
+		bold: ["बोल्ड", "मोटा"],
+		italic: ["इटैलिक", "तिरछा"],
+		inlineCode: ["कोड"],
+		tag: ["टैग"],
 	},
 
 	// ── Arabic ─────────────────────────────────────────────────────
@@ -223,6 +273,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["تراجع"],
 		stopRecording: ["أوقف التسجيل", "إيقاف التسجيل"],
 		colon: ["نقطتان"],
+		wikilink: ["رابط ويكي", "رابط"],
+		bold: ["غامق", "عريض"],
+		italic: ["مائل"],
+		inlineCode: ["كود"],
+		tag: ["وسم"],
 	},
 
 	// ── Japanese ───────────────────────────────────────────────────
@@ -240,6 +295,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["元に戻す", "取り消し"],
 		stopRecording: ["録音停止", "録音を止めて"],
 		colon: ["コロン"],
+		wikilink: ["ウィキリンク", "リンク"],
+		bold: ["太字", "ボールド"],
+		italic: ["斜体", "イタリック"],
+		inlineCode: ["コード"],
+		tag: ["タグ"],
 	},
 
 	// ── Korean ─────────────────────────────────────────────────────
@@ -257,6 +317,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["실행 취소", "되돌리기"],
 		stopRecording: ["녹음 중지", "녹음 멈춰"],
 		colon: ["콜론"],
+		wikilink: ["위키링크", "링크"],
+		bold: ["굵게", "볼드"],
+		italic: ["기울임", "이탤릭"],
+		inlineCode: ["코드"],
+		tag: ["태그"],
 	},
 
 	// ── Italian ────────────────────────────────────────────────────
@@ -274,6 +339,11 @@ export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string
 		undo: ["annulla"],
 		stopRecording: ["ferma registrazione", "interrompi registrazione", "stop registrazione"],
 		colon: ["due punti"],
+		wikilink: ["wikilink", "link wiki"],
+		bold: ["grassetto"],
+		italic: ["corsivo"],
+		inlineCode: ["codice"],
+		tag: ["tag", "etichetta"],
 	},
 };
 
@@ -293,6 +363,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "Ongedaan maken",
 		stopRecording: "Stop opname",
 		colon: "Dubbele punt",
+		wikilink: "Wikilink [[…]]",
+		bold: "Vet **…**",
+		italic: "Cursief *…*",
+		inlineCode: "Code `…`",
+		tag: "Tag #…",
 	},
 	en: {
 		newParagraph: "New paragraph",
@@ -308,6 +383,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "Undo",
 		stopRecording: "Stop recording",
 		colon: "Colon",
+		wikilink: "Wikilink [[…]]",
+		bold: "Bold **…**",
+		italic: "Italic *…*",
+		inlineCode: "Code `…`",
+		tag: "Tag #…",
 	},
 	fr: {
 		newParagraph: "Nouveau paragraphe",
@@ -323,6 +403,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "Annuler",
 		stopRecording: "Arrêter l'enregistrement",
 		colon: "Deux-points",
+		wikilink: "Wikilink [[…]]",
+		bold: "Gras **…**",
+		italic: "Italique *…*",
+		inlineCode: "Code `…`",
+		tag: "Étiquette #…",
 	},
 	de: {
 		newParagraph: "Neuer Absatz",
@@ -338,6 +423,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "Rückgängig",
 		stopRecording: "Aufnahme beenden",
 		colon: "Doppelpunkt",
+		wikilink: "Wikilink [[…]]",
+		bold: "Fett **…**",
+		italic: "Kursiv *…*",
+		inlineCode: "Code `…`",
+		tag: "Tag #…",
 	},
 	es: {
 		newParagraph: "Nuevo párrafo",
@@ -353,6 +443,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "Deshacer",
 		stopRecording: "Parar grabación",
 		colon: "Dos puntos",
+		wikilink: "Wikilink [[…]]",
+		bold: "Negrita **…**",
+		italic: "Cursiva *…*",
+		inlineCode: "Código `…`",
+		tag: "Etiqueta #…",
 	},
 	pt: {
 		newParagraph: "Novo parágrafo",
@@ -368,6 +463,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "Desfazer",
 		stopRecording: "Parar gravação",
 		colon: "Dois pontos",
+		wikilink: "Wikilink [[…]]",
+		bold: "Negrito **…**",
+		italic: "Itálico *…*",
+		inlineCode: "Código `…`",
+		tag: "Etiqueta #…",
 	},
 	ru: {
 		newParagraph: "Новый абзац",
@@ -383,6 +483,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "Отменить",
 		stopRecording: "Остановить запись",
 		colon: "Двоеточие",
+		wikilink: "Вики-ссылка [[…]]",
+		bold: "Жирный **…**",
+		italic: "Курсив *…*",
+		inlineCode: "Код `…`",
+		tag: "Тег #…",
 	},
 	zh: {
 		newParagraph: "新段落",
@@ -398,6 +503,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "撤销",
 		stopRecording: "停止录音",
 		colon: "冒号",
+		wikilink: "维基链接 [[…]]",
+		bold: "加粗 **…**",
+		italic: "斜体 *…*",
+		inlineCode: "代码 `…`",
+		tag: "标签 #…",
 	},
 	hi: {
 		newParagraph: "नया पैराग्राफ",
@@ -413,6 +523,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "पूर्ववत",
 		stopRecording: "रिकॉर्डिंग बंद करो",
 		colon: "कोलन",
+		wikilink: "विकि लिंक [[…]]",
+		bold: "बोल्ड **…**",
+		italic: "इटैलिक *…*",
+		inlineCode: "कोड `…`",
+		tag: "टैग #…",
 	},
 	ar: {
 		newParagraph: "فقرة جديدة",
@@ -428,6 +543,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "تراجع",
 		stopRecording: "أوقف التسجيل",
 		colon: "نقطتان",
+		wikilink: "[[…]] رابط ويكي",
+		bold: "**…** غامق",
+		italic: "*…* مائل",
+		inlineCode: "`…` كود",
+		tag: "#… وسم",
 	},
 	ja: {
 		newParagraph: "新しい段落",
@@ -443,6 +563,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "元に戻す",
 		stopRecording: "録音停止",
 		colon: "コロン",
+		wikilink: "ウィキリンク [[…]]",
+		bold: "太字 **…**",
+		italic: "斜体 *…*",
+		inlineCode: "コード `…`",
+		tag: "タグ #…",
 	},
 	ko: {
 		newParagraph: "새 단락",
@@ -458,6 +583,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "실행 취소",
 		stopRecording: "녹음 중지",
 		colon: "콜론",
+		wikilink: "위키링크 [[…]]",
+		bold: "굵게 **…**",
+		italic: "기울임 *…*",
+		inlineCode: "코드 `…`",
+		tag: "태그 #…",
 	},
 	it: {
 		newParagraph: "Nuovo paragrafo",
@@ -473,6 +603,11 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 		undo: "Annulla",
 		stopRecording: "Ferma registrazione",
 		colon: "Due punti",
+		wikilink: "Wikilink [[…]]",
+		bold: "Grassetto **…**",
+		italic: "Corsivo *…*",
+		inlineCode: "Codice `…`",
+		tag: "Tag #…",
 	},
 };
 
@@ -483,9 +618,13 @@ export const LABELS: Partial<Record<LangCode, Record<CommandId, string>>> = {
 export const MISHEARINGS: Partial<Record<LangCode, [RegExp, string][]>> = {
 	nl: [
 		[/\bniveau\b/g, "nieuwe"],
+		[/\bniva\b/g, "nieuwe"],
 		[/\bnieuw alinea\b/g, "nieuwe alinea"],
 		[/\bnieuw regel\b/g, "nieuwe regel"],
 		[/\bnieuw punt\b/g, "nieuw punt"],
+		[/\blinea\b/g, "alinea"],
+		[/\blinie\b/g, "alinea"],
+		[/\bbeeindigde\b/g, "beeindig de"],
 	],
 	fr: [
 		[/\bnouveau ligne\b/g, "nouvelle ligne"],

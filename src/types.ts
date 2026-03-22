@@ -3,6 +3,24 @@
 // https://github.com/maxonamission/voxtral-transcribe
 export type FocusBehavior = "pause" | "keep-recording" | "pause-after-delay";
 
+/** User-defined custom voice command */
+export interface CustomCommand {
+	/** Unique ID (auto-generated) */
+	id: string;
+	/** Trigger phrases per language (key = lang code, value = phrases) */
+	triggers: Record<string, string[]>;
+	/** Command type: insert text or open a slot */
+	type: "insert" | "slot";
+	/** Text to insert (for type "insert") */
+	insertText?: string;
+	/** Slot prefix (for type "slot") */
+	slotPrefix?: string;
+	/** Slot suffix (for type "slot") */
+	slotSuffix?: string;
+	/** Slot exit trigger (for type "slot") */
+	slotExit?: "enter" | "space" | "enter-or-space";
+}
+
 export interface VoxtralSettings {
 	apiKey: string;
 	language: string;
@@ -11,6 +29,9 @@ export interface VoxtralSettings {
 	correctModel: string;
 	autoCorrect: boolean;
 	streamingDelayMs: number;
+	dualDelay: boolean; // dual-delay mode: fast + slow stream for speed + accuracy
+	dualDelayFastMs: number;
+	dualDelaySlowMs: number;
 	systemPrompt: string;
 	mode: "realtime" | "batch";
 	microphoneDeviceId: string; // "" = system default
@@ -19,6 +40,9 @@ export interface VoxtralSettings {
 	dismissMobileBatchNotice: boolean; // hide "using batch mode" notice on mobile
 	enterToSend: boolean; // Enter key acts as tap-to-send when mic is live in batch mode
 	typingCooldownMs: number; // ms of silence before mic unmutes after typing
+	noiseSuppression: boolean; // browser-level noise suppression, echo cancellation, AGC
+	customCommands: CustomCommand[];
+	templatesFolder: string; // path to templates folder (e.g. "Templates"), empty = disabled
 }
 
 export const DEFAULT_SETTINGS: VoxtralSettings = {
@@ -29,6 +53,9 @@ export const DEFAULT_SETTINGS: VoxtralSettings = {
 	correctModel: "mistral-small-latest",
 	autoCorrect: true,
 	streamingDelayMs: 480,
+	dualDelay: false,
+	dualDelayFastMs: 240,
+	dualDelaySlowMs: 2400,
 	systemPrompt: "",
 	mode: "realtime",
 	microphoneDeviceId: "",
@@ -37,6 +64,9 @@ export const DEFAULT_SETTINGS: VoxtralSettings = {
 	dismissMobileBatchNotice: false,
 	enterToSend: true,
 	typingCooldownMs: 800,
+	noiseSuppression: false,
+	customCommands: [],
+	templatesFolder: "",
 };
 
 export const DEFAULT_CORRECT_PROMPT =

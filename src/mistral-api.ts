@@ -556,10 +556,12 @@ export class RealtimeTranscriber {
 	private settings: VoxtralSettings;
 	private callbacks: RealtimeCallbacks;
 	private intentionallyClosed = false;
+	private delayOverrideMs: number | null = null;
 
-	constructor(settings: VoxtralSettings, callbacks: RealtimeCallbacks) {
+	constructor(settings: VoxtralSettings, callbacks: RealtimeCallbacks, delayOverrideMs?: number) {
 		this.settings = settings;
 		this.callbacks = callbacks;
+		this.delayOverrideMs = delayOverrideMs ?? null;
 	}
 
 	async connect(): Promise<void> {
@@ -666,6 +668,7 @@ export class RealtimeTranscriber {
 
 	private sendSessionUpdate(): void {
 		if (!this.ws) return;
+		const delayMs = this.delayOverrideMs ?? this.settings.streamingDelayMs;
 		const msg = {
 			type: "session.update",
 			session: {
@@ -673,7 +676,7 @@ export class RealtimeTranscriber {
 					encoding: "pcm_s16le",
 					sample_rate: 16000,
 				},
-				target_streaming_delay_ms: this.settings.streamingDelayMs,
+				target_streaming_delay_ms: delayMs,
 			},
 		};
 		this.ws.send(JSON.stringify(msg));

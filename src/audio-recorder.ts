@@ -51,6 +51,9 @@ export class AudioRecorder {
 	/** The label of the currently active microphone */
 	activeMicLabel = "";
 
+	/** True if the selected mic failed and we fell back to default */
+	fallbackUsed = false;
+
 	/** Duration in seconds of the last flushed/stopped chunk */
 	lastChunkDurationSec = 0;
 
@@ -81,15 +84,37 @@ export class AudioRecorder {
 
 	async start(
 		deviceId?: string,
-		onPcmChunk?: (pcmData: ArrayBuffer) => void
+		onPcmChunk?: (pcmData: ArrayBuffer) => void,
+		noiseSuppression?: boolean
 	): Promise<void> {
 		this.onPcmChunk = onPcmChunk || null;
 
-		const constraints: MediaStreamConstraints = {
-			audio: deviceId ? { deviceId: { exact: deviceId } } : true,
-		};
+		const audioConstraints: MediaTrackConstraints = { channelCount: 1 };
+		if (noiseSuppression) {
+			audioConstraints.noiseSuppression = { ideal: true };
+			audioConstraints.echoCancellation = { ideal: true };
+			audioConstraints.autoGainControl = { ideal: true };
+		}
+		if (deviceId) audioConstraints.deviceId = { exact: deviceId };
 
-		this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+		try {
+			this.stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+		} catch (err) {
+			// If a specific device was requested and failed, fallback to default mic
+			if (deviceId) {
+				console.warn("Voxtral: Selected mic failed, falling back to default:", err);
+				const fallbackConstraints: MediaTrackConstraints = { channelCount: 1 };
+				if (noiseSuppression) {
+					fallbackConstraints.noiseSuppression = { ideal: true };
+					fallbackConstraints.echoCancellation = { ideal: true };
+					fallbackConstraints.autoGainControl = { ideal: true };
+				}
+				this.stream = await navigator.mediaDevices.getUserMedia({ audio: fallbackConstraints });
+				this.fallbackUsed = true;
+			} else {
+				throw err;
+			}
+		}
 
 		try {
 			// Determine active mic label from stream track
@@ -237,6 +262,7 @@ export class AudioRecorder {
 		this.mediaRecorder = null;
 		this.chunks = [];
 		this.activeMicLabel = "";
+		this.fallbackUsed = false;
 	}
 
 	get isRecording(): boolean {

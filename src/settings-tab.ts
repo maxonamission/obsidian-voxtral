@@ -1,12 +1,12 @@
 // Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
 // Licensed under GPL-3.0 — see LICENSE for details
 // https://github.com/maxonamission/voxtral-transcribe
-import { App, Platform, PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, Platform, PluginSettingTab, Setting } from "obsidian";
 import type VoxtralPlugin from "./main";
 import { AudioRecorder } from "./audio-recorder";
 import { listModels } from "./mistral-api";
 import type { MistralModel, } from "./mistral-api";
-import type { FocusBehavior } from "./types";
+import type { FocusBehavior, CustomCommand } from "./types";
 import { SUPPORTED_LANGUAGES, LANGUAGE_NAMES } from "./lang";
 
 export class VoxtralSettingTab extends PluginSettingTab {
@@ -92,20 +92,25 @@ export class VoxtralSettingTab extends PluginSettingTab {
 							| "realtime"
 							| "batch";
 						await this.plugin.saveSettings();
+						this.display(); // re-render to update mode-dependent settings
 					})
 			);
 		}
 
-		// Enter-to-send (batch mode)
+		// Enter-to-send (batch mode only)
+		const isBatch = this.plugin.settings.mode === "batch" || Platform.isMobile;
 		new Setting(containerEl)
 			.setName("Enter = tap-to-send")
 			.setDesc(
-				"In batch mode, pressing Enter sends the current audio chunk when the mic is live. " +
-				"While typing, Enter inserts a normal newline."
+				isBatch
+					? "In batch mode, pressing Enter sends the current audio chunk when the mic is live. " +
+					  "While typing, Enter inserts a normal newline."
+					: "Only available in batch mode. Switch to batch mode to change this setting."
 			)
 			.addToggle((toggle) =>
 				toggle
-					.setValue(this.plugin.settings.enterToSend)
+					.setValue(isBatch ? this.plugin.settings.enterToSend : false)
+					.setDisabled(!isBatch)
 					.onChange(async (value) => {
 						this.plugin.settings.enterToSend = value;
 						await this.plugin.saveSettings();
@@ -218,30 +223,70 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Streaming delay")
+			.setName("Noise suppression")
 			.setDesc(
-				"Delay in ms for realtime mode. Lower = faster but less accurate."
+				"Enable browser-level noise suppression, echo cancellation, and auto gain control. " +
+				"Useful in noisy environments."
 			)
-			.addDropdown((drop) => {
-				const options: Record<string, string> = {
-					"240": "240 ms (fastest)",
-					"480": "480 ms (default)",
-					"640": "640 ms",
-					"800": "800 ms",
-					"1200": "1200 ms",
-					"1600": "1600 ms",
-					"2400": "2400 ms (most accurate)",
-				};
-				for (const [value, label] of Object.entries(options)) {
-					drop.addOption(value, label);
-				}
-				drop.setValue(
-					String(this.plugin.settings.streamingDelayMs)
-				).onChange(async (value) => {
-					this.plugin.settings.streamingDelayMs = Number(value);
-					await this.plugin.saveSettings();
-				});
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.noiseSuppression)
+					.onChange(async (value) => {
+						this.plugin.settings.noiseSuppression = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		const isRealtime = !isBatch && !Platform.isMobile;
+
+		new Setting(containerEl)
+			.setName("Dual-delay mode")
+			.setDesc(
+				Platform.isMobile
+					? "Not available on mobile (requires realtime streaming)."
+					: !isRealtime
+					? "Only available in realtime mode."
+					: "Run two parallel streams: a fast one for immediate text and a slow one " +
+					  "for higher accuracy and voice command detection. Overrides the streaming delay setting."
+			)
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.dualDelay)
+					.setDisabled(!isRealtime)
+					.onChange(async (value) => {
+						this.plugin.settings.dualDelay = value;
+						await this.plugin.saveSettings();
+						this.display(); // re-render to show/hide delay settings
+					});
 			});
+
+		if (isRealtime && !this.plugin.settings.dualDelay) {
+			new Setting(containerEl)
+				.setName("Streaming delay")
+				.setDesc(
+					"Delay in ms for realtime mode. Lower = faster but less accurate."
+				)
+				.addDropdown((drop) => {
+					const options: Record<string, string> = {
+						"240": "240 ms (fastest)",
+						"480": "480 ms (default)",
+						"640": "640 ms",
+						"800": "800 ms",
+						"1200": "1200 ms",
+						"1600": "1600 ms",
+						"2400": "2400 ms (most accurate)",
+					};
+					for (const [value, label] of Object.entries(options)) {
+						drop.addOption(value, label);
+					}
+					drop.setValue(
+						String(this.plugin.settings.streamingDelayMs)
+					).onChange(async (value) => {
+						this.plugin.settings.streamingDelayMs = Number(value);
+						await this.plugin.saveSettings();
+					});
+				});
+		}
 
 		// Hotkeys hint
 		new Setting(containerEl).setName("Keyboard shortcuts").setHeading();
@@ -282,6 +327,36 @@ export class VoxtralSettingTab extends PluginSettingTab {
 						window.open("https://buymeacoffee.com/maxonamission");
 					})
 			);
+
+		// Templates
+		new Setting(containerEl).setName("Templates").setHeading();
+
+		new Setting(containerEl)
+			.setName("Templates folder")
+			.setDesc(
+				'Path to your templates folder (e.g. "Templates"). ' +
+				'Say "template {name}" or "sjabloon {name}" to insert. Leave empty to disable.'
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("Templates")
+					.setValue(this.plugin.settings.templatesFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.templatesFolder = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Built-in quick-templates")
+			.setDesc(
+				'Say "tabel", "codeblok", "callout", "tip", or "waarschuwing" to insert ' +
+				"common Markdown structures. Always active."
+			);
+
+		// Custom voice commands
+		new Setting(containerEl).setName("Custom voice commands").setHeading();
+		this.renderCustomCommands(containerEl);
 
 		// Advanced settings
 		new Setting(containerEl).setName("Advanced").setHeading();
@@ -347,6 +422,230 @@ export class VoxtralSettingTab extends PluginSettingTab {
 					textarea.classList.add("voxtral-textarea-full");
 				}
 			});
+	}
+
+	private renderCustomCommands(containerEl: HTMLElement): void {
+		const commands = this.plugin.settings.customCommands;
+		const lang = this.plugin.settings.language;
+
+		// Existing commands
+		for (let i = 0; i < commands.length; i++) {
+			const cmd = commands[i];
+			const triggers = cmd.triggers[lang] ?? cmd.triggers["en"] ?? [];
+			const typeLabel = cmd.type === "slot"
+				? `${cmd.slotPrefix ?? ""}…${cmd.slotSuffix ?? ""}`
+				: (cmd.insertText ?? "").replace(/\n/g, "↵").slice(0, 30);
+
+			new Setting(containerEl)
+				.setName(triggers.join(", ") || cmd.id)
+				.setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`)
+				.addButton((btn) =>
+					btn
+						.setButtonText("Edit")
+						.onClick(() => {
+							this.openCommandEditor(cmd, i);
+						})
+				)
+				.addButton((btn) =>
+					btn
+						.setButtonText("Delete")
+						.setWarning()
+						.onClick(async () => {
+							commands.splice(i, 1);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+				);
+		}
+
+		// Add new command button
+		new Setting(containerEl)
+			.setDesc("Add a custom voice command for inserting text or opening a slot")
+			.addButton((btn) =>
+				btn
+					.setButtonText("Add command")
+					.setCta()
+					.onClick(() => {
+						const newCmd: CustomCommand = {
+							id: `custom-${Date.now()}`,
+							triggers: { [lang]: [""] },
+							type: "insert",
+							insertText: "",
+						};
+						commands.push(newCmd);
+						this.openCommandEditor(newCmd, commands.length - 1);
+					})
+			);
+	}
+
+	private openCommandEditor(cmd: CustomCommand, index: number): void {
+		const { plugin } = this;
+		const redisplay = () => this.display();
+		const lang = this.plugin.settings.language;
+
+		let removeVVListener: (() => void) | undefined;
+		const editorModal = new (class extends Modal {
+			onOpen(): void {
+				const { contentEl } = this;
+
+				// Make the modal scrollable on mobile where the keyboard
+				// covers the bottom half of the screen
+				this.containerEl.addClass("voxtral-cmd-editor-overlay");
+				this.modalEl.addClass("voxtral-cmd-editor-modal");
+
+				// On mobile, use visualViewport to resize modal when
+				// the on-screen keyboard appears/disappears
+				if (Platform.isMobile && window.visualViewport) {
+					const vv = window.visualViewport;
+					const adjustHeight = () => {
+						this.modalEl.style.maxHeight = `${vv.height - 32}px`;
+					};
+					adjustHeight();
+					vv.addEventListener("resize", adjustHeight);
+					removeVVListener = () => vv.removeEventListener("resize", adjustHeight);
+				}
+
+				// Prevent input events from leaking to the settings page
+				// behind the modal (fixes mobile keyboard going to API key field)
+				const stopLeak = (e: Event) => e.stopPropagation();
+				contentEl.addEventListener("input", stopLeak, true);
+				contentEl.addEventListener("keydown", stopLeak, true);
+				contentEl.addEventListener("keyup", stopLeak, true);
+				contentEl.addEventListener("keypress", stopLeak, true);
+
+				// Title
+				new Setting(contentEl).setName("Custom voice command").setHeading();
+
+				// Trigger phrases
+				let triggerInput: HTMLInputElement;
+				new Setting(contentEl)
+					.setName("Trigger phrases (comma-separated)")
+					.addText((text) => {
+						triggerInput = text.inputEl;
+						text.setValue((cmd.triggers[lang] ?? []).join(", "));
+					});
+
+				// Type selector
+				let typeValue = cmd.type;
+				new Setting(contentEl)
+					.setName("Type")
+					.addDropdown((drop) => {
+						drop.addOption("insert", "Insert text");
+						drop.addOption("slot", "Slot (type between prefix/suffix)");
+						drop.setValue(cmd.type);
+						drop.onChange((value) => {
+							typeValue = value as "insert" | "slot";
+							updateVisibility();
+						});
+					});
+
+				// Insert text field
+				const insertContainer = contentEl.createDiv();
+				let insertInput: HTMLInputElement;
+				new Setting(insertContainer)
+					.setName("Text to insert")
+					.setDesc("Use \\n for newline")
+					.addText((text) => {
+						insertInput = text.inputEl;
+						text.setValue((cmd.insertText ?? "").replace(/\n/g, "\\n"));
+					});
+
+				// Slot fields
+				const slotContainer = contentEl.createDiv();
+				let prefixInput: HTMLInputElement;
+				let suffixInput: HTMLInputElement;
+				let exitValue = cmd.slotExit ?? "enter";
+
+				new Setting(slotContainer)
+					.setName("Prefix (e.g. [[ or **)")
+					.addText((text) => {
+						prefixInput = text.inputEl;
+						text.setValue(cmd.slotPrefix ?? "");
+					});
+
+				new Setting(slotContainer)
+					.setName("Suffix (e.g. ]] or **)")
+					.addText((text) => {
+						suffixInput = text.inputEl;
+						text.setValue(cmd.slotSuffix ?? "");
+					});
+
+				new Setting(slotContainer)
+					.setName("Close slot on")
+					.addDropdown((drop) => {
+						drop.addOption("enter", "Enter");
+						drop.addOption("space", "Space");
+						drop.addOption("enter-or-space", "Enter or space");
+						drop.setValue(exitValue);
+						drop.onChange((value) => {
+							exitValue = value as "enter" | "space" | "enter-or-space";
+						});
+					});
+
+				// Show/hide based on type
+				const updateVisibility = () => {
+					insertContainer.toggle(typeValue === "insert");
+					slotContainer.toggle(typeValue === "slot");
+				};
+				updateVisibility();
+
+				// Auto-focus the trigger input (helps mobile keyboard target)
+				if (Platform.isMobile) {
+					setTimeout(() => triggerInput?.focus(), 100);
+				}
+
+				// Buttons
+				new Setting(contentEl)
+					.addButton((btn) =>
+						btn.setButtonText("Cancel").onClick(() => {
+							this.close();
+						})
+					)
+					.addButton((btn) =>
+						btn
+							.setButtonText("Save")
+							.setCta()
+							.onClick(() => {
+								// Parse triggers
+								const triggers = triggerInput.value
+									.split(",")
+									.map((t: string) => t.trim())
+									.filter((t: string) => t.length > 0);
+								if (triggers.length === 0) {
+									triggerInput.classList.add("voxtral-cmd-error");
+									return;
+								}
+
+								cmd.triggers[lang] = triggers;
+								cmd.type = typeValue;
+
+								if (cmd.type === "insert") {
+									cmd.insertText = insertInput.value.replace(/\\n/g, "\n");
+									cmd.slotPrefix = undefined;
+									cmd.slotSuffix = undefined;
+									cmd.slotExit = undefined;
+								} else {
+									cmd.slotPrefix = prefixInput.value;
+									cmd.slotSuffix = suffixInput.value;
+									cmd.slotExit = exitValue;
+									cmd.insertText = undefined;
+								}
+
+								plugin.settings.customCommands[index] = cmd;
+								void plugin.saveSettings();
+								this.close();
+								redisplay();
+							})
+					);
+			}
+
+			onClose(): void {
+				removeVVListener?.();
+				this.contentEl.empty();
+			}
+		})(this.app);
+
+		editorModal.open();
 	}
 
 	/**
