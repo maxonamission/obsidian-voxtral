@@ -593,7 +593,12 @@ export default class VoxtralPlugin extends Plugin {
 		}
 
 		this.currentEditor = null;
-		this.tracker.reset();
+		// Only reset tracked ranges if auto-correct already ran.
+		// When auto-correct is off, the user may want to manually
+		// trigger "Correct dictated text" after stopping.
+		if (this.settings.autoCorrect) {
+			this.tracker.reset();
+		}
 		this.updateStatusBar("idle");
 		new Notice("Recording stopped");
 	}
@@ -645,7 +650,14 @@ export default class VoxtralPlugin extends Plugin {
 
 			this.updateStatusBar("recording");
 			if (text) {
+				// Use tracker to record the inserted range for manual
+				// "Correct dictated text" (when autoCorrect is off).
+				const offsetBefore = editor.posToOffset(editor.getCursor());
 				const stopRequested = processText(editor, text);
+				const offsetAfter = editor.posToOffset(editor.getCursor());
+				if (offsetAfter > offsetBefore) {
+					this.tracker.addRange(offsetBefore, offsetAfter);
+				}
 				if (stopRequested) {
 					await this.stopRecording();
 					return;
@@ -808,6 +820,7 @@ export default class VoxtralPlugin extends Plugin {
 		try {
 			new Notice("Correcting...");
 			await this.tracker.autoCorrectAfterStop(editor, this.settings);
+			this.tracker.reset();
 			new Notice("Dictated text corrected");
 		} catch (e) {
 			new Notice(`Correction failed: ${e}`);

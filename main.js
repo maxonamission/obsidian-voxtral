@@ -4737,7 +4737,9 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       new import_obsidian7.Notice(`Error stopping recording: ${e}`);
     }
     this.currentEditor = null;
-    this.tracker.reset();
+    if (this.settings.autoCorrect) {
+      this.tracker.reset();
+    }
     this.updateStatusBar("idle");
     new import_obsidian7.Notice("Recording stopped");
   }
@@ -4772,7 +4774,12 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       }
       this.updateStatusBar("recording");
       if (text) {
+        const offsetBefore = editor.posToOffset(editor.getCursor());
         const stopRequested = processText(editor, text);
+        const offsetAfter = editor.posToOffset(editor.getCursor());
+        if (offsetAfter > offsetBefore) {
+          this.tracker.addRange(offsetBefore, offsetAfter);
+        }
         if (stopRequested) {
           await this.stopRecording();
           return;
@@ -4906,6 +4913,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
     try {
       new import_obsidian7.Notice("Correcting...");
       await this.tracker.autoCorrectAfterStop(editor, this.settings);
+      this.tracker.reset();
       new import_obsidian7.Notice("Dictated text corrected");
     } catch (e) {
       new import_obsidian7.Notice(`Correction failed: ${e}`);
