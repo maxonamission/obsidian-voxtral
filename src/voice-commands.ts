@@ -168,6 +168,12 @@ function levenshtein(a: string, b: string): number {
 function insertAtCursor(editor: Editor, text: string): void {
 	const cursor = editor.getCursor();
 
+	// Never start a line with spaces from auto-transcription
+	// (preserve newlines — those are intentional formatting)
+	if (cursor.ch === 0) {
+		text = text.replace(/^ +/, "");
+	}
+
 	// Ensure a space between existing text and new text when needed.
 	// Skip when a slot is active — text is inserted right after a
 	// formatting prefix (e.g. "**") and a space would break markdown.
@@ -462,7 +468,8 @@ export function loadCustomCommands(commands: CustomCommand[]): void {
 			const prefix = cmd.slotPrefix;
 			const suffix = cmd.slotSuffix ?? "";
 			const exit = cmd.slotExit ?? "enter";
-			customCommandLabels.set(cmd.id, `${prefix}…${suffix}`);
+			const slotLabel = cmd.labels?.[activeLang] ?? cmd.labels?.en ?? `${prefix}…${suffix}`;
+			customCommandLabels.set(cmd.id, slotLabel);
 			return {
 				id: cmd.id as CommandId,
 				slot: { prefix, suffix, exitTrigger: exit },
@@ -480,8 +487,9 @@ export function loadCustomCommands(commands: CustomCommand[]): void {
 		}
 		// Insert command
 		const text = cmd.insertText ?? "";
-		const displayText = text.replace(/\n/g, "↵").slice(0, 30);
-		customCommandLabels.set(cmd.id, displayText || cmd.id);
+		const fallbackLabel = text.replace(/\n/g, "↵").slice(0, 30);
+		const insertLabel = cmd.labels?.[activeLang] ?? cmd.labels?.en ?? (fallbackLabel || cmd.id);
+		customCommandLabels.set(cmd.id, insertLabel);
 		return {
 			id: cmd.id as CommandId,
 			action: (editor: Editor) => insertAtCursor(editor, text),
@@ -777,15 +785,44 @@ function processSegment(editor: Editor, text: string): boolean {
 	return false;
 }
 
+/** Open/close command pairs to merge into a single help row */
+const OPEN_CLOSE_PAIRS: [CommandId, CommandId][] = [
+	["boldOpen", "boldClose"],
+	["italicOpen", "italicClose"],
+	["inlineCodeOpen", "inlineCodeClose"],
+	["tagOpen", "tagClose"],
+	["codeBlockOpen", "codeBlockClose"],
+];
+
 /**
  * Get all commands for the help panel, with localized labels and
  * patterns for the active language.
+ * Open/close pairs are merged into a single row.
  */
 export function getCommandList(): { label: string; patterns: string[] }[] {
-	const builtIn = COMMAND_DEFS.map((c) => ({
-		label: getLabel(c.id, activeLang),
-		patterns: getPatternsForCommand(c.id, activeLang),
-	}));
+	const closeIds = new Set(OPEN_CLOSE_PAIRS.map(([, c]) => c));
+	const openMap = new Map(OPEN_CLOSE_PAIRS);
+
+	const builtIn: { label: string; patterns: string[] }[] = [];
+	for (const c of COMMAND_DEFS) {
+		if (closeIds.has(c.id)) continue; // skip close — merged with open
+		const closeId = openMap.get(c.id);
+		if (closeId) {
+			// Merge open/close into one row
+			const openPatterns = getPatternsForCommand(c.id, activeLang);
+			const closePatterns = getPatternsForCommand(closeId, activeLang);
+			builtIn.push({
+				label: getLabel(c.id, activeLang) + " / " + getLabel(closeId, activeLang),
+				patterns: [...openPatterns.slice(0, 1), ...closePatterns.slice(0, 1)],
+			});
+		} else {
+			builtIn.push({
+				label: getLabel(c.id, activeLang),
+				patterns: getPatternsForCommand(c.id, activeLang),
+			});
+		}
+	}
+
 	const custom = customCommandDefs.map((c) => ({
 		label: customCommandLabels.get(c.id) ?? c.id,
 		patterns: getPatternsForAnyCommand(c.id, activeLang),

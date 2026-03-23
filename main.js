@@ -30,6 +30,21 @@ function getDefaultBuiltInCommands() {
     {
       id: "builtin-table",
       builtIn: true,
+      labels: {
+        nl: "Tabel",
+        en: "Table",
+        fr: "Tableau",
+        de: "Tabelle",
+        es: "Tabla",
+        pt: "Tabela",
+        it: "Tabella",
+        ru: "\u0422\u0430\u0431\u043B\u0438\u0446\u0430",
+        zh: "\u8868\u683C",
+        ja: "\u30C6\u30FC\u30D6\u30EB",
+        ko: "\uD14C\uC774\uBE14",
+        hi: "\u091F\u0947\u092C\u0932",
+        ar: "\u062C\u062F\u0648\u0644"
+      },
       type: "insert",
       insertText: "\n\n| Kolom 1 | Kolom 2 | Kolom 3 |\n| --- | --- | --- |\n| | | |\n",
       triggers: {
@@ -51,6 +66,21 @@ function getDefaultBuiltInCommands() {
     {
       id: "builtin-callout",
       builtIn: true,
+      labels: {
+        nl: "Callout (opmerking)",
+        en: "Callout (note)",
+        fr: "Callout (note)",
+        de: "Callout (Hinweis)",
+        es: "Callout (nota)",
+        pt: "Callout (nota)",
+        it: "Callout (nota)",
+        ru: "\u0417\u0430\u043C\u0435\u0442\u043A\u0430",
+        zh: "\u6807\u6CE8\uFF08\u5907\u6CE8\uFF09",
+        ja: "\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8\uFF08\u6CE8\u91C8\uFF09",
+        ko: "\uCF5C\uC544\uC6C3 (\uBA54\uBAA8)",
+        hi: "\u0915\u0949\u0932\u0906\u0909\u091F (\u0928\u094B\u091F)",
+        ar: "\u062A\u0646\u0628\u064A\u0647 (\u0645\u0644\u0627\u062D\u0638\u0629)"
+      },
       type: "insert",
       insertText: "\n\n> [!note]\n> ",
       triggers: {
@@ -72,6 +102,21 @@ function getDefaultBuiltInCommands() {
     {
       id: "builtin-warning",
       builtIn: true,
+      labels: {
+        nl: "Callout (waarschuwing)",
+        en: "Callout (warning)",
+        fr: "Callout (avertissement)",
+        de: "Callout (Warnung)",
+        es: "Callout (advertencia)",
+        pt: "Callout (aviso)",
+        it: "Callout (avviso)",
+        ru: "\u041F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435",
+        zh: "\u6807\u6CE8\uFF08\u8B66\u544A\uFF09",
+        ja: "\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8\uFF08\u8B66\u544A\uFF09",
+        ko: "\uCF5C\uC544\uC6C3 (\uACBD\uACE0)",
+        hi: "\u0915\u0949\u0932\u0906\u0909\u091F (\u091A\u0947\u0924\u093E\u0935\u0928\u0940)",
+        ar: "\u062A\u0646\u0628\u064A\u0647 (\u062A\u062D\u0630\u064A\u0631)"
+      },
       type: "insert",
       insertText: "\n\n> [!warning]\n> ",
       triggers: {
@@ -93,6 +138,21 @@ function getDefaultBuiltInCommands() {
     {
       id: "builtin-tip",
       builtIn: true,
+      labels: {
+        nl: "Callout (tip)",
+        en: "Callout (tip)",
+        fr: "Callout (astuce)",
+        de: "Callout (Tipp)",
+        es: "Callout (consejo)",
+        pt: "Callout (dica)",
+        it: "Callout (suggerimento)",
+        ru: "\u0421\u043E\u0432\u0435\u0442",
+        zh: "\u6807\u6CE8\uFF08\u63D0\u793A\uFF09",
+        ja: "\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8\uFF08\u30D2\u30F3\u30C8\uFF09",
+        ko: "\uCF5C\uC544\uC6C3 (\uD301)",
+        hi: "\u0915\u0949\u0932\u0906\u0909\u091F (\u0938\u0941\u091D\u093E\u0935)",
+        ar: "\u062A\u0646\u0628\u064A\u0647 (\u0646\u0635\u064A\u062D\u0629)"
+      },
       type: "insert",
       insertText: "\n\n> [!tip]\n> ",
       triggers: {
@@ -2559,6 +2619,9 @@ function levenshtein(a, b) {
 }
 function insertAtCursor(editor, text) {
   const cursor = editor.getCursor();
+  if (cursor.ch === 0) {
+    text = text.replace(/^ +/, "");
+  }
   if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !isSlotActive()) {
     const charBefore = editor.getRange(
       { line: cursor.line, ch: cursor.ch - 1 },
@@ -2817,12 +2880,13 @@ var customCommandDefs = [];
 function loadCustomCommands(commands) {
   customCommandLabels.clear();
   customCommandDefs = commands.map((cmd) => {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
     if (cmd.type === "slot" && cmd.slotPrefix !== void 0) {
       const prefix = cmd.slotPrefix;
       const suffix = (_a = cmd.slotSuffix) != null ? _a : "";
       const exit = (_b = cmd.slotExit) != null ? _b : "enter";
-      customCommandLabels.set(cmd.id, `${prefix}\u2026${suffix}`);
+      const slotLabel = (_f = (_e = (_c = cmd.labels) == null ? void 0 : _c[activeLang]) != null ? _e : (_d = cmd.labels) == null ? void 0 : _d.en) != null ? _f : `${prefix}\u2026${suffix}`;
+      customCommandLabels.set(cmd.id, slotLabel);
       return {
         id: cmd.id,
         slot: { prefix, suffix, exitTrigger: exit },
@@ -2838,9 +2902,10 @@ function loadCustomCommands(commands) {
         }
       };
     }
-    const text = (_c = cmd.insertText) != null ? _c : "";
-    const displayText = text.replace(/\n/g, "\u21B5").slice(0, 30);
-    customCommandLabels.set(cmd.id, displayText || cmd.id);
+    const text = (_g = cmd.insertText) != null ? _g : "";
+    const fallbackLabel = text.replace(/\n/g, "\u21B5").slice(0, 30);
+    const insertLabel = (_k = (_j = (_h = cmd.labels) == null ? void 0 : _h[activeLang]) != null ? _j : (_i = cmd.labels) == null ? void 0 : _i.en) != null ? _k : fallbackLabel || cmd.id;
+    customCommandLabels.set(cmd.id, insertLabel);
     return {
       id: cmd.id,
       action: (editor) => insertAtCursor(editor, text)
@@ -3030,11 +3095,34 @@ function processSegment(editor, text) {
   }
   return false;
 }
+var OPEN_CLOSE_PAIRS = [
+  ["boldOpen", "boldClose"],
+  ["italicOpen", "italicClose"],
+  ["inlineCodeOpen", "inlineCodeClose"],
+  ["tagOpen", "tagClose"],
+  ["codeBlockOpen", "codeBlockClose"]
+];
 function getCommandList() {
-  const builtIn = COMMAND_DEFS.map((c) => ({
-    label: getLabel(c.id, activeLang),
-    patterns: getPatternsForCommand(c.id, activeLang)
-  }));
+  const closeIds = new Set(OPEN_CLOSE_PAIRS.map(([, c]) => c));
+  const openMap = new Map(OPEN_CLOSE_PAIRS);
+  const builtIn = [];
+  for (const c of COMMAND_DEFS) {
+    if (closeIds.has(c.id)) continue;
+    const closeId = openMap.get(c.id);
+    if (closeId) {
+      const openPatterns = getPatternsForCommand(c.id, activeLang);
+      const closePatterns = getPatternsForCommand(closeId, activeLang);
+      builtIn.push({
+        label: getLabel(c.id, activeLang) + " / " + getLabel(closeId, activeLang),
+        patterns: [...openPatterns.slice(0, 1), ...closePatterns.slice(0, 1)]
+      });
+    } else {
+      builtIn.push({
+        label: getLabel(c.id, activeLang),
+        patterns: getPatternsForCommand(c.id, activeLang)
+      });
+    }
+  }
   const custom = customCommandDefs.map((c) => {
     var _a;
     return {
@@ -3442,6 +3530,9 @@ var DictationTracker = class _DictationTracker {
    */
   trackInsertAtCursor(editor, text) {
     const cursor = editor.getCursor();
+    if (cursor.ch === 0) {
+      text = text.replace(/^ +/, "");
+    }
     if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !isSlotActive()) {
       const charBefore = editor.getRange(
         { line: cursor.line, ch: cursor.ch - 1 },
