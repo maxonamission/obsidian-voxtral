@@ -1903,9 +1903,13 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
     new import_obsidian2.Setting(containerEl).setName("Custom voice commands").setHeading();
     this.renderCustomCommands(containerEl);
     new import_obsidian2.Setting(containerEl).setName("Advanced").setHeading();
-    const isTranscriptionModel = (m) => {
+    const isRealtimeModel = (m) => {
       var _a;
-      return !!((_a = m.capabilities) == null ? void 0 : _a.audio_transcription);
+      return !!((_a = m.capabilities) == null ? void 0 : _a.audio_transcription) && m.id.includes("realtime");
+    };
+    const isBatchModel = (m) => {
+      var _a;
+      return !!((_a = m.capabilities) == null ? void 0 : _a.audio_transcription) && !m.id.includes("realtime");
     };
     const isTextChatModel = (m) => {
       var _a, _b;
@@ -1920,7 +1924,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         this.plugin.settings.realtimeModel = value.trim();
         await this.plugin.saveSettings();
       },
-      isTranscriptionModel
+      isRealtimeModel
     );
     this.addModelDropdown(
       containerEl,
@@ -1931,7 +1935,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         this.plugin.settings.batchModel = value.trim();
         await this.plugin.saveSettings();
       },
-      isTranscriptionModel
+      isBatchModel
     );
     this.addModelDropdown(
       containerEl,

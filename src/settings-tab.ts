@@ -362,8 +362,10 @@ export class VoxtralSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Advanced").setHeading();
 
 		// Filter helpers based on model capabilities
-		const isTranscriptionModel = (m: MistralModel) =>
-			!!m.capabilities?.audio_transcription;
+		const isRealtimeModel = (m: MistralModel) =>
+			!!m.capabilities?.audio_transcription && m.id.includes("realtime");
+		const isBatchModel = (m: MistralModel) =>
+			!!m.capabilities?.audio_transcription && !m.id.includes("realtime");
 		const isTextChatModel = (m: MistralModel) =>
 			!!m.capabilities?.completion_chat &&
 			!m.capabilities?.audio_transcription &&
@@ -378,7 +380,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 				this.plugin.settings.realtimeModel = value.trim();
 				await this.plugin.saveSettings();
 			},
-			isTranscriptionModel
+			isRealtimeModel
 		);
 
 		this.addModelDropdown(
@@ -390,7 +392,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 				this.plugin.settings.batchModel = value.trim();
 				await this.plugin.saveSettings();
 			},
-			isTranscriptionModel
+			isBatchModel
 		);
 
 		this.addModelDropdown(
