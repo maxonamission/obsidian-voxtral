@@ -3219,6 +3219,10 @@ var DictationTracker = class _DictationTracker {
       this.dictatedRanges.push({ from: offsetBefore, to: offsetAfter });
     }
   }
+  /** True when at least one dictated range has been recorded. */
+  hasRanges() {
+    return this.dictatedRanges.length > 0;
+  }
   /** Record a range directly (for dual-delay finalization). */
   addRange(from, to) {
     this.dictatedRanges.push({ from, to });
@@ -4022,7 +4026,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
     });
     this.addCommand({
       id: "correct-all",
-      name: "Correct entire note",
+      name: "Correct dictated text",
       icon: "file-check",
       editorCallback: (editor) => {
         void this.correctAll(editor);
@@ -4534,9 +4538,8 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
     }
   }
   async correctAll(editor) {
-    const text = editor.getValue();
-    if (!text.trim()) {
-      new import_obsidian7.Notice("Note is empty");
+    if (!this.tracker.hasRanges()) {
+      new import_obsidian7.Notice("No dictated text to correct");
       return;
     }
     if (!this.settings.apiKey) {
@@ -4545,13 +4548,8 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
     }
     try {
       new import_obsidian7.Notice("Correcting...");
-      const corrected = await correctText(text, this.settings);
-      if (corrected && corrected !== text) {
-        editor.setValue(corrected);
-        new import_obsidian7.Notice("Note corrected");
-      } else {
-        new import_obsidian7.Notice("No corrections needed");
-      }
+      await this.tracker.autoCorrectAfterStop(editor, this.settings);
+      new import_obsidian7.Notice("Dictated text corrected");
     } catch (e) {
       new import_obsidian7.Notice(`Correction failed: ${e}`);
     }

@@ -152,7 +152,7 @@ export default class VoxtralPlugin extends Plugin {
 
 		this.addCommand({
 			id: "correct-all",
-			name: "Correct entire note",
+			name: "Correct dictated text",
 			icon: "file-check",
 			editorCallback: (editor: Editor) => { void this.correctAll(editor); },
 		});
@@ -822,9 +822,8 @@ export default class VoxtralPlugin extends Plugin {
 	}
 
 	private async correctAll(editor: Editor): Promise<void> {
-		const text = editor.getValue();
-		if (!text.trim()) {
-			new Notice("Note is empty");
+		if (!this.tracker.hasRanges()) {
+			new Notice("No dictated text to correct");
 			return;
 		}
 
@@ -835,13 +834,8 @@ export default class VoxtralPlugin extends Plugin {
 
 		try {
 			new Notice("Correcting...");
-			const corrected = await correctText(text, this.settings);
-			if (corrected && corrected !== text) {
-				editor.setValue(corrected);
-				new Notice("Note corrected");
-			} else {
-				new Notice("No corrections needed");
-			}
+			await this.tracker.autoCorrectAfterStop(editor, this.settings);
+			new Notice("Dictated text corrected");
 		} catch (e) {
 			new Notice(`Correction failed: ${e}`);
 		}

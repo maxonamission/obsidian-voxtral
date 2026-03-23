@@ -126,6 +126,11 @@ export class DictationTracker {
 		}
 	}
 
+	/** True when at least one dictated range has been recorded. */
+	hasRanges(): boolean {
+		return this.dictatedRanges.length > 0;
+	}
+
 	/** Record a range directly (for dual-delay finalization). */
 	addRange(from: number, to: number): void {
 		this.dictatedRanges.push({ from, to });
