@@ -22,10 +22,11 @@ __export(main_exports, {
   default: () => VoxtralPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian5 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 
 // src/types.ts
 var DEFAULT_SETTINGS = {
+  settingsVersion: 1,
   apiKey: "",
   language: "nl",
   realtimeModel: "voxtral-mini-transcribe-realtime-2602",
@@ -49,6 +50,24 @@ var DEFAULT_SETTINGS = {
   templatesFolder: ""
 };
 var DEFAULT_CORRECT_PROMPT = "You are a precise text corrector for dictated text. The input language may vary (commonly Dutch, but follow whatever language the text is in).\n\nCORRECT ONLY:\n- Capitalization (sentence starts, proper nouns)\n- Clearly misspelled or garbled words (from speech recognition)\n- Missing or wrong punctuation\n\nDO NOT CHANGE:\n- Sentence structure or word order\n- Style or tone\n- Markdown formatting (# headings, - lists, - [ ] to-do items)\n\nINLINE CORRECTION INSTRUCTIONS:\nThe text was dictated via speech recognition. The speaker sometimes gives inline instructions meant for you. Recognize these patterns:\n- Explicit markers: 'voor de correctie', 'voor de correctie achteraf', 'for the correction', 'correction note'\n- Spelled-out words: 'V-O-X-T-R-A-L' or 'with an x' \u2192 merge into the intended word\n- Self-corrections: 'no not X but Y', 'nee niet X maar Y', 'I mean Y', 'ik bedoel Y'\n- Meta-commentary: 'that's a Dutch word', 'with a capital letter', 'met een hoofdletter'\n\nWhen you encounter such instructions:\n1. Apply the instruction to the REST of the text\n2. Remove the instruction/meta-commentary itself from the output\n3. Keep all content text \u2014 NEVER remove normal sentences\n\nCRITICAL RULES:\n- Your output must be SHORTER than or equal to the input (after removing meta-instructions)\n- NEVER add your own text, commentary, explanations, or notes\n- NEVER add parenthesized text like '(text missing)' or '(no corrections needed)'\n- NEVER continue, elaborate, or expand on the content\n- NEVER invent or hallucinate text that wasn't in the input\n- If the input is short (even one word), just return it corrected\n- Your output must contain ONLY the corrected version of the input text, NOTHING else";
+
+// src/settings-migration.ts
+var CURRENT_VERSION = 1;
+var migrations = {
+  // No migrations yet — v0 → v1 is handled by the default merge below
+};
+function migrateSettings(data) {
+  if (!data) {
+    return { ...DEFAULT_SETTINGS, settingsVersion: CURRENT_VERSION };
+  }
+  let version = typeof data.settingsVersion === "number" ? data.settingsVersion : 0;
+  while (migrations[version]) {
+    data = migrations[version](data);
+    version++;
+  }
+  data.settingsVersion = CURRENT_VERSION;
+  return { ...DEFAULT_SETTINGS, ...data };
+}
 
 // src/settings-tab.ts
 var import_obsidian2 = require("obsidian");
@@ -309,6 +328,185 @@ var AudioRecorder = class {
 
 // src/mistral-api.ts
 var import_obsidian = require("obsidian");
+
+// src/authenticated-websocket.ts
+var WS_OPEN = 1;
+function loadNodeModule(name) {
+  const r = globalThis["require"];
+  if (!r) throw new Error(`Node.js require() not available (needed for ${name})`);
+  return r(name);
+}
+function createAuthenticatedWebSocket(url, headers, callbacks) {
+  const https = loadNodeModule("https");
+  const crypto = loadNodeModule("crypto");
+  const parsed = new URL(url);
+  const wsKey = crypto.randomBytes(16).toString("base64");
+  const conn = {
+    readyState: 0,
+    send: () => {
+    },
+    close: () => {
+    }
+  };
+  const req = https.request(
+    {
+      hostname: parsed.hostname,
+      port: parsed.port || 443,
+      path: parsed.pathname + parsed.search,
+      method: "GET",
+      headers: {
+        ...headers,
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": wsKey
+      }
+    },
+    (res) => {
+      callbacks.onError(
+        new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
+      );
+    }
+  );
+  req.on("upgrade", (_res, socket) => {
+    conn.readyState = WS_OPEN;
+    conn.send = (data) => {
+      const payload = Buffer.from(data, "utf-8");
+      const mask = crypto.randomBytes(4);
+      let header;
+      if (payload.length < 126) {
+        header = Buffer.alloc(6);
+        header[0] = 129;
+        header[1] = 128 | payload.length;
+        mask.copy(header, 2);
+      } else if (payload.length < 65536) {
+        header = Buffer.alloc(8);
+        header[0] = 129;
+        header[1] = 128 | 126;
+        header.writeUInt16BE(payload.length, 2);
+        mask.copy(header, 4);
+      } else {
+        header = Buffer.alloc(14);
+        header[0] = 129;
+        header[1] = 128 | 127;
+        header.writeBigUInt64BE(BigInt(payload.length), 2);
+        mask.copy(header, 10);
+      }
+      const masked = Buffer.alloc(payload.length);
+      for (let i = 0; i < payload.length; i++) {
+        masked[i] = payload[i] ^ mask[i % 4];
+      }
+      socket.write(Buffer.concat([header, masked]));
+    };
+    conn.close = () => {
+      conn.readyState = 3;
+      const closeFrame = Buffer.alloc(6);
+      closeFrame[0] = 136;
+      closeFrame[1] = 128;
+      const closeMask = crypto.randomBytes(4);
+      closeMask.copy(closeFrame, 2);
+      try {
+        socket.write(closeFrame);
+      } catch (e) {
+      }
+      socket.end();
+    };
+    const pingInterval = setInterval(() => {
+      if (conn.readyState !== WS_OPEN) {
+        clearInterval(pingInterval);
+        return;
+      }
+      try {
+        const pingFrame = Buffer.alloc(6);
+        pingFrame[0] = 137;
+        pingFrame[1] = 128;
+        const pingMask = crypto.randomBytes(4);
+        pingMask.copy(pingFrame, 2);
+        socket.write(pingFrame);
+      } catch (e) {
+      }
+    }, 15e3);
+    callbacks.onOpen();
+    let buffer = Buffer.alloc(0);
+    socket.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (buffer.length >= 2) {
+        const firstByte = buffer[0];
+        const secondByte = buffer[1];
+        const opcode = firstByte & 15;
+        const isMasked = (secondByte & 128) !== 0;
+        let payloadLength = secondByte & 127;
+        let offset = 2;
+        if (payloadLength === 126) {
+          if (buffer.length < 4) return;
+          payloadLength = buffer.readUInt16BE(2);
+          offset = 4;
+        } else if (payloadLength === 127) {
+          if (buffer.length < 10) return;
+          payloadLength = Number(buffer.readBigUInt64BE(2));
+          offset = 10;
+        }
+        if (isMasked) offset += 4;
+        if (buffer.length < offset + payloadLength) return;
+        let payload = buffer.subarray(offset, offset + payloadLength);
+        if (isMasked) {
+          const maskKey = buffer.subarray(offset - 4, offset);
+          payload = Buffer.from(payload);
+          for (let i = 0; i < payload.length; i++) {
+            payload[i] ^= maskKey[i % 4];
+          }
+        }
+        buffer = buffer.subarray(offset + payloadLength);
+        if (opcode === 1) {
+          callbacks.onMessage(payload.toString("utf-8"));
+        } else if (opcode === 8) {
+          conn.readyState = 3;
+          clearInterval(pingInterval);
+          socket.end();
+          callbacks.onClose();
+          return;
+        } else if (opcode === 9) {
+          const pongMask = crypto.randomBytes(4);
+          const pongLen = payload.length;
+          let pongHeader;
+          if (pongLen < 126) {
+            pongHeader = Buffer.alloc(6);
+            pongHeader[0] = 138;
+            pongHeader[1] = 128 | pongLen;
+            pongMask.copy(pongHeader, 2);
+          } else {
+            pongHeader = Buffer.alloc(8);
+            pongHeader[0] = 138;
+            pongHeader[1] = 128 | 126;
+            pongHeader.writeUInt16BE(pongLen, 2);
+            pongMask.copy(pongHeader, 4);
+          }
+          const maskedPong = Buffer.from(payload);
+          for (let i = 0; i < maskedPong.length; i++) {
+            maskedPong[i] ^= pongMask[i % 4];
+          }
+          socket.write(Buffer.concat([pongHeader, maskedPong]));
+        }
+      }
+    });
+    socket.on("close", () => {
+      conn.readyState = 3;
+      clearInterval(pingInterval);
+      callbacks.onClose();
+    });
+    socket.on("error", (err) => {
+      clearInterval(pingInterval);
+      callbacks.onError(err);
+    });
+  });
+  req.on("error", (err) => {
+    callbacks.onError(err);
+  });
+  req.end();
+  return conn;
+}
+
+// src/mistral-api.ts
 var BASE_URL = "https://api.mistral.ai";
 function sanitizeApiError(status, rawBody) {
   var _a;
@@ -517,181 +715,6 @@ function stripLlmCommentary(corrected, original) {
   }
   return cleaned.trim();
 }
-var WS_OPEN = 1;
-function loadNodeModule(name) {
-  const r = globalThis["require"];
-  if (!r) throw new Error(`Node.js require() not available (needed for ${name})`);
-  return r(name);
-}
-function createWebSocket(url, headers, callbacks) {
-  const https = loadNodeModule("https");
-  const crypto = loadNodeModule("crypto");
-  const parsed = new URL(url);
-  const wsKey = crypto.randomBytes(16).toString("base64");
-  const conn = {
-    readyState: 0,
-    send: () => {
-    },
-    close: () => {
-    }
-  };
-  const req = https.request(
-    {
-      hostname: parsed.hostname,
-      port: parsed.port || 443,
-      path: parsed.pathname + parsed.search,
-      method: "GET",
-      headers: {
-        ...headers,
-        Connection: "Upgrade",
-        Upgrade: "websocket",
-        "Sec-WebSocket-Version": "13",
-        "Sec-WebSocket-Key": wsKey
-      }
-    },
-    (res) => {
-      callbacks.onError(
-        new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
-      );
-    }
-  );
-  req.on("upgrade", (_res, socket) => {
-    conn.readyState = WS_OPEN;
-    conn.send = (data) => {
-      const payload = Buffer.from(data, "utf-8");
-      const mask = crypto.randomBytes(4);
-      let header;
-      if (payload.length < 126) {
-        header = Buffer.alloc(6);
-        header[0] = 129;
-        header[1] = 128 | payload.length;
-        mask.copy(header, 2);
-      } else if (payload.length < 65536) {
-        header = Buffer.alloc(8);
-        header[0] = 129;
-        header[1] = 128 | 126;
-        header.writeUInt16BE(payload.length, 2);
-        mask.copy(header, 4);
-      } else {
-        header = Buffer.alloc(14);
-        header[0] = 129;
-        header[1] = 128 | 127;
-        header.writeBigUInt64BE(BigInt(payload.length), 2);
-        mask.copy(header, 10);
-      }
-      const masked = Buffer.alloc(payload.length);
-      for (let i = 0; i < payload.length; i++) {
-        masked[i] = payload[i] ^ mask[i % 4];
-      }
-      socket.write(Buffer.concat([header, masked]));
-    };
-    conn.close = () => {
-      conn.readyState = 3;
-      const closeFrame = Buffer.alloc(6);
-      closeFrame[0] = 136;
-      closeFrame[1] = 128;
-      const closeMask = crypto.randomBytes(4);
-      closeMask.copy(closeFrame, 2);
-      try {
-        socket.write(closeFrame);
-      } catch (e) {
-      }
-      socket.end();
-    };
-    const pingInterval = setInterval(() => {
-      if (conn.readyState !== WS_OPEN) {
-        clearInterval(pingInterval);
-        return;
-      }
-      try {
-        const pingFrame = Buffer.alloc(6);
-        pingFrame[0] = 137;
-        pingFrame[1] = 128;
-        const pingMask = crypto.randomBytes(4);
-        pingMask.copy(pingFrame, 2);
-        socket.write(pingFrame);
-      } catch (e) {
-      }
-    }, 15e3);
-    callbacks.onOpen();
-    let buffer = Buffer.alloc(0);
-    socket.on("data", (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      while (buffer.length >= 2) {
-        const firstByte = buffer[0];
-        const secondByte = buffer[1];
-        const opcode = firstByte & 15;
-        const isMasked = (secondByte & 128) !== 0;
-        let payloadLength = secondByte & 127;
-        let offset = 2;
-        if (payloadLength === 126) {
-          if (buffer.length < 4) return;
-          payloadLength = buffer.readUInt16BE(2);
-          offset = 4;
-        } else if (payloadLength === 127) {
-          if (buffer.length < 10) return;
-          payloadLength = Number(buffer.readBigUInt64BE(2));
-          offset = 10;
-        }
-        if (isMasked) offset += 4;
-        if (buffer.length < offset + payloadLength) return;
-        let payload = buffer.subarray(offset, offset + payloadLength);
-        if (isMasked) {
-          const maskKey = buffer.subarray(offset - 4, offset);
-          payload = Buffer.from(payload);
-          for (let i = 0; i < payload.length; i++) {
-            payload[i] ^= maskKey[i % 4];
-          }
-        }
-        buffer = buffer.subarray(offset + payloadLength);
-        if (opcode === 1) {
-          callbacks.onMessage(payload.toString("utf-8"));
-        } else if (opcode === 8) {
-          conn.readyState = 3;
-          clearInterval(pingInterval);
-          socket.end();
-          callbacks.onClose();
-          return;
-        } else if (opcode === 9) {
-          const pongMask = crypto.randomBytes(4);
-          const pongLen = payload.length;
-          let pongHeader;
-          if (pongLen < 126) {
-            pongHeader = Buffer.alloc(6);
-            pongHeader[0] = 138;
-            pongHeader[1] = 128 | pongLen;
-            pongMask.copy(pongHeader, 2);
-          } else {
-            pongHeader = Buffer.alloc(8);
-            pongHeader[0] = 138;
-            pongHeader[1] = 128 | 126;
-            pongHeader.writeUInt16BE(pongLen, 2);
-            pongMask.copy(pongHeader, 4);
-          }
-          const maskedPong = Buffer.from(payload);
-          for (let i = 0; i < maskedPong.length; i++) {
-            maskedPong[i] ^= pongMask[i % 4];
-          }
-          socket.write(Buffer.concat([pongHeader, maskedPong]));
-        }
-      }
-    });
-    socket.on("close", () => {
-      conn.readyState = 3;
-      clearInterval(pingInterval);
-      callbacks.onClose();
-    });
-    socket.on("error", (err) => {
-      clearInterval(pingInterval);
-      callbacks.onError(err);
-    });
-  });
-  req.on("error", (err) => {
-    callbacks.onError(err);
-  });
-  req.end();
-  return conn;
-}
 var RealtimeTranscriber = class {
   constructor(settings, callbacks, delayOverrideMs) {
     this.ws = null;
@@ -713,7 +736,7 @@ var RealtimeTranscriber = class {
         (_a = this.ws) == null ? void 0 : _a.close();
         reject(new Error("WebSocket connection timeout"));
       }, 1e4);
-      this.ws = createWebSocket(
+      this.ws = createAuthenticatedWebSocket(
         url,
         { Authorization: `Bearer ${this.settings.apiKey}` },
         {
@@ -851,40 +874,11 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
-// src/lang.ts
-var SUPPORTED_LANGUAGES = [
-  "nl",
-  "en",
-  "fr",
-  "de",
-  "es",
-  "pt",
-  "it",
-  "ru",
-  "zh",
-  "hi",
-  "ar",
-  "ja",
-  "ko"
-];
-var LANGUAGE_NAMES = {
-  nl: "Nederlands",
-  en: "English",
-  fr: "Fran\xE7ais",
-  de: "Deutsch",
-  es: "Espa\xF1ol",
-  pt: "Portugu\xEAs",
-  it: "Italiano",
-  ru: "\u0420\u0443\u0441\u0441\u043A\u0438\u0439",
-  zh: "\u4E2D\u6587",
-  hi: "\u0939\u093F\u0928\u094D\u0926\u0940",
-  ar: "\u0627\u0644\u0639\u0631\u0628\u064A\u0629",
-  ja: "\u65E5\u672C\u8A9E",
-  ko: "\uD55C\uAD6D\uC5B4"
-};
-var PATTERNS = {
-  // ── Dutch ──────────────────────────────────────────────────────
-  nl: {
+// src/languages/nl.json
+var nl_default = {
+  code: "nl",
+  name: "Nederlands",
+  patterns: {
     newParagraph: ["nieuwe alinea", "nieuw alinea", "nieuwe paragraaf", "nieuw paragraaf", "nieuwe linie"],
     newLine: ["nieuwe regel", "nieuwe lijn", "volgende regel"],
     heading1: ["kop een", "kop 1"],
@@ -904,261 +898,7 @@ var PATTERNS = {
     inlineCode: ["code"],
     tag: ["tag", "label"]
   },
-  // ── English ────────────────────────────────────────────────────
-  en: {
-    newParagraph: ["new paragraph"],
-    newLine: ["new line", "next line"],
-    heading1: ["heading one", "heading 1"],
-    heading2: ["heading two", "heading 2"],
-    heading3: ["heading three", "heading 3"],
-    bulletPoint: ["new item", "next item", "bullet", "bullet point", "new bullet"],
-    todoItem: ["new todo", "new to do", "todo item", "to do item"],
-    numberedItem: ["numbered item", "new numbered item", "next number"],
-    deleteLastParagraph: ["delete last paragraph"],
-    deleteLastLine: ["delete last line", "delete last sentence"],
-    undo: ["undo"],
-    stopRecording: ["stop recording"],
-    colon: ["colon"],
-    wikilink: ["wiki link", "wikilink", "link"],
-    bold: ["bold"],
-    italic: ["italic"],
-    inlineCode: ["code", "inline code"],
-    tag: ["tag"]
-  },
-  // ── French ─────────────────────────────────────────────────────
-  fr: {
-    newParagraph: ["nouveau paragraphe", "nouvelle section", "nouveau alinea"],
-    newLine: ["nouvelle ligne", "a la ligne", "retour a la ligne"],
-    heading1: ["titre un", "titre 1"],
-    heading2: ["titre deux", "titre 2"],
-    heading3: ["titre trois", "titre 3"],
-    bulletPoint: ["nouveau point", "nouvelle puce", "point suivant", "nouvel element", "nouvel item"],
-    todoItem: ["nouvelle tache", "nouveau todo", "nouveau to do"],
-    numberedItem: ["point numero", "element numero", "nouveau numero"],
-    deleteLastParagraph: ["supprimer dernier paragraphe", "effacer dernier paragraphe"],
-    deleteLastLine: ["supprimer derniere ligne", "effacer derniere ligne", "supprimer derniere phrase"],
-    undo: ["annuler"],
-    stopRecording: ["arreter enregistrement", "arreter l enregistrement", "stop enregistrement"],
-    colon: ["deux points"],
-    wikilink: ["wiki lien", "lien wiki"],
-    bold: ["gras"],
-    italic: ["italique"],
-    inlineCode: ["code"],
-    tag: ["etiquette", "tag"]
-  },
-  // ── German ─────────────────────────────────────────────────────
-  de: {
-    newParagraph: ["neuer absatz", "neuer paragraph"],
-    newLine: ["neue zeile", "nachste zeile"],
-    heading1: ["uberschrift eins", "uberschrift 1"],
-    heading2: ["uberschrift zwei", "uberschrift 2"],
-    heading3: ["uberschrift drei", "uberschrift 3"],
-    bulletPoint: ["neuer punkt", "neuer aufzahlungspunkt", "nachster punkt", "neues element"],
-    todoItem: ["neue aufgabe", "neues todo", "neues to do"],
-    numberedItem: ["nummerierter punkt", "neuer nummerierter punkt", "nachste nummer"],
-    deleteLastParagraph: ["letzten absatz loschen", "absatz loschen"],
-    deleteLastLine: ["letzte zeile loschen", "letzten satz loschen"],
-    undo: ["ruckgangig", "ruckgangig machen"],
-    stopRecording: ["aufnahme beenden", "aufnahme stoppen"],
-    colon: ["doppelpunkt"],
-    wikilink: ["wikilink", "wiki link"],
-    bold: ["fett"],
-    italic: ["kursiv"],
-    inlineCode: ["code"],
-    tag: ["tag", "schlagwort"]
-  },
-  // ── Spanish ────────────────────────────────────────────────────
-  es: {
-    newParagraph: ["nuevo parrafo", "nueva seccion"],
-    newLine: ["nueva linea", "siguiente linea"],
-    heading1: ["titulo uno", "titulo 1"],
-    heading2: ["titulo dos", "titulo 2"],
-    heading3: ["titulo tres", "titulo 3"],
-    bulletPoint: ["nuevo punto", "nueva vineta", "siguiente punto", "nuevo elemento"],
-    todoItem: ["nueva tarea", "nuevo todo", "nuevo to do"],
-    numberedItem: ["punto numerado", "nuevo numero", "siguiente numero"],
-    deleteLastParagraph: ["borrar ultimo parrafo", "eliminar ultimo parrafo"],
-    deleteLastLine: ["borrar ultima linea", "eliminar ultima linea", "borrar ultima frase"],
-    undo: ["deshacer"],
-    stopRecording: ["parar grabacion", "detener grabacion"],
-    colon: ["dos puntos"],
-    wikilink: ["wikilink", "enlace wiki"],
-    bold: ["negrita"],
-    italic: ["cursiva"],
-    inlineCode: ["codigo"],
-    tag: ["etiqueta", "tag"]
-  },
-  // ── Portuguese ─────────────────────────────────────────────────
-  pt: {
-    newParagraph: ["novo paragrafo", "nova secao"],
-    newLine: ["nova linha", "proxima linha"],
-    heading1: ["titulo um", "titulo 1"],
-    heading2: ["titulo dois", "titulo 2"],
-    heading3: ["titulo tres", "titulo 3"],
-    bulletPoint: ["novo ponto", "novo item", "proximo ponto", "novo elemento"],
-    todoItem: ["nova tarefa", "novo todo", "novo to do"],
-    numberedItem: ["ponto numerado", "novo numero", "proximo numero"],
-    deleteLastParagraph: ["apagar ultimo paragrafo", "excluir ultimo paragrafo"],
-    deleteLastLine: ["apagar ultima linha", "excluir ultima linha", "apagar ultima frase"],
-    undo: ["desfazer"],
-    stopRecording: ["parar gravacao", "encerrar gravacao"],
-    colon: ["dois pontos"],
-    wikilink: ["wikilink", "link wiki"],
-    bold: ["negrito"],
-    italic: ["italico"],
-    inlineCode: ["codigo"],
-    tag: ["etiqueta", "tag"]
-  },
-  // ── Russian ───────────────────────────────────────────────────
-  ru: {
-    newParagraph: ["\u043D\u043E\u0432\u044B\u0439 \u0430\u0431\u0437\u0430\u0446", "\u043D\u043E\u0432\u044B\u0439 \u043F\u0430\u0440\u0430\u0433\u0440\u0430\u0444"],
-    newLine: ["\u043D\u043E\u0432\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430"],
-    heading1: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u043E\u0434\u0438\u043D", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 1"],
-    heading2: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u0434\u0432\u0430", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 2"],
-    heading3: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u0442\u0440\u0438", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 3"],
-    bulletPoint: ["\u043D\u043E\u0432\u044B\u0439 \u043F\u0443\u043D\u043A\u0442", "\u043D\u043E\u0432\u044B\u0439 \u044D\u043B\u0435\u043C\u0435\u043D\u0442", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u043F\u0443\u043D\u043A\u0442"],
-    todoItem: ["\u043D\u043E\u0432\u0430\u044F \u0437\u0430\u0434\u0430\u0447\u0430", "\u043D\u043E\u0432\u043E\u0435 \u0437\u0430\u0434\u0430\u043D\u0438\u0435"],
-    numberedItem: ["\u043D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u043D\u043E\u043C\u0435\u0440"],
-    deleteLastParagraph: ["\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0430\u0431\u0437\u0430\u0446"],
-    deleteLastLine: ["\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u044E\u044E \u0441\u0442\u0440\u043E\u043A\u0443", "\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0435"],
-    undo: ["\u043E\u0442\u043C\u0435\u043D\u0438\u0442\u044C", "\u043E\u0442\u043C\u0435\u043D\u0430"],
-    stopRecording: ["\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C", "\u0441\u0442\u043E\u043F \u0437\u0430\u043F\u0438\u0441\u044C"],
-    colon: ["\u0434\u0432\u043E\u0435\u0442\u043E\u0447\u0438\u0435"],
-    wikilink: ["\u0432\u0438\u043A\u0438 \u0441\u0441\u044B\u043B\u043A\u0430", "\u0432\u0438\u043A\u0438 \u043B\u0438\u043D\u043A"],
-    bold: ["\u0436\u0438\u0440\u043D\u044B\u0439"],
-    italic: ["\u043A\u0443\u0440\u0441\u0438\u0432"],
-    inlineCode: ["\u043A\u043E\u0434"],
-    tag: ["\u0442\u0435\u0433", "\u043C\u0435\u0442\u043A\u0430"]
-  },
-  // ── Chinese ────────────────────────────────────────────────────
-  zh: {
-    newParagraph: ["\u65B0\u6BB5\u843D", "\u65B0\u7684\u6BB5\u843D"],
-    newLine: ["\u6362\u884C", "\u65B0\u884C", "\u4E0B\u4E00\u884C"],
-    heading1: ["\u6807\u9898\u4E00", "\u6807\u98981", "\u4E00\u7EA7\u6807\u9898"],
-    heading2: ["\u6807\u9898\u4E8C", "\u6807\u98982", "\u4E8C\u7EA7\u6807\u9898"],
-    heading3: ["\u6807\u9898\u4E09", "\u6807\u98983", "\u4E09\u7EA7\u6807\u9898"],
-    bulletPoint: ["\u65B0\u9879\u76EE", "\u5217\u8868\u9879", "\u65B0\u7684\u9879\u76EE"],
-    todoItem: ["\u65B0\u4EFB\u52A1", "\u65B0\u5F85\u529E", "\u5F85\u529E\u4E8B\u9879"],
-    numberedItem: ["\u7F16\u53F7\u9879", "\u65B0\u7F16\u53F7", "\u4E0B\u4E00\u4E2A\u7F16\u53F7"],
-    deleteLastParagraph: ["\u5220\u9664\u4E0A\u4E00\u6BB5", "\u5220\u9664\u6700\u540E\u4E00\u6BB5"],
-    deleteLastLine: ["\u5220\u9664\u4E0A\u4E00\u884C", "\u5220\u9664\u4E0A\u4E00\u53E5"],
-    undo: ["\u64A4\u9500", "\u64A4\u56DE"],
-    stopRecording: ["\u505C\u6B62\u5F55\u97F3", "\u7ED3\u675F\u5F55\u97F3"],
-    colon: ["\u5192\u53F7"],
-    wikilink: ["\u7EF4\u57FA\u94FE\u63A5", "\u94FE\u63A5"],
-    bold: ["\u52A0\u7C97", "\u7C97\u4F53"],
-    italic: ["\u659C\u4F53"],
-    inlineCode: ["\u4EE3\u7801"],
-    tag: ["\u6807\u7B7E"]
-  },
-  // ── Hindi ──────────────────────────────────────────────────────
-  hi: {
-    newParagraph: ["\u0928\u092F\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B", "\u0928\u092F\u093E \u0905\u0928\u0941\u091A\u094D\u091B\u0947\u0926"],
-    newLine: ["\u0928\u0908 \u0932\u093E\u0907\u0928", "\u0905\u0917\u0932\u0940 \u0932\u093E\u0907\u0928"],
-    heading1: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u090F\u0915", "\u0936\u0940\u0930\u094D\u0937\u0915 1", "\u0939\u0947\u0921\u093F\u0902\u0917 1"],
-    heading2: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u0926\u094B", "\u0936\u0940\u0930\u094D\u0937\u0915 2", "\u0939\u0947\u0921\u093F\u0902\u0917 2"],
-    heading3: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u0924\u0940\u0928", "\u0936\u0940\u0930\u094D\u0937\u0915 3", "\u0939\u0947\u0921\u093F\u0902\u0917 3"],
-    bulletPoint: ["\u0928\u092F\u093E \u092C\u093F\u0902\u0926\u0941", "\u0928\u092F\u093E \u092A\u0949\u0907\u0902\u091F", "\u0905\u0917\u0932\u093E \u092A\u0949\u0907\u0902\u091F"],
-    todoItem: ["\u0928\u092F\u093E \u0915\u093E\u0930\u094D\u092F", "\u0928\u092F\u093E \u091F\u0942\u0921\u0942"],
-    numberedItem: ["\u0915\u094D\u0930\u092E\u093E\u0902\u0915\u093F\u0924 \u092C\u093F\u0902\u0926\u0941", "\u0905\u0917\u0932\u093E \u0928\u0902\u092C\u0930"],
-    deleteLastParagraph: ["\u092A\u093F\u091B\u0932\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B \u0939\u091F\u093E\u0913"],
-    deleteLastLine: ["\u092A\u093F\u091B\u0932\u0940 \u0932\u093E\u0907\u0928 \u0939\u091F\u093E\u0913", "\u0905\u0902\u0924\u093F\u092E \u0932\u093E\u0907\u0928 \u0939\u091F\u093E\u0913"],
-    undo: ["\u092A\u0942\u0930\u094D\u0935\u0935\u0924", "\u0905\u0928\u0921\u0942"],
-    stopRecording: ["\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B", "\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u0930\u094B\u0915\u094B"],
-    colon: ["\u0915\u094B\u0932\u0928"],
-    wikilink: ["\u0935\u093F\u0915\u093F \u0932\u093F\u0902\u0915", "\u0932\u093F\u0902\u0915"],
-    bold: ["\u092C\u094B\u0932\u094D\u0921", "\u092E\u094B\u091F\u093E"],
-    italic: ["\u0907\u091F\u0948\u0932\u093F\u0915", "\u0924\u093F\u0930\u091B\u093E"],
-    inlineCode: ["\u0915\u094B\u0921"],
-    tag: ["\u091F\u0948\u0917"]
-  },
-  // ── Arabic ─────────────────────────────────────────────────────
-  ar: {
-    newParagraph: ["\u0641\u0642\u0631\u0629 \u062C\u062F\u064A\u062F\u0629"],
-    newLine: ["\u0633\u0637\u0631 \u062C\u062F\u064A\u062F", "\u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u062A\u0627\u0644\u064A"],
-    heading1: ["\u0639\u0646\u0648\u0627\u0646 \u0648\u0627\u062D\u062F", "\u0639\u0646\u0648\u0627\u0646 1"],
-    heading2: ["\u0639\u0646\u0648\u0627\u0646 \u0627\u062B\u0646\u064A\u0646", "\u0639\u0646\u0648\u0627\u0646 2"],
-    heading3: ["\u0639\u0646\u0648\u0627\u0646 \u062B\u0644\u0627\u062B\u0629", "\u0639\u0646\u0648\u0627\u0646 3"],
-    bulletPoint: ["\u0646\u0642\u0637\u0629 \u062C\u062F\u064A\u062F\u0629", "\u0639\u0646\u0635\u0631 \u062C\u062F\u064A\u062F"],
-    todoItem: ["\u0645\u0647\u0645\u0629 \u062C\u062F\u064A\u062F\u0629"],
-    numberedItem: ["\u0639\u0646\u0635\u0631 \u0645\u0631\u0642\u0645", "\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u062A\u0627\u0644\u064A"],
-    deleteLastParagraph: ["\u0627\u062D\u0630\u0641 \u0627\u0644\u0641\u0642\u0631\u0629 \u0627\u0644\u0623\u062E\u064A\u0631\u0629"],
-    deleteLastLine: ["\u0627\u062D\u0630\u0641 \u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u0623\u062E\u064A\u0631", "\u0627\u062D\u0630\u0641 \u0627\u0644\u062C\u0645\u0644\u0629 \u0627\u0644\u0623\u062E\u064A\u0631\u0629"],
-    undo: ["\u062A\u0631\u0627\u062C\u0639"],
-    stopRecording: ["\u0623\u0648\u0642\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644", "\u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644"],
-    colon: ["\u0646\u0642\u0637\u062A\u0627\u0646"],
-    wikilink: ["\u0631\u0627\u0628\u0637 \u0648\u064A\u0643\u064A", "\u0631\u0627\u0628\u0637"],
-    bold: ["\u063A\u0627\u0645\u0642", "\u0639\u0631\u064A\u0636"],
-    italic: ["\u0645\u0627\u0626\u0644"],
-    inlineCode: ["\u0643\u0648\u062F"],
-    tag: ["\u0648\u0633\u0645"]
-  },
-  // ── Japanese ───────────────────────────────────────────────────
-  ja: {
-    newParagraph: ["\u65B0\u3057\u3044\u6BB5\u843D", "\u65B0\u6BB5\u843D"],
-    newLine: ["\u6539\u884C", "\u65B0\u3057\u3044\u884C", "\u6B21\u306E\u884C"],
-    heading1: ["\u898B\u51FA\u30571", "\u898B\u51FA\u3057\u3044\u3061"],
-    heading2: ["\u898B\u51FA\u30572", "\u898B\u51FA\u3057\u306B"],
-    heading3: ["\u898B\u51FA\u30573", "\u898B\u51FA\u3057\u3055\u3093"],
-    bulletPoint: ["\u7B87\u6761\u66F8\u304D", "\u65B0\u3057\u3044\u9805\u76EE", "\u6B21\u306E\u9805\u76EE"],
-    todoItem: ["\u65B0\u3057\u3044\u30BF\u30B9\u30AF", "\u30BF\u30B9\u30AF\u8FFD\u52A0"],
-    numberedItem: ["\u756A\u53F7\u4ED8\u304D", "\u6B21\u306E\u756A\u53F7"],
-    deleteLastParagraph: ["\u6700\u5F8C\u306E\u6BB5\u843D\u3092\u524A\u9664"],
-    deleteLastLine: ["\u6700\u5F8C\u306E\u884C\u3092\u524A\u9664", "\u6700\u5F8C\u306E\u6587\u3092\u524A\u9664"],
-    undo: ["\u5143\u306B\u623B\u3059", "\u53D6\u308A\u6D88\u3057"],
-    stopRecording: ["\u9332\u97F3\u505C\u6B62", "\u9332\u97F3\u3092\u6B62\u3081\u3066"],
-    colon: ["\u30B3\u30ED\u30F3"],
-    wikilink: ["\u30A6\u30A3\u30AD\u30EA\u30F3\u30AF", "\u30EA\u30F3\u30AF"],
-    bold: ["\u592A\u5B57", "\u30DC\u30FC\u30EB\u30C9"],
-    italic: ["\u659C\u4F53", "\u30A4\u30BF\u30EA\u30C3\u30AF"],
-    inlineCode: ["\u30B3\u30FC\u30C9"],
-    tag: ["\u30BF\u30B0"]
-  },
-  // ── Korean ─────────────────────────────────────────────────────
-  ko: {
-    newParagraph: ["\uC0C8 \uB2E8\uB77D", "\uC0C8 \uBB38\uB2E8"],
-    newLine: ["\uC0C8 \uC904", "\uB2E4\uC74C \uC904", "\uC904 \uBC14\uAFC8"],
-    heading1: ["\uC81C\uBAA9 1", "\uC81C\uBAA9 \uD558\uB098"],
-    heading2: ["\uC81C\uBAA9 2", "\uC81C\uBAA9 \uB458"],
-    heading3: ["\uC81C\uBAA9 3", "\uC81C\uBAA9 \uC14B"],
-    bulletPoint: ["\uC0C8 \uD56D\uBAA9", "\uB2E4\uC74C \uD56D\uBAA9", "\uAE00\uBA38\uB9AC \uAE30\uD638"],
-    todoItem: ["\uC0C8 \uD560\uC77C", "\uD560\uC77C \uCD94\uAC00"],
-    numberedItem: ["\uBC88\uD638 \uD56D\uBAA9", "\uB2E4\uC74C \uBC88\uD638"],
-    deleteLastParagraph: ["\uB9C8\uC9C0\uB9C9 \uB2E8\uB77D \uC0AD\uC81C"],
-    deleteLastLine: ["\uB9C8\uC9C0\uB9C9 \uC904 \uC0AD\uC81C", "\uB9C8\uC9C0\uB9C9 \uBB38\uC7A5 \uC0AD\uC81C"],
-    undo: ["\uC2E4\uD589 \uCDE8\uC18C", "\uB418\uB3CC\uB9AC\uAE30"],
-    stopRecording: ["\uB179\uC74C \uC911\uC9C0", "\uB179\uC74C \uBA48\uCDB0"],
-    colon: ["\uCF5C\uB860"],
-    wikilink: ["\uC704\uD0A4\uB9C1\uD06C", "\uB9C1\uD06C"],
-    bold: ["\uAD75\uAC8C", "\uBCFC\uB4DC"],
-    italic: ["\uAE30\uC6B8\uC784", "\uC774\uD0E4\uB9AD"],
-    inlineCode: ["\uCF54\uB4DC"],
-    tag: ["\uD0DC\uADF8"]
-  },
-  // ── Italian ────────────────────────────────────────────────────
-  it: {
-    newParagraph: ["nuovo paragrafo", "nuova sezione", "nuovo capoverso"],
-    newLine: ["nuova riga", "a capo", "riga successiva"],
-    heading1: ["titolo uno", "titolo 1"],
-    heading2: ["titolo due", "titolo 2"],
-    heading3: ["titolo tre", "titolo 3"],
-    bulletPoint: ["nuovo punto", "nuovo elemento", "punto successivo", "nuovo elenco"],
-    todoItem: ["nuovo compito", "nuova attivita", "nuovo todo", "nuovo to do"],
-    numberedItem: ["punto numerato", "nuovo numero", "numero successivo"],
-    deleteLastParagraph: ["cancella ultimo paragrafo", "elimina ultimo paragrafo"],
-    deleteLastLine: ["cancella ultima riga", "elimina ultima riga", "cancella ultima frase"],
-    undo: ["annulla"],
-    stopRecording: ["ferma registrazione", "interrompi registrazione", "stop registrazione"],
-    colon: ["due punti"],
-    wikilink: ["wikilink", "link wiki"],
-    bold: ["grassetto"],
-    italic: ["corsivo"],
-    inlineCode: ["codice"],
-    tag: ["tag", "etichetta"]
-  }
-};
-var LABELS = {
-  nl: {
+  labels: {
     newParagraph: "Nieuwe alinea",
     newLine: "Nieuwe regel",
     heading1: "Kop 1",
@@ -1178,7 +918,60 @@ var LABELS = {
     inlineCode: "Code `\u2026`",
     tag: "Tag #\u2026"
   },
-  en: {
+  mishearings: [
+    { pattern: "\\bniveau\\b", flags: "g", replacement: "nieuwe" },
+    { pattern: "\\bniva\\b", flags: "g", replacement: "nieuwe" },
+    { pattern: "\\bnieuw alinea\\b", flags: "g", replacement: "nieuwe alinea" },
+    { pattern: "\\bnieuw regel\\b", flags: "g", replacement: "nieuwe regel" },
+    { pattern: "\\bnieuw punt\\b", flags: "g", replacement: "nieuw punt" },
+    { pattern: "\\blinea\\b", flags: "g", replacement: "alinea" },
+    { pattern: "\\blinie\\b", flags: "g", replacement: "alinea" },
+    { pattern: "\\bbeeindigde\\b", flags: "g", replacement: "beeindig de" }
+  ],
+  phonetics: [
+    { pattern: "ij", flags: "g", replacement: "ei" },
+    { pattern: "au", flags: "g", replacement: "ou" },
+    { pattern: "dt\\b", flags: "g", replacement: "t" },
+    { pattern: "\\bsch", flags: "g", replacement: "sg" },
+    { pattern: "ck", flags: "g", replacement: "k" },
+    { pattern: "ph", flags: "g", replacement: "f" },
+    { pattern: "th", flags: "g", replacement: "t" },
+    { pattern: "ie", flags: "g", replacement: "i" },
+    { pattern: "oe", flags: "g", replacement: "u" },
+    { pattern: "ee", flags: "g", replacement: "e" },
+    { pattern: "oo", flags: "g", replacement: "o" },
+    { pattern: "uu", flags: "g", replacement: "u" },
+    { pattern: "aa", flags: "g", replacement: "a" }
+  ],
+  articles: ["een", "de", "het", "die", "dat", "deze"],
+  fillers: ["alsjeblieft", "graag", "even", "maar", "eens", "dan", "nu", "hoor"]
+};
+
+// src/languages/en.json
+var en_default = {
+  code: "en",
+  name: "English",
+  patterns: {
+    newParagraph: ["new paragraph"],
+    newLine: ["new line", "next line"],
+    heading1: ["heading one", "heading 1"],
+    heading2: ["heading two", "heading 2"],
+    heading3: ["heading three", "heading 3"],
+    bulletPoint: ["new item", "next item", "bullet", "bullet point", "new bullet"],
+    todoItem: ["new todo", "new to do", "todo item", "to do item"],
+    numberedItem: ["numbered item", "new numbered item", "next number"],
+    deleteLastParagraph: ["delete last paragraph"],
+    deleteLastLine: ["delete last line", "delete last sentence"],
+    undo: ["undo"],
+    stopRecording: ["stop recording"],
+    colon: ["colon"],
+    wikilink: ["wiki link", "wikilink", "link"],
+    bold: ["bold"],
+    italic: ["italic"],
+    inlineCode: ["code", "inline code"],
+    tag: ["tag"]
+  },
+  labels: {
     newParagraph: "New paragraph",
     newLine: "New line",
     heading1: "Heading 1",
@@ -1198,7 +991,50 @@ var LABELS = {
     inlineCode: "Code `\u2026`",
     tag: "Tag #\u2026"
   },
-  fr: {
+  mishearings: [],
+  phonetics: [
+    { pattern: "ph", flags: "g", replacement: "f" },
+    { pattern: "th", flags: "g", replacement: "t" },
+    { pattern: "ck", flags: "g", replacement: "k" },
+    { pattern: "ght", flags: "g", replacement: "t" },
+    { pattern: "wh", flags: "g", replacement: "w" },
+    { pattern: "kn", flags: "g", replacement: "n" },
+    { pattern: "wr", flags: "g", replacement: "r" },
+    { pattern: "tion", flags: "g", replacement: "shun" },
+    { pattern: "sion", flags: "g", replacement: "shun" },
+    { pattern: "([aeiou])ll", flags: "g", replacement: "$1l" },
+    { pattern: "([aeiou])dd", flags: "g", replacement: "$1d" },
+    { pattern: "([aeiou])tt", flags: "g", replacement: "$1t" }
+  ],
+  articles: ["a", "an", "the"],
+  fillers: ["please", "now", "then", "thanks"]
+};
+
+// src/languages/fr.json
+var fr_default = {
+  code: "fr",
+  name: "Fran\xE7ais",
+  patterns: {
+    newParagraph: ["nouveau paragraphe", "nouvelle section", "nouveau alinea"],
+    newLine: ["nouvelle ligne", "a la ligne", "retour a la ligne"],
+    heading1: ["titre un", "titre 1"],
+    heading2: ["titre deux", "titre 2"],
+    heading3: ["titre trois", "titre 3"],
+    bulletPoint: ["nouveau point", "nouvelle puce", "point suivant", "nouvel element", "nouvel item"],
+    todoItem: ["nouvelle tache", "nouveau todo", "nouveau to do"],
+    numberedItem: ["point numero", "element numero", "nouveau numero"],
+    deleteLastParagraph: ["supprimer dernier paragraphe", "effacer dernier paragraphe"],
+    deleteLastLine: ["supprimer derniere ligne", "effacer derniere ligne", "supprimer derniere phrase"],
+    undo: ["annuler"],
+    stopRecording: ["arreter enregistrement", "arreter l enregistrement", "stop enregistrement"],
+    colon: ["deux points"],
+    wikilink: ["wiki lien", "lien wiki"],
+    bold: ["gras"],
+    italic: ["italique"],
+    inlineCode: ["code"],
+    tag: ["etiquette", "tag"]
+  },
+  labels: {
     newParagraph: "Nouveau paragraphe",
     newLine: "Nouvelle ligne",
     heading1: "Titre 1",
@@ -1218,7 +1054,52 @@ var LABELS = {
     inlineCode: "Code `\u2026`",
     tag: "\xC9tiquette #\u2026"
   },
-  de: {
+  mishearings: [
+    { pattern: "\\bnouveau ligne\\b", flags: "g", replacement: "nouvelle ligne" },
+    { pattern: "\\bnouvelle paragraphe\\b", flags: "g", replacement: "nouveau paragraphe" }
+  ],
+  phonetics: [
+    { pattern: "eau", flags: "g", replacement: "o" },
+    { pattern: "aux", flags: "g", replacement: "o" },
+    { pattern: "ai", flags: "g", replacement: "e" },
+    { pattern: "ei", flags: "g", replacement: "e" },
+    { pattern: "ph", flags: "g", replacement: "f" },
+    { pattern: "qu", flags: "g", replacement: "k" },
+    { pattern: "gn", flags: "g", replacement: "ny" },
+    { pattern: "oi", flags: "g", replacement: "wa" },
+    { pattern: "ou", flags: "g", replacement: "u" },
+    { pattern: "an", flags: "g", replacement: "on" },
+    { pattern: "en", flags: "g", replacement: "on" }
+  ],
+  articles: ["un", "une", "le", "la", "les", "l", "du", "des"],
+  fillers: ["s il vous plait", "s il te plait", "merci"]
+};
+
+// src/languages/de.json
+var de_default = {
+  code: "de",
+  name: "Deutsch",
+  patterns: {
+    newParagraph: ["neuer absatz", "neuer paragraph"],
+    newLine: ["neue zeile", "nachste zeile"],
+    heading1: ["uberschrift eins", "uberschrift 1"],
+    heading2: ["uberschrift zwei", "uberschrift 2"],
+    heading3: ["uberschrift drei", "uberschrift 3"],
+    bulletPoint: ["neuer punkt", "neuer aufzahlungspunkt", "nachster punkt", "neues element"],
+    todoItem: ["neue aufgabe", "neues todo", "neues to do"],
+    numberedItem: ["nummerierter punkt", "neuer nummerierter punkt", "nachste nummer"],
+    deleteLastParagraph: ["letzten absatz loschen", "absatz loschen"],
+    deleteLastLine: ["letzte zeile loschen", "letzten satz loschen"],
+    undo: ["ruckgangig", "ruckgangig machen"],
+    stopRecording: ["aufnahme beenden", "aufnahme stoppen"],
+    colon: ["doppelpunkt"],
+    wikilink: ["wikilink", "wiki link"],
+    bold: ["fett"],
+    italic: ["kursiv"],
+    inlineCode: ["code"],
+    tag: ["tag", "schlagwort"]
+  },
+  labels: {
     newParagraph: "Neuer Absatz",
     newLine: "Neue Zeile",
     heading1: "\xDCberschrift 1",
@@ -1238,7 +1119,53 @@ var LABELS = {
     inlineCode: "Code `\u2026`",
     tag: "Tag #\u2026"
   },
-  es: {
+  mishearings: [
+    { pattern: "\\bneue absatz\\b", flags: "g", replacement: "neuer absatz" },
+    { pattern: "\\bneues zeile\\b", flags: "g", replacement: "neue zeile" }
+  ],
+  phonetics: [
+    { pattern: "sch", flags: "g", replacement: "sh" },
+    { pattern: "ei", flags: "g", replacement: "ai" },
+    { pattern: "ie", flags: "g", replacement: "i" },
+    { pattern: "ck", flags: "g", replacement: "k" },
+    { pattern: "ph", flags: "g", replacement: "f" },
+    { pattern: "th", flags: "g", replacement: "t" },
+    { pattern: "v", flags: "g", replacement: "f" },
+    { pattern: "tz", flags: "g", replacement: "ts" },
+    { pattern: "dt\\b", flags: "g", replacement: "t" },
+    { pattern: "aa", flags: "g", replacement: "a" },
+    { pattern: "ee", flags: "g", replacement: "e" },
+    { pattern: "oo", flags: "g", replacement: "o" }
+  ],
+  articles: ["ein", "eine", "einen", "einem", "einer", "der", "die", "das", "den", "dem", "des"],
+  fillers: ["bitte", "mal", "jetzt", "dann"]
+};
+
+// src/languages/es.json
+var es_default = {
+  code: "es",
+  name: "Espa\xF1ol",
+  patterns: {
+    newParagraph: ["nuevo parrafo", "nueva seccion"],
+    newLine: ["nueva linea", "siguiente linea"],
+    heading1: ["titulo uno", "titulo 1"],
+    heading2: ["titulo dos", "titulo 2"],
+    heading3: ["titulo tres", "titulo 3"],
+    bulletPoint: ["nuevo punto", "nueva vineta", "siguiente punto", "nuevo elemento"],
+    todoItem: ["nueva tarea", "nuevo todo", "nuevo to do"],
+    numberedItem: ["punto numerado", "nuevo numero", "siguiente numero"],
+    deleteLastParagraph: ["borrar ultimo parrafo", "eliminar ultimo parrafo"],
+    deleteLastLine: ["borrar ultima linea", "eliminar ultima linea", "borrar ultima frase"],
+    undo: ["deshacer"],
+    stopRecording: ["parar grabacion", "detener grabacion"],
+    colon: ["dos puntos"],
+    wikilink: ["wikilink", "enlace wiki"],
+    bold: ["negrita"],
+    italic: ["cursiva"],
+    inlineCode: ["codigo"],
+    tag: ["etiqueta", "tag"]
+  },
+  labels: {
     newParagraph: "Nuevo p\xE1rrafo",
     newLine: "Nueva l\xEDnea",
     heading1: "T\xEDtulo 1",
@@ -1258,7 +1185,45 @@ var LABELS = {
     inlineCode: "C\xF3digo `\u2026`",
     tag: "Etiqueta #\u2026"
   },
-  pt: {
+  mishearings: [],
+  phonetics: [
+    { pattern: "ll", flags: "g", replacement: "y" },
+    { pattern: "v", flags: "g", replacement: "b" },
+    { pattern: "ce", flags: "g", replacement: "se" },
+    { pattern: "ci", flags: "g", replacement: "si" },
+    { pattern: "qu", flags: "g", replacement: "k" },
+    { pattern: "gu(?=[ei])", flags: "g", replacement: "g" },
+    { pattern: "h", flags: "g", replacement: "" }
+  ],
+  articles: ["un", "una", "el", "la", "los", "las", "unos", "unas"],
+  fillers: ["por favor", "ahora", "gracias"]
+};
+
+// src/languages/pt.json
+var pt_default = {
+  code: "pt",
+  name: "Portugu\xEAs",
+  patterns: {
+    newParagraph: ["novo paragrafo", "nova secao"],
+    newLine: ["nova linha", "proxima linha"],
+    heading1: ["titulo um", "titulo 1"],
+    heading2: ["titulo dois", "titulo 2"],
+    heading3: ["titulo tres", "titulo 3"],
+    bulletPoint: ["novo ponto", "novo item", "proximo ponto", "novo elemento"],
+    todoItem: ["nova tarefa", "novo todo", "novo to do"],
+    numberedItem: ["ponto numerado", "novo numero", "proximo numero"],
+    deleteLastParagraph: ["apagar ultimo paragrafo", "excluir ultimo paragrafo"],
+    deleteLastLine: ["apagar ultima linha", "excluir ultima linha", "apagar ultima frase"],
+    undo: ["desfazer"],
+    stopRecording: ["parar gravacao", "encerrar gravacao"],
+    colon: ["dois pontos"],
+    wikilink: ["wikilink", "link wiki"],
+    bold: ["negrito"],
+    italic: ["italico"],
+    inlineCode: ["codigo"],
+    tag: ["etiqueta", "tag"]
+  },
+  labels: {
     newParagraph: "Novo par\xE1grafo",
     newLine: "Nova linha",
     heading1: "T\xEDtulo 1",
@@ -1278,7 +1243,102 @@ var LABELS = {
     inlineCode: "C\xF3digo `\u2026`",
     tag: "Etiqueta #\u2026"
   },
-  ru: {
+  mishearings: [],
+  phonetics: [
+    { pattern: "lh", flags: "g", replacement: "ly" },
+    { pattern: "nh", flags: "g", replacement: "ny" },
+    { pattern: "ch", flags: "g", replacement: "sh" },
+    { pattern: "qu", flags: "g", replacement: "k" },
+    { pattern: "\xE7\xE3o", flags: "g", replacement: "saun" },
+    { pattern: "ss", flags: "g", replacement: "s" }
+  ],
+  articles: ["um", "uma", "o", "a", "os", "as", "uns", "umas"],
+  fillers: ["por favor", "agora", "obrigado"]
+};
+
+// src/languages/it.json
+var it_default = {
+  code: "it",
+  name: "Italiano",
+  patterns: {
+    newParagraph: ["nuovo paragrafo", "nuova sezione", "nuovo capoverso"],
+    newLine: ["nuova riga", "a capo", "riga successiva"],
+    heading1: ["titolo uno", "titolo 1"],
+    heading2: ["titolo due", "titolo 2"],
+    heading3: ["titolo tre", "titolo 3"],
+    bulletPoint: ["nuovo punto", "nuovo elemento", "punto successivo", "nuovo elenco"],
+    todoItem: ["nuovo compito", "nuova attivita", "nuovo todo", "nuovo to do"],
+    numberedItem: ["punto numerato", "nuovo numero", "numero successivo"],
+    deleteLastParagraph: ["cancella ultimo paragrafo", "elimina ultimo paragrafo"],
+    deleteLastLine: ["cancella ultima riga", "elimina ultima riga", "cancella ultima frase"],
+    undo: ["annulla"],
+    stopRecording: ["ferma registrazione", "interrompi registrazione", "stop registrazione"],
+    colon: ["due punti"],
+    wikilink: ["wikilink", "link wiki"],
+    bold: ["grassetto"],
+    italic: ["corsivo"],
+    inlineCode: ["codice"],
+    tag: ["tag", "etichetta"]
+  },
+  labels: {
+    newParagraph: "Nuovo paragrafo",
+    newLine: "Nuova riga",
+    heading1: "Titolo 1",
+    heading2: "Titolo 2",
+    heading3: "Titolo 3",
+    bulletPoint: "Punto elenco",
+    todoItem: "Attivit\xE0",
+    numberedItem: "Punto numerato",
+    deleteLastParagraph: "Cancella ultimo paragrafo",
+    deleteLastLine: "Cancella ultima riga",
+    undo: "Annulla",
+    stopRecording: "Ferma registrazione",
+    colon: "Due punti",
+    wikilink: "Wikilink [[\u2026]]",
+    bold: "Grassetto **\u2026**",
+    italic: "Corsivo *\u2026*",
+    inlineCode: "Codice `\u2026`",
+    tag: "Tag #\u2026"
+  },
+  mishearings: [],
+  phonetics: [
+    { pattern: "gn", flags: "g", replacement: "ny" },
+    { pattern: "gl(?=[i])", flags: "g", replacement: "ly" },
+    { pattern: "ch", flags: "g", replacement: "k" },
+    { pattern: "gh", flags: "g", replacement: "g" },
+    { pattern: "sc(?=[ei])", flags: "g", replacement: "sh" },
+    { pattern: "zz", flags: "g", replacement: "ts" },
+    { pattern: "cc(?=[ei])", flags: "g", replacement: "ch" }
+  ],
+  articles: ["un", "uno", "una", "il", "lo", "la", "i", "gli", "le"],
+  fillers: ["per favore", "ora", "adesso", "grazie"]
+};
+
+// src/languages/ru.json
+var ru_default = {
+  code: "ru",
+  name: "\u0420\u0443\u0441\u0441\u043A\u0438\u0439",
+  patterns: {
+    newParagraph: ["\u043D\u043E\u0432\u044B\u0439 \u0430\u0431\u0437\u0430\u0446", "\u043D\u043E\u0432\u044B\u0439 \u043F\u0430\u0440\u0430\u0433\u0440\u0430\u0444"],
+    newLine: ["\u043D\u043E\u0432\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430"],
+    heading1: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u043E\u0434\u0438\u043D", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 1"],
+    heading2: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u0434\u0432\u0430", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 2"],
+    heading3: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u0442\u0440\u0438", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 3"],
+    bulletPoint: ["\u043D\u043E\u0432\u044B\u0439 \u043F\u0443\u043D\u043A\u0442", "\u043D\u043E\u0432\u044B\u0439 \u044D\u043B\u0435\u043C\u0435\u043D\u0442", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u043F\u0443\u043D\u043A\u0442"],
+    todoItem: ["\u043D\u043E\u0432\u0430\u044F \u0437\u0430\u0434\u0430\u0447\u0430", "\u043D\u043E\u0432\u043E\u0435 \u0437\u0430\u0434\u0430\u043D\u0438\u0435"],
+    numberedItem: ["\u043D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u043D\u043E\u043C\u0435\u0440"],
+    deleteLastParagraph: ["\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0430\u0431\u0437\u0430\u0446"],
+    deleteLastLine: ["\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u044E\u044E \u0441\u0442\u0440\u043E\u043A\u0443", "\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0435"],
+    undo: ["\u043E\u0442\u043C\u0435\u043D\u0438\u0442\u044C", "\u043E\u0442\u043C\u0435\u043D\u0430"],
+    stopRecording: ["\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C", "\u0441\u0442\u043E\u043F \u0437\u0430\u043F\u0438\u0441\u044C"],
+    colon: ["\u0434\u0432\u043E\u0435\u0442\u043E\u0447\u0438\u0435"],
+    wikilink: ["\u0432\u0438\u043A\u0438 \u0441\u0441\u044B\u043B\u043A\u0430", "\u0432\u0438\u043A\u0438 \u043B\u0438\u043D\u043A"],
+    bold: ["\u0436\u0438\u0440\u043D\u044B\u0439"],
+    italic: ["\u043A\u0443\u0440\u0441\u0438\u0432"],
+    inlineCode: ["\u043A\u043E\u0434"],
+    tag: ["\u0442\u0435\u0433", "\u043C\u0435\u0442\u043A\u0430"]
+  },
+  labels: {
     newParagraph: "\u041D\u043E\u0432\u044B\u0439 \u0430\u0431\u0437\u0430\u0446",
     newLine: "\u041D\u043E\u0432\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430",
     heading1: "\u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 1",
@@ -1298,7 +1358,37 @@ var LABELS = {
     inlineCode: "\u041A\u043E\u0434 `\u2026`",
     tag: "\u0422\u0435\u0433 #\u2026"
   },
-  zh: {
+  mishearings: [],
+  phonetics: [],
+  articles: [],
+  fillers: []
+};
+
+// src/languages/zh.json
+var zh_default = {
+  code: "zh",
+  name: "\u4E2D\u6587",
+  patterns: {
+    newParagraph: ["\u65B0\u6BB5\u843D", "\u65B0\u7684\u6BB5\u843D"],
+    newLine: ["\u6362\u884C", "\u65B0\u884C", "\u4E0B\u4E00\u884C"],
+    heading1: ["\u6807\u9898\u4E00", "\u6807\u98981", "\u4E00\u7EA7\u6807\u9898"],
+    heading2: ["\u6807\u9898\u4E8C", "\u6807\u98982", "\u4E8C\u7EA7\u6807\u9898"],
+    heading3: ["\u6807\u9898\u4E09", "\u6807\u98983", "\u4E09\u7EA7\u6807\u9898"],
+    bulletPoint: ["\u65B0\u9879\u76EE", "\u5217\u8868\u9879", "\u65B0\u7684\u9879\u76EE"],
+    todoItem: ["\u65B0\u4EFB\u52A1", "\u65B0\u5F85\u529E", "\u5F85\u529E\u4E8B\u9879"],
+    numberedItem: ["\u7F16\u53F7\u9879", "\u65B0\u7F16\u53F7", "\u4E0B\u4E00\u4E2A\u7F16\u53F7"],
+    deleteLastParagraph: ["\u5220\u9664\u4E0A\u4E00\u6BB5", "\u5220\u9664\u6700\u540E\u4E00\u6BB5"],
+    deleteLastLine: ["\u5220\u9664\u4E0A\u4E00\u884C", "\u5220\u9664\u4E0A\u4E00\u53E5"],
+    undo: ["\u64A4\u9500", "\u64A4\u56DE"],
+    stopRecording: ["\u505C\u6B62\u5F55\u97F3", "\u7ED3\u675F\u5F55\u97F3"],
+    colon: ["\u5192\u53F7"],
+    wikilink: ["\u7EF4\u57FA\u94FE\u63A5", "\u94FE\u63A5"],
+    bold: ["\u52A0\u7C97", "\u7C97\u4F53"],
+    italic: ["\u659C\u4F53"],
+    inlineCode: ["\u4EE3\u7801"],
+    tag: ["\u6807\u7B7E"]
+  },
+  labels: {
     newParagraph: "\u65B0\u6BB5\u843D",
     newLine: "\u6362\u884C",
     heading1: "\u6807\u9898 1",
@@ -1318,7 +1408,37 @@ var LABELS = {
     inlineCode: "\u4EE3\u7801 `\u2026`",
     tag: "\u6807\u7B7E #\u2026"
   },
-  hi: {
+  mishearings: [],
+  phonetics: [],
+  articles: [],
+  fillers: []
+};
+
+// src/languages/hi.json
+var hi_default = {
+  code: "hi",
+  name: "\u0939\u093F\u0928\u094D\u0926\u0940",
+  patterns: {
+    newParagraph: ["\u0928\u092F\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B", "\u0928\u092F\u093E \u0905\u0928\u0941\u091A\u094D\u091B\u0947\u0926"],
+    newLine: ["\u0928\u0908 \u0932\u093E\u0907\u0928", "\u0905\u0917\u0932\u0940 \u0932\u093E\u0907\u0928"],
+    heading1: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u090F\u0915", "\u0936\u0940\u0930\u094D\u0937\u0915 1", "\u0939\u0947\u0921\u093F\u0902\u0917 1"],
+    heading2: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u0926\u094B", "\u0936\u0940\u0930\u094D\u0937\u0915 2", "\u0939\u0947\u0921\u093F\u0902\u0917 2"],
+    heading3: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u0924\u0940\u0928", "\u0936\u0940\u0930\u094D\u0937\u0915 3", "\u0939\u0947\u0921\u093F\u0902\u0917 3"],
+    bulletPoint: ["\u0928\u092F\u093E \u092C\u093F\u0902\u0926\u0941", "\u0928\u092F\u093E \u092A\u0949\u0907\u0902\u091F", "\u0905\u0917\u0932\u093E \u092A\u0949\u0907\u0902\u091F"],
+    todoItem: ["\u0928\u092F\u093E \u0915\u093E\u0930\u094D\u092F", "\u0928\u092F\u093E \u091F\u0942\u0921\u0942"],
+    numberedItem: ["\u0915\u094D\u0930\u092E\u093E\u0902\u0915\u093F\u0924 \u092C\u093F\u0902\u0926\u0941", "\u0905\u0917\u0932\u093E \u0928\u0902\u092C\u0930"],
+    deleteLastParagraph: ["\u092A\u093F\u091B\u0932\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B \u0939\u091F\u093E\u0913"],
+    deleteLastLine: ["\u092A\u093F\u091B\u0932\u0940 \u0932\u093E\u0907\u0928 \u0939\u091F\u093E\u0913", "\u0905\u0902\u0924\u093F\u092E \u0932\u093E\u0907\u0928 \u0939\u091F\u093E\u0913"],
+    undo: ["\u092A\u0942\u0930\u094D\u0935\u0935\u0924", "\u0905\u0928\u0921\u0942"],
+    stopRecording: ["\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B", "\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u0930\u094B\u0915\u094B"],
+    colon: ["\u0915\u094B\u0932\u0928"],
+    wikilink: ["\u0935\u093F\u0915\u093F \u0932\u093F\u0902\u0915", "\u0932\u093F\u0902\u0915"],
+    bold: ["\u092C\u094B\u0932\u094D\u0921", "\u092E\u094B\u091F\u093E"],
+    italic: ["\u0907\u091F\u0948\u0932\u093F\u0915", "\u0924\u093F\u0930\u091B\u093E"],
+    inlineCode: ["\u0915\u094B\u0921"],
+    tag: ["\u091F\u0948\u0917"]
+  },
+  labels: {
     newParagraph: "\u0928\u092F\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B",
     newLine: "\u0928\u0908 \u0932\u093E\u0907\u0928",
     heading1: "\u0936\u0940\u0930\u094D\u0937\u0915 1",
@@ -1338,7 +1458,37 @@ var LABELS = {
     inlineCode: "\u0915\u094B\u0921 `\u2026`",
     tag: "\u091F\u0948\u0917 #\u2026"
   },
-  ar: {
+  mishearings: [],
+  phonetics: [],
+  articles: [],
+  fillers: []
+};
+
+// src/languages/ar.json
+var ar_default = {
+  code: "ar",
+  name: "\u0627\u0644\u0639\u0631\u0628\u064A\u0629",
+  patterns: {
+    newParagraph: ["\u0641\u0642\u0631\u0629 \u062C\u062F\u064A\u062F\u0629"],
+    newLine: ["\u0633\u0637\u0631 \u062C\u062F\u064A\u062F", "\u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u062A\u0627\u0644\u064A"],
+    heading1: ["\u0639\u0646\u0648\u0627\u0646 \u0648\u0627\u062D\u062F", "\u0639\u0646\u0648\u0627\u0646 1"],
+    heading2: ["\u0639\u0646\u0648\u0627\u0646 \u0627\u062B\u0646\u064A\u0646", "\u0639\u0646\u0648\u0627\u0646 2"],
+    heading3: ["\u0639\u0646\u0648\u0627\u0646 \u062B\u0644\u0627\u062B\u0629", "\u0639\u0646\u0648\u0627\u0646 3"],
+    bulletPoint: ["\u0646\u0642\u0637\u0629 \u062C\u062F\u064A\u062F\u0629", "\u0639\u0646\u0635\u0631 \u062C\u062F\u064A\u062F"],
+    todoItem: ["\u0645\u0647\u0645\u0629 \u062C\u062F\u064A\u062F\u0629"],
+    numberedItem: ["\u0639\u0646\u0635\u0631 \u0645\u0631\u0642\u0645", "\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u062A\u0627\u0644\u064A"],
+    deleteLastParagraph: ["\u0627\u062D\u0630\u0641 \u0627\u0644\u0641\u0642\u0631\u0629 \u0627\u0644\u0623\u062E\u064A\u0631\u0629"],
+    deleteLastLine: ["\u0627\u062D\u0630\u0641 \u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u0623\u062E\u064A\u0631", "\u0627\u062D\u0630\u0641 \u0627\u0644\u062C\u0645\u0644\u0629 \u0627\u0644\u0623\u062E\u064A\u0631\u0629"],
+    undo: ["\u062A\u0631\u0627\u062C\u0639"],
+    stopRecording: ["\u0623\u0648\u0642\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644", "\u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644"],
+    colon: ["\u0646\u0642\u0637\u062A\u0627\u0646"],
+    wikilink: ["\u0631\u0627\u0628\u0637 \u0648\u064A\u0643\u064A", "\u0631\u0627\u0628\u0637"],
+    bold: ["\u063A\u0627\u0645\u0642", "\u0639\u0631\u064A\u0636"],
+    italic: ["\u0645\u0627\u0626\u0644"],
+    inlineCode: ["\u0643\u0648\u062F"],
+    tag: ["\u0648\u0633\u0645"]
+  },
+  labels: {
     newParagraph: "\u0641\u0642\u0631\u0629 \u062C\u062F\u064A\u062F\u0629",
     newLine: "\u0633\u0637\u0631 \u062C\u062F\u064A\u062F",
     heading1: "\u0639\u0646\u0648\u0627\u0646 1",
@@ -1358,7 +1508,37 @@ var LABELS = {
     inlineCode: "`\u2026` \u0643\u0648\u062F",
     tag: "#\u2026 \u0648\u0633\u0645"
   },
-  ja: {
+  mishearings: [],
+  phonetics: [],
+  articles: ["\u0627\u0644"],
+  fillers: []
+};
+
+// src/languages/ja.json
+var ja_default = {
+  code: "ja",
+  name: "\u65E5\u672C\u8A9E",
+  patterns: {
+    newParagraph: ["\u65B0\u3057\u3044\u6BB5\u843D", "\u65B0\u6BB5\u843D"],
+    newLine: ["\u6539\u884C", "\u65B0\u3057\u3044\u884C", "\u6B21\u306E\u884C"],
+    heading1: ["\u898B\u51FA\u30571", "\u898B\u51FA\u3057\u3044\u3061"],
+    heading2: ["\u898B\u51FA\u30572", "\u898B\u51FA\u3057\u306B"],
+    heading3: ["\u898B\u51FA\u30573", "\u898B\u51FA\u3057\u3055\u3093"],
+    bulletPoint: ["\u7B87\u6761\u66F8\u304D", "\u65B0\u3057\u3044\u9805\u76EE", "\u6B21\u306E\u9805\u76EE"],
+    todoItem: ["\u65B0\u3057\u3044\u30BF\u30B9\u30AF", "\u30BF\u30B9\u30AF\u8FFD\u52A0"],
+    numberedItem: ["\u756A\u53F7\u4ED8\u304D", "\u6B21\u306E\u756A\u53F7"],
+    deleteLastParagraph: ["\u6700\u5F8C\u306E\u6BB5\u843D\u3092\u524A\u9664"],
+    deleteLastLine: ["\u6700\u5F8C\u306E\u884C\u3092\u524A\u9664", "\u6700\u5F8C\u306E\u6587\u3092\u524A\u9664"],
+    undo: ["\u5143\u306B\u623B\u3059", "\u53D6\u308A\u6D88\u3057"],
+    stopRecording: ["\u9332\u97F3\u505C\u6B62", "\u9332\u97F3\u3092\u6B62\u3081\u3066"],
+    colon: ["\u30B3\u30ED\u30F3"],
+    wikilink: ["\u30A6\u30A3\u30AD\u30EA\u30F3\u30AF", "\u30EA\u30F3\u30AF"],
+    bold: ["\u592A\u5B57", "\u30DC\u30FC\u30EB\u30C9"],
+    italic: ["\u659C\u4F53", "\u30A4\u30BF\u30EA\u30C3\u30AF"],
+    inlineCode: ["\u30B3\u30FC\u30C9"],
+    tag: ["\u30BF\u30B0"]
+  },
+  labels: {
     newParagraph: "\u65B0\u3057\u3044\u6BB5\u843D",
     newLine: "\u6539\u884C",
     heading1: "\u898B\u51FA\u3057 1",
@@ -1378,7 +1558,37 @@ var LABELS = {
     inlineCode: "\u30B3\u30FC\u30C9 `\u2026`",
     tag: "\u30BF\u30B0 #\u2026"
   },
-  ko: {
+  mishearings: [],
+  phonetics: [],
+  articles: [],
+  fillers: []
+};
+
+// src/languages/ko.json
+var ko_default = {
+  code: "ko",
+  name: "\uD55C\uAD6D\uC5B4",
+  patterns: {
+    newParagraph: ["\uC0C8 \uB2E8\uB77D", "\uC0C8 \uBB38\uB2E8"],
+    newLine: ["\uC0C8 \uC904", "\uB2E4\uC74C \uC904", "\uC904 \uBC14\uAFC8"],
+    heading1: ["\uC81C\uBAA9 1", "\uC81C\uBAA9 \uD558\uB098"],
+    heading2: ["\uC81C\uBAA9 2", "\uC81C\uBAA9 \uB458"],
+    heading3: ["\uC81C\uBAA9 3", "\uC81C\uBAA9 \uC14B"],
+    bulletPoint: ["\uC0C8 \uD56D\uBAA9", "\uB2E4\uC74C \uD56D\uBAA9", "\uAE00\uBA38\uB9AC \uAE30\uD638"],
+    todoItem: ["\uC0C8 \uD560\uC77C", "\uD560\uC77C \uCD94\uAC00"],
+    numberedItem: ["\uBC88\uD638 \uD56D\uBAA9", "\uB2E4\uC74C \uBC88\uD638"],
+    deleteLastParagraph: ["\uB9C8\uC9C0\uB9C9 \uB2E8\uB77D \uC0AD\uC81C"],
+    deleteLastLine: ["\uB9C8\uC9C0\uB9C9 \uC904 \uC0AD\uC81C", "\uB9C8\uC9C0\uB9C9 \uBB38\uC7A5 \uC0AD\uC81C"],
+    undo: ["\uC2E4\uD589 \uCDE8\uC18C", "\uB418\uB3CC\uB9AC\uAE30"],
+    stopRecording: ["\uB179\uC74C \uC911\uC9C0", "\uB179\uC74C \uBA48\uCDB0"],
+    colon: ["\uCF5C\uB860"],
+    wikilink: ["\uC704\uD0A4\uB9C1\uD06C", "\uB9C1\uD06C"],
+    bold: ["\uAD75\uAC8C", "\uBCFC\uB4DC"],
+    italic: ["\uAE30\uC6B8\uC784", "\uC774\uD0E4\uB9AD"],
+    inlineCode: ["\uCF54\uB4DC"],
+    tag: ["\uD0DC\uADF8"]
+  },
+  labels: {
     newParagraph: "\uC0C8 \uB2E8\uB77D",
     newLine: "\uC0C8 \uC904",
     heading1: "\uC81C\uBAA9 1",
@@ -1398,47 +1608,61 @@ var LABELS = {
     inlineCode: "\uCF54\uB4DC `\u2026`",
     tag: "\uD0DC\uADF8 #\u2026"
   },
-  it: {
-    newParagraph: "Nuovo paragrafo",
-    newLine: "Nuova riga",
-    heading1: "Titolo 1",
-    heading2: "Titolo 2",
-    heading3: "Titolo 3",
-    bulletPoint: "Punto elenco",
-    todoItem: "Attivit\xE0",
-    numberedItem: "Punto numerato",
-    deleteLastParagraph: "Cancella ultimo paragrafo",
-    deleteLastLine: "Cancella ultima riga",
-    undo: "Annulla",
-    stopRecording: "Ferma registrazione",
-    colon: "Due punti",
-    wikilink: "Wikilink [[\u2026]]",
-    bold: "Grassetto **\u2026**",
-    italic: "Corsivo *\u2026*",
-    inlineCode: "Codice `\u2026`",
-    tag: "Tag #\u2026"
-  }
+  mishearings: [],
+  phonetics: [],
+  articles: [],
+  fillers: []
 };
-var MISHEARINGS = {
-  nl: [
-    [/\bniveau\b/g, "nieuwe"],
-    [/\bniva\b/g, "nieuwe"],
-    [/\bnieuw alinea\b/g, "nieuwe alinea"],
-    [/\bnieuw regel\b/g, "nieuwe regel"],
-    [/\bnieuw punt\b/g, "nieuw punt"],
-    [/\blinea\b/g, "alinea"],
-    [/\blinie\b/g, "alinea"],
-    [/\bbeeindigde\b/g, "beeindig de"]
-  ],
-  fr: [
-    [/\bnouveau ligne\b/g, "nouvelle ligne"],
-    [/\bnouvelle paragraphe\b/g, "nouveau paragraphe"]
-  ],
-  de: [
-    [/\bneue absatz\b/g, "neuer absatz"],
-    [/\bneues zeile\b/g, "neue zeile"]
-  ]
+
+// src/lang.ts
+var ALL_LANGS = {
+  nl: nl_default,
+  en: en_default,
+  fr: fr_default,
+  de: de_default,
+  es: es_default,
+  pt: pt_default,
+  it: it_default,
+  ru: ru_default,
+  zh: zh_default,
+  hi: hi_default,
+  ar: ar_default,
+  ja: ja_default,
+  ko: ko_default
 };
+var SUPPORTED_LANGUAGES = [
+  "nl",
+  "en",
+  "fr",
+  "de",
+  "es",
+  "pt",
+  "it",
+  "ru",
+  "zh",
+  "hi",
+  "ar",
+  "ja",
+  "ko"
+];
+var LANGUAGE_NAMES = Object.fromEntries(
+  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].name])
+);
+var PATTERNS = Object.fromEntries(
+  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].patterns])
+);
+var LABELS = Object.fromEntries(
+  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].labels])
+);
+function compileMishearings(data) {
+  return data.map(({ pattern, flags, replacement }) => [
+    new RegExp(pattern, flags),
+    replacement
+  ]);
+}
+var MISHEARINGS = Object.fromEntries(
+  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS[code].mishearings.length > 0).map((code) => [code, compileMishearings(ALL_LANGS[code].mishearings)])
+);
 function getPatternsForCommand(commandId, lang) {
   var _a, _b, _c, _d;
   const langPatterns = (_b = (_a = PATTERNS[lang]) == null ? void 0 : _a[commandId]) != null ? _b : [];
@@ -1473,7 +1697,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     ;
-    new import_obsidian2.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai").addText(
+    new import_obsidian2.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai. Stored in Obsidian\u2019s plugin data folder (data.json), unencrypted. Do not share your data.json file.").addText(
       (text) => text.setPlaceholder("Enter your API key").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value.trim();
         await this.plugin.saveSettings();
@@ -1931,184 +2155,36 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
 var import_obsidian3 = require("obsidian");
 
 // src/phonetics.ts
-var PHONETIC_RULES = {
-  nl: [
-    [/ij/g, "ei"],
-    // ij ↔ ei (most common Dutch confusion)
-    [/au/g, "ou"],
-    // au ↔ ou
-    [/dt\b/g, "t"],
-    // -dt → -t (verb endings)
-    [/\bsch/g, "sg"],
-    // sch- → sg (ASR often drops the h)
-    [/ck/g, "k"],
-    // ck → k
-    [/ph/g, "f"],
-    // ph → f
-    [/th/g, "t"],
-    // th → t
-    [/ie/g, "i"],
-    // ie → i (long vs short)
-    [/oe/g, "u"],
-    // oe → u
-    [/ee/g, "e"],
-    // ee → e
-    [/oo/g, "o"],
-    // oo → o
-    [/uu/g, "u"],
-    // uu → u
-    [/aa/g, "a"]
-    // aa → a
-  ],
-  en: [
-    [/ph/g, "f"],
-    // phone → fone
-    [/th/g, "t"],
-    // the → te (ASR simplification)
-    [/ck/g, "k"],
-    // check → chek
-    [/ght/g, "t"],
-    // right → rit
-    [/wh/g, "w"],
-    // what → wat
-    [/kn/g, "n"],
-    // know → now
-    [/wr/g, "r"],
-    // write → rite
-    [/tion/g, "shun"],
-    // action → akshun
-    [/sion/g, "shun"],
-    // mission → mishun
-    [/([aeiou])ll/g, "$1l"],
-    // bullet → bulet
-    [/([aeiou])dd/g, "$1d"],
-    // heading → heding
-    [/([aeiou])tt/g, "$1t"]
-    // getting → geting
-  ],
-  fr: [
-    [/eau/g, "o"],
-    // nouveau → nouvo
-    [/aux/g, "o"],
-    // journaux → journo
-    [/ai/g, "e"],
-    // faire → fere
-    [/ei/g, "e"],
-    // seize → seze
-    [/ph/g, "f"],
-    // paragraphe → paragrafe
-    [/qu/g, "k"],
-    // quelque → kelke
-    [/gn/g, "ny"],
-    // ligne → linye
-    [/oi/g, "wa"],
-    // enregistrement → simplified
-    [/ou/g, "u"],
-    // nouveau → nu
-    [/an/g, "on"],
-    // dans → dons (nasal equivalence)
-    [/en/g, "on"]
-    // enregistrement → onregistrement
-  ],
-  de: [
-    [/sch/g, "sh"],
-    // Überschrift → ubershrift
-    [/ei/g, "ai"],
-    // Zeile → zaile (equivalent)
-    [/ie/g, "i"],
-    // Zeile → zile
-    [/ck/g, "k"],
-    // Rückgängig → rukgangig
-    [/ph/g, "f"],
-    // Paragraph → paragraf
-    [/th/g, "t"],
-    // Thema → tema
-    [/v/g, "f"],
-    // vor → for (German v = f)
-    [/tz/g, "ts"],
-    // Satz → sats
-    [/dt\b/g, "t"],
-    // Stadt → stat
-    [/aa/g, "a"],
-    // Saal → sal
-    [/ee/g, "e"],
-    // Kaffee → kafe
-    [/oo/g, "o"]
-    // Boot → bot
-  ],
-  es: [
-    [/ll/g, "y"],
-    // calle → caye
-    [/v/g, "b"],
-    // volver → bolber
-    [/ce/g, "se"],
-    // sección → sesion
-    [/ci/g, "si"],
-    // acción → aksion
-    [/qu/g, "k"],
-    // borrar → borar
-    [/gu(?=[ei])/g, "g"],
-    // guía → gia
-    [/h/g, ""]
-    // hacer → acer (silent h)
-  ],
-  pt: [
-    [/lh/g, "ly"],
-    // trabalho → trabalyo
-    [/nh/g, "ny"],
-    // linha → linya
-    [/ch/g, "sh"],
-    // fechar → feshar
-    [/qu/g, "k"],
-    // querer → kerer
-    [/ção/g, "saun"],
-    // seção → sesaun
-    [/ss/g, "s"]
-    // passo → paso
-  ],
-  it: [
-    [/gn/g, "ny"],
-    // registrazione → rejistratione
-    [/gl(?=[i])/g, "ly"],
-    // taglia → talya
-    [/ch/g, "k"],
-    // che → ke
-    [/gh/g, "g"],
-    // spaghetti → spagetti
-    [/sc(?=[ei])/g, "sh"],
-    // uscire → ushire
-    [/zz/g, "ts"],
-    // piazza → piatsa
-    [/cc(?=[ei])/g, "ch"]
-    // accento → achento
-  ]
+var ALL_LANGS2 = {
+  nl: nl_default,
+  en: en_default,
+  fr: fr_default,
+  de: de_default,
+  es: es_default,
+  pt: pt_default,
+  it: it_default,
+  ru: ru_default,
+  zh: zh_default,
+  hi: hi_default,
+  ar: ar_default,
+  ja: ja_default,
+  ko: ko_default
 };
-var ARTICLES = {
-  nl: ["een", "de", "het", "die", "dat", "deze"],
-  en: ["a", "an", "the"],
-  fr: ["un", "une", "le", "la", "les", "l", "du", "des"],
-  de: ["ein", "eine", "einen", "einem", "einer", "der", "die", "das", "den", "dem", "des"],
-  es: ["un", "una", "el", "la", "los", "las", "unos", "unas"],
-  pt: ["um", "uma", "o", "a", "os", "as", "uns", "umas"],
-  it: ["un", "uno", "una", "il", "lo", "la", "i", "gli", "le"],
-  ru: [],
-  // No articles in Russian
-  zh: [],
-  hi: [],
-  ar: ["\u0627\u0644"],
-  // al- prefix
-  ja: [],
-  ko: []
-};
-var TRAILING_FILLERS = {
-  nl: ["alsjeblieft", "graag", "even", "maar", "eens", "dan", "nu", "hoor"],
-  en: ["please", "now", "then", "thanks"],
-  fr: ["s il vous plait", "s il te plait", "merci"],
-  de: ["bitte", "mal", "jetzt", "dann"],
-  es: ["por favor", "ahora", "gracias"],
-  pt: ["por favor", "agora", "obrigado"],
-  it: ["per favore", "ora", "adesso", "grazie"]
-};
+function compileRules(data) {
+  return data.map(({ pattern, flags, replacement }) => [
+    new RegExp(pattern, flags),
+    replacement
+  ]);
+}
+var PHONETIC_RULES = Object.fromEntries(
+  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS2[code].phonetics.length > 0).map((code) => [code, compileRules(ALL_LANGS2[code].phonetics)])
+);
+var ARTICLES = Object.fromEntries(
+  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS2[code].articles])
+);
+var TRAILING_FILLERS = Object.fromEntries(
+  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS2[code].fillers.length > 0).map((code) => [code, ALL_LANGS2[code].fillers])
+);
 function phoneticNormalize(text, lang) {
   const rules = PHONETIC_RULES[lang];
   if (!rules) return text;
@@ -2633,6 +2709,12 @@ var UI_STRINGS = {
       'Zeg "voor de correctie: ..." om instructies aan de corrector te geven.',
       "Gespelde woorden (V-O-X-T-R-A-L) worden automatisch samengevoegd.",
       'Zelfcorrecties ("nee niet X maar Y") worden herkend.'
+    ],
+    privacy: "Privacy",
+    privacyItems: [
+      "Audio wordt via HTTPS/WSS naar de Mistral API gestuurd en niet lokaal opgeslagen.",
+      "Instellingen (incl. API-sleutel) staan in data.json in de Obsidian plugin-map.",
+      "Logexport bevat geen getranscribeerde tekst of API-sleutels."
     ]
   },
   en: {
@@ -2645,6 +2727,12 @@ var UI_STRINGS = {
       'Say "for the correction: ..." to give inline instructions to the corrector.',
       "Spelled-out words (V-O-X-T-R-A-L) are merged automatically.",
       'Self-corrections ("no not X but Y") are recognized.'
+    ],
+    privacy: "Privacy",
+    privacyItems: [
+      "Audio is sent to the Mistral API over HTTPS/WSS and is not stored locally.",
+      "Settings (including your API key) are stored in data.json in the plugin folder.",
+      "Log export does not contain transcribed text or API keys."
     ]
   },
   fr: {
@@ -2657,6 +2745,12 @@ var UI_STRINGS = {
       'Dites "pour la correction : ..." pour donner des instructions au correcteur.',
       "Les mots \xE9pel\xE9s (V-O-X-T-R-A-L) sont fusionn\xE9s automatiquement.",
       'Les auto-corrections ("non pas X mais Y") sont reconnues.'
+    ],
+    privacy: "Confidentialit\xE9",
+    privacyItems: [
+      "L'audio est envoy\xE9 \xE0 l'API Mistral via HTTPS/WSS et n'est pas stock\xE9 localement.",
+      "Les param\xE8tres (y compris la cl\xE9 API) sont stock\xE9s dans data.json.",
+      "L'export des logs ne contient ni texte transcrit ni cl\xE9s API."
     ]
   },
   de: {
@@ -2669,6 +2763,12 @@ var UI_STRINGS = {
       'Sagen Sie "f\xFCr die Korrektur: ..." um dem Korrektor Anweisungen zu geben.',
       "Buchstabierte W\xF6rter (V-O-X-T-R-A-L) werden automatisch zusammengef\xFChrt.",
       'Selbstkorrekturen ("nein nicht X sondern Y") werden erkannt.'
+    ],
+    privacy: "Datenschutz",
+    privacyItems: [
+      "Audio wird \xFCber HTTPS/WSS an die Mistral-API gesendet und nicht lokal gespeichert.",
+      "Einstellungen (inkl. API-Schl\xFCssel) werden in data.json gespeichert.",
+      "Der Log-Export enth\xE4lt weder transkribierten Text noch API-Schl\xFCssel."
     ]
   },
   es: {
@@ -2681,6 +2781,12 @@ var UI_STRINGS = {
       'Diga "para la correcci\xF3n: ..." para dar instrucciones al corrector.',
       "Las palabras deletreadas (V-O-X-T-R-A-L) se fusionan autom\xE1ticamente.",
       'Las autocorrecciones ("no, no X sino Y") se reconocen.'
+    ],
+    privacy: "Privacidad",
+    privacyItems: [
+      "El audio se env\xEDa a la API de Mistral por HTTPS/WSS y no se almacena localmente.",
+      "La configuraci\xF3n (incluida la clave API) se almacena en data.json.",
+      "La exportaci\xF3n de registros no contiene texto transcrito ni claves API."
     ]
   },
   pt: {
@@ -2693,6 +2799,12 @@ var UI_STRINGS = {
       'Diga "para a corre\xE7\xE3o: ..." para dar instru\xE7\xF5es ao corretor.',
       "Palavras soletradas (V-O-X-T-R-A-L) s\xE3o mescladas automaticamente.",
       'Autocorre\xE7\xF5es ("n\xE3o, n\xE3o X mas Y") s\xE3o reconhecidas.'
+    ],
+    privacy: "Privacidade",
+    privacyItems: [
+      "O \xE1udio \xE9 enviado \xE0 API Mistral via HTTPS/WSS e n\xE3o \xE9 armazenado localmente.",
+      "As configura\xE7\xF5es (incluindo a chave API) s\xE3o armazenadas em data.json.",
+      "A exporta\xE7\xE3o de logs n\xE3o cont\xE9m texto transcrito nem chaves API."
     ]
   },
   it: {
@@ -2705,6 +2817,12 @@ var UI_STRINGS = {
       'D\xEC "per la correzione: ..." per dare istruzioni al correttore.',
       "Le parole compitate (V-O-X-T-R-A-L) vengono unite automaticamente.",
       'Le autocorrezioni ("no non X ma Y") vengono riconosciute.'
+    ],
+    privacy: "Privacy",
+    privacyItems: [
+      "L'audio viene inviato all'API Mistral tramite HTTPS/WSS e non viene salvato localmente.",
+      "Le impostazioni (inclusa la chiave API) sono memorizzate in data.json.",
+      "L'esportazione dei log non contiene testo trascritto n\xE9 chiavi API."
     ]
   }
 };
@@ -2765,6 +2883,11 @@ var VoxtralHelpView = class extends import_obsidian3.ItemView {
     const tips = container.createEl("ul", { cls: "voxtral-help-tips" });
     for (const tip of strings.tipItems) {
       tips.createEl("li", { text: tip });
+    }
+    container.createEl("h4", { text: strings.privacy });
+    const privacyList = container.createEl("ul", { cls: "voxtral-help-privacy" });
+    for (const item of strings.privacyItems) {
+      privacyList.createEl("li", { text: item });
     }
   }
   // eslint-disable-next-line @typescript-eslint/require-await -- base class requires async signature
@@ -2954,7 +3077,7 @@ function matchQuickTemplate(normalizedText, lang) {
   return null;
 }
 
-// src/main.ts
+// src/plugin-logger.ts
 var LOG_BUFFER_SIZE = 500;
 var logBuffer = [];
 function pushLog(level, args) {
@@ -2979,10 +3102,832 @@ var vlog = {
     console.error(...args);
   }
 };
-var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
+function redactForExport(line) {
+  let redacted = line.replace(/\b[A-Za-z0-9]{32,}\b/g, "[REDACTED]");
+  redacted = redacted.replace(/"[^"]{20,}"/g, '"[text redacted]"');
+  redacted = redacted.replace(
+    /(full text:|Hallucination detected —|Discarding hallucinated) .+/gi,
+    "$1 [redacted]"
+  );
+  return redacted;
+}
+function getLogText() {
+  return logBuffer.map(redactForExport).join("\n");
+}
+function getLogCount() {
+  return logBuffer.length;
+}
+
+// src/dictation-tracker.ts
+var DictationTracker = class _DictationTracker {
+  constructor() {
+    this.dictatedRanges = [];
+  }
+  /** Clear all tracked ranges (call when recording starts/stops). */
+  reset() {
+    this.dictatedRanges = [];
+  }
+  /**
+   * Wrap processText to track what was inserted in the editor.
+   * Records the cursor offset before and after to determine the
+   * range of inserted text, and adjusts existing ranges when an
+   * insertion shifts them.
+   *
+   * @param onSlotActive — optional callback when a slot becomes active
+   */
+  trackProcessText(editor, text, onSlotActive) {
+    const offsetBefore = editor.posToOffset(editor.getCursor());
+    processText(editor, text);
+    if (isSlotActive() && onSlotActive) {
+      onSlotActive();
+    }
+    const offsetAfter = editor.posToOffset(editor.getCursor());
+    const delta = offsetAfter - offsetBefore;
+    if (delta > 0) {
+      for (const range of this.dictatedRanges) {
+        if (range.from >= offsetBefore) {
+          range.from += delta;
+          range.to += delta;
+        } else if (range.to > offsetBefore) {
+          range.to += delta;
+        }
+      }
+      this.dictatedRanges.push({ from: offsetBefore, to: offsetAfter });
+    } else if (delta < 0) {
+      const deletedLen = -delta;
+      const deletedFrom = offsetAfter;
+      const deletedTo = offsetBefore;
+      for (const range of this.dictatedRanges) {
+        if (range.from >= deletedTo) {
+          range.from -= deletedLen;
+          range.to -= deletedLen;
+        } else if (range.from >= deletedFrom) {
+          range.from = deletedFrom;
+          range.to = range.to <= deletedTo ? deletedFrom : range.to - deletedLen;
+        } else if (range.to > deletedFrom) {
+          range.to = range.to <= deletedTo ? deletedFrom : range.to - deletedLen;
+        }
+      }
+      this.dictatedRanges = this.dictatedRanges.filter(
+        (r) => r.to > r.from
+      );
+    }
+  }
+  /**
+   * Insert text at cursor and track the range for auto-correct.
+   * Handles auto-spacing between existing text and new text.
+   */
+  trackInsertAtCursor(editor, text) {
+    const cursor = editor.getCursor();
+    if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
+      const charBefore = editor.getRange(
+        { line: cursor.line, ch: cursor.ch - 1 },
+        cursor
+      );
+      if (charBefore && /\S/.test(charBefore)) {
+        text = " " + text;
+      }
+    }
+    const offsetBefore = editor.posToOffset(cursor);
+    editor.replaceRange(text, cursor);
+    const lines = text.split("\n");
+    const lastLine = lines[lines.length - 1];
+    const newLine = cursor.line + lines.length - 1;
+    const newCh = lines.length === 1 ? cursor.ch + lastLine.length : lastLine.length;
+    editor.setCursor({ line: newLine, ch: newCh });
+    const offsetAfter = editor.posToOffset(editor.getCursor());
+    const delta = offsetAfter - offsetBefore;
+    if (delta > 0) {
+      for (const range of this.dictatedRanges) {
+        if (range.from >= offsetBefore) {
+          range.from += delta;
+          range.to += delta;
+        } else if (range.to > offsetBefore) {
+          range.to += delta;
+        }
+      }
+      this.dictatedRanges.push({ from: offsetBefore, to: offsetAfter });
+    }
+  }
+  /** Record a range directly (for dual-delay finalization). */
+  addRange(from, to) {
+    this.dictatedRanges.push({ from, to });
+  }
+  /**
+   * After stopping realtime recording, correct only the text
+   * that was actually dictated.  Each tracked range is corrected
+   * independently, processed from end to start so that earlier
+   * offsets remain valid after replacements.
+   */
+  async autoCorrectAfterStop(editor, settings) {
+    if (this.dictatedRanges.length === 0) return;
+    const merged = _DictationTracker.mergeRanges(this.dictatedRanges);
+    merged.sort((a, b) => b.from - a.from);
+    const fullText = editor.getValue();
+    const corrections = [];
+    for (const range of merged) {
+      if (range.from >= fullText.length || range.to > fullText.length) {
+        continue;
+      }
+      const text = fullText.substring(range.from, range.to);
+      if (!text.trim()) continue;
+      corrections.push({
+        from: editor.offsetToPos(range.from),
+        to: editor.offsetToPos(range.to),
+        text
+      });
+    }
+    for (const c of corrections) {
+      try {
+        const corrected = await correctText(c.text, settings);
+        if (corrected && corrected !== c.text) {
+          editor.replaceRange(corrected, c.from, c.to);
+        }
+      } catch (e) {
+        vlog.error("Voxtral: Auto-correct failed", e);
+      }
+    }
+  }
+  /**
+   * Merge overlapping or adjacent dictated ranges into a minimal set.
+   */
+  static mergeRanges(ranges) {
+    if (ranges.length === 0) return [];
+    const sorted = [...ranges].sort((a, b) => a.from - b.from);
+    const merged = [sorted[0]];
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = merged[merged.length - 1];
+      const cur = sorted[i];
+      if (cur.from <= prev.to) {
+        prev.to = Math.max(prev.to, cur.to);
+      } else {
+        merged.push({ ...cur });
+      }
+    }
+    return merged;
+  }
+};
+
+// src/realtime-session.ts
+var import_obsidian5 = require("obsidian");
+var RealtimeSession = class {
+  constructor(settings, tracker, callbacks) {
+    this.settings = settings;
+    this.tracker = tracker;
+    this.callbacks = callbacks;
+    this.transcriber = null;
+    this.pendingText = "";
+    this.prevRaw = "";
+    this.turnDelta = 0;
+    this.turnProcessed = 0;
+    this.slotBuffer = "";
+    this.consecutiveFailures = 0;
+    this.maxConsecutiveFailures = 5;
+  }
+  /** Connect the WebSocket and start receiving transcription. */
+  async start(editor) {
+    this.pendingText = "";
+    this.prevRaw = "";
+    this.turnDelta = 0;
+    this.turnProcessed = 0;
+    this.slotBuffer = "";
+    this.consecutiveFailures = 0;
+    await this.connectWebSocket(editor);
+  }
+  /** Send PCM audio data to the transcriber. */
+  sendAudio(pcmData) {
+    var _a;
+    (_a = this.transcriber) == null ? void 0 : _a.sendAudio(pcmData);
+  }
+  /** Signal end of audio and finalize any pending text. */
+  async stop(editor) {
+    var _a, _b;
+    (_a = this.transcriber) == null ? void 0 : _a.endAudio();
+    await new Promise((resolve) => setTimeout(resolve, 1e3));
+    if (this.pendingText.trim()) {
+      this.tracker.trackProcessText(
+        editor,
+        this.pendingText.trim(),
+        () => this.callbacks.updateStatusBar("slot")
+      );
+      this.pendingText = "";
+    }
+    (_b = this.transcriber) == null ? void 0 : _b.close();
+    this.transcriber = null;
+  }
+  /** Flush buffered transcription text after a slot closes. */
+  flushSlotBuffer(editor) {
+    const buffered = this.slotBuffer;
+    this.slotBuffer = "";
+    if (buffered.trim()) {
+      this.pendingText += buffered;
+      if (this.pendingText.trim()) {
+        this.tracker.trackProcessText(
+          editor,
+          this.pendingText.trim() + " ",
+          () => this.callbacks.updateStatusBar("slot")
+        );
+        this.pendingText = "";
+      }
+    }
+  }
+  // ── WebSocket lifecycle ──
+  async connectWebSocket(editor) {
+    this.transcriber = new RealtimeTranscriber(this.settings, {
+      onSessionCreated: () => {
+        vlog.debug("Voxtral: Realtime session created");
+      },
+      onDelta: (text) => {
+        this.handleDelta(editor, text);
+      },
+      onDone: (text) => {
+        this.handleDone(editor, text);
+      },
+      onError: (message) => {
+        vlog.error("Voxtral: Realtime error:", message);
+        new import_obsidian5.Notice(`Streaming error: ${message}`);
+      },
+      onDisconnect: () => {
+        void this.handleDisconnect();
+      }
+    });
+    await this.transcriber.connect();
+  }
+  /**
+   * Handle WebSocket closure during recording.
+   *
+   * The Mistral realtime API closes the connection after each
+   * transcription.done event (end of utterance / silence detected).
+   * This is NORMAL — not an error. We silently reconnect so the
+   * user can keep talking without interruption.
+   *
+   * Only shows a warning if reconnection fails repeatedly.
+   */
+  async handleDisconnect() {
+    if (!this.callbacks.isRecording()) return;
+    const editor = this.callbacks.getEditor();
+    if (!editor) {
+      this.callbacks.stopRecording();
+      return;
+    }
+    vlog.debug("Voxtral: Session ended, reconnecting silently...");
+    this.prevRaw = "";
+    this.turnDelta = 0;
+    this.turnProcessed = 0;
+    try {
+      await this.connectWebSocket(editor);
+      this.consecutiveFailures = 0;
+      vlog.debug("Voxtral: Session reconnected");
+    } catch (e) {
+      this.consecutiveFailures++;
+      console.error(
+        `Voxtral: Reconnect failed (${this.consecutiveFailures}/${this.maxConsecutiveFailures})`,
+        e
+      );
+      if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
+        new import_obsidian5.Notice(
+          "Cannot connect to the API. Recording stopped.",
+          6e3
+        );
+        this.callbacks.stopRecording();
+        return;
+      }
+      const delay = Math.min(
+        500 * this.consecutiveFailures,
+        3e3
+      );
+      await new Promise(
+        (resolve) => setTimeout(resolve, delay)
+      );
+      if (this.callbacks.isRecording()) {
+        void this.handleDisconnect();
+      }
+    }
+  }
+  // ── Delta / Done text processing ──
+  handleDelta(editor, text) {
+    const isCumulative = this.prevRaw && text.startsWith(this.prevRaw);
+    const newText = isCumulative ? text.substring(this.prevRaw.length) : text;
+    this.prevRaw = isCumulative ? text : this.prevRaw + text;
+    if (!newText) return;
+    if (isSlotActive()) {
+      this.slotBuffer += newText;
+      this.turnDelta += newText.length;
+      return;
+    }
+    this.pendingText += newText;
+    this.turnDelta += newText.length;
+    const sentenceEnd = /[.!?]\s*$/;
+    const longEnough = this.pendingText.length > 120;
+    if (sentenceEnd.test(this.pendingText) || longEnough) {
+      const sentence = this.pendingText.trim();
+      this.turnProcessed += this.pendingText.length;
+      this.pendingText = "";
+      const normalized = normalizeCommand(sentence);
+      const stopPatterns = [
+        "beeindig opname",
+        "beeindig de opname",
+        "beeindigt opname",
+        "beeindigt de opname",
+        "beeindigde opname",
+        "beeindigde de opname",
+        "stop opname",
+        "stopopname",
+        "stop de opname",
+        "stop recording"
+      ];
+      if (stopPatterns.some((p) => normalized.includes(p))) {
+        this.callbacks.stopRecording();
+        return;
+      }
+      this.tracker.trackProcessText(
+        editor,
+        sentence + " ",
+        () => this.callbacks.updateStatusBar("slot")
+      );
+    }
+  }
+  handleDone(editor, doneText) {
+    if (isSlotActive()) {
+      return;
+    }
+    if (doneText && doneText.length > this.turnDelta) {
+      this.pendingText += doneText.substring(this.turnDelta);
+    }
+    if (this.pendingText.trim()) {
+      this.tracker.trackProcessText(
+        editor,
+        this.pendingText.trim() + " ",
+        () => this.callbacks.updateStatusBar("slot")
+      );
+      this.pendingText = "";
+    }
+    this.turnDelta = 0;
+    this.turnProcessed = 0;
+  }
+};
+
+// src/dual-delay-session.ts
+var import_obsidian6 = require("obsidian");
+var DualDelaySession = class {
+  constructor(settings, tracker, callbacks) {
+    this.settings = settings;
+    this.tracker = tracker;
+    this.callbacks = callbacks;
+    this.fastTranscriber = null;
+    this.slowTranscriber = null;
+    // Session state
+    this.state = "idle" /* Idle */;
+    // Text accumulators
+    this.fastText = "";
+    this.slowText = "";
+    this.fastPrevRaw = "";
+    this.slowPrevRaw = "";
+    this.slowTurnDelta = 0;
+    // Editor state
+    this.insertOffset = 0;
+    this.displayLen = 0;
+    this.slowCommitted = 0;
+    this.commandJustRan = false;
+    // Reconnection
+    this.consecutiveFailures = 0;
+    this.maxConsecutiveFailures = 5;
+  }
+  /** Transition to a new state with debug logging. */
+  setState(newState) {
+    const prev = this.state;
+    this.state = newState;
+    vlog.debug(`Voxtral: DualDelay state: ${prev} \u2192 ${newState}`);
+  }
+  /** Connect both WebSocket streams and initialize state. */
+  async start(editor) {
+    this.setState("connecting" /* Connecting */);
+    this.fastText = "";
+    this.slowText = "";
+    this.insertOffset = editor.posToOffset(editor.getCursor());
+    this.displayLen = 0;
+    this.slowCommitted = 0;
+    this.slowTurnDelta = 0;
+    this.fastPrevRaw = "";
+    this.slowPrevRaw = "";
+    this.commandJustRan = false;
+    this.consecutiveFailures = 0;
+    await this.connectWebSockets(editor);
+    this.setState("streaming" /* Streaming */);
+  }
+  /** Send PCM audio data to both transcribers. */
+  sendAudio(pcmData) {
+    var _a, _b;
+    (_a = this.fastTranscriber) == null ? void 0 : _a.sendAudio(pcmData);
+    (_b = this.slowTranscriber) == null ? void 0 : _b.sendAudio(pcmData);
+  }
+  /** Finalize the session: flush remaining text and close streams. */
+  async stop() {
+    var _a, _b, _c, _d;
+    this.setState("finalizing" /* Finalizing */);
+    (_a = this.fastTranscriber) == null ? void 0 : _a.endAudio();
+    (_b = this.slowTranscriber) == null ? void 0 : _b.endAudio();
+    await new Promise((resolve) => setTimeout(resolve, 1e3));
+    const editor = this.callbacks.getEditor();
+    if (editor) {
+      this.processSlowCommands(editor);
+      const finalText = this.slowText || this.fastText;
+      if (finalText) {
+        const from = editor.offsetToPos(this.insertOffset);
+        const to = editor.offsetToPos(
+          this.insertOffset + this.displayLen
+        );
+        editor.replaceRange(finalText, from, to);
+        const endOffset = this.insertOffset + finalText.length;
+        editor.setCursor(editor.offsetToPos(endOffset));
+        this.tracker.addRange(
+          this.insertOffset,
+          this.insertOffset + finalText.length
+        );
+      }
+    }
+    (_c = this.fastTranscriber) == null ? void 0 : _c.close();
+    (_d = this.slowTranscriber) == null ? void 0 : _d.close();
+    this.fastTranscriber = null;
+    this.slowTranscriber = null;
+    this.fastText = "";
+    this.slowText = "";
+    this.displayLen = 0;
+    this.slowCommitted = 0;
+    this.slowTurnDelta = 0;
+    this.setState("idle" /* Idle */);
+  }
+  // ── WebSocket lifecycle ──
+  async connectWebSockets(editor) {
+    const fastDelay = this.settings.dualDelayFastMs;
+    const slowDelay = this.settings.dualDelaySlowMs;
+    this.fastTranscriber = new RealtimeTranscriber(
+      this.settings,
+      {
+        onSessionCreated: () => {
+          vlog.debug(
+            "Voxtral: Fast stream session created"
+          );
+        },
+        onDelta: (text) => {
+          this.handleFastDelta(text);
+          this.renderText(editor);
+        },
+        onDone: () => {
+          this.renderText(editor);
+        },
+        onError: (message) => {
+          vlog.error(
+            "Voxtral: Fast stream error:",
+            message
+          );
+        },
+        onDisconnect: () => {
+          void this.handleStreamDisconnect("fast");
+        }
+      },
+      fastDelay
+    );
+    this.slowTranscriber = new RealtimeTranscriber(
+      this.settings,
+      {
+        onSessionCreated: () => {
+          vlog.debug(
+            "Voxtral: Slow stream session created"
+          );
+        },
+        onDelta: (text) => {
+          this.handleSlowDelta(text);
+          this.renderText(editor);
+          this.processSlowCommands(editor);
+        },
+        onDone: () => {
+          this.renderText(editor);
+          this.processSlowCommands(editor);
+        },
+        onError: (message) => {
+          vlog.error(
+            "Voxtral: Slow stream error:",
+            message
+          );
+        },
+        onDisconnect: () => {
+          void this.handleStreamDisconnect("slow");
+        }
+      },
+      slowDelay
+    );
+    await Promise.all([
+      this.fastTranscriber.connect(),
+      this.slowTranscriber.connect()
+    ]);
+  }
+  async handleStreamDisconnect(stream) {
+    if (!this.callbacks.isRecording()) return;
+    const editor = this.callbacks.getEditor();
+    if (!editor) {
+      this.callbacks.stopRecording();
+      return;
+    }
+    this.setState("reconnecting" /* Reconnecting */);
+    vlog.debug(
+      `Voxtral: ${stream} stream ended, reconnecting...`
+    );
+    try {
+      if (stream === "fast") {
+        await this.reconnectFastStream(editor);
+      } else {
+        await this.reconnectSlowStream(editor);
+      }
+      this.consecutiveFailures = 0;
+      this.setState("streaming" /* Streaming */);
+    } catch (e) {
+      this.consecutiveFailures++;
+      vlog.error(
+        `Voxtral: ${stream} stream reconnect failed (${this.consecutiveFailures})`,
+        e
+      );
+      if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
+        new import_obsidian6.Notice(
+          "Cannot reconnect. Recording stopped.",
+          6e3
+        );
+        this.callbacks.stopRecording();
+        return;
+      }
+      const delay = Math.min(
+        500 * this.consecutiveFailures,
+        3e3
+      );
+      await new Promise(
+        (resolve) => setTimeout(resolve, delay)
+      );
+      if (this.callbacks.isRecording()) {
+        void this.handleStreamDisconnect(stream);
+      }
+    }
+  }
+  async reconnectFastStream(editor) {
+    const fastDelay = this.settings.dualDelayFastMs;
+    this.fastTranscriber = new RealtimeTranscriber(
+      this.settings,
+      {
+        onSessionCreated: () => vlog.debug(
+          "Voxtral: Fast stream reconnected"
+        ),
+        onDelta: (text) => {
+          this.fastText += text;
+          this.renderText(editor);
+        },
+        onDone: () => this.renderText(editor),
+        onError: (message) => vlog.error(
+          "Voxtral: Fast stream error:",
+          message
+        ),
+        onDisconnect: () => void this.handleStreamDisconnect("fast")
+      },
+      fastDelay
+    );
+    await this.fastTranscriber.connect();
+  }
+  async reconnectSlowStream(editor) {
+    if (this.slowText.trim()) {
+      const from = editor.offsetToPos(this.insertOffset);
+      const to = editor.offsetToPos(
+        this.insertOffset + this.displayLen
+      );
+      editor.replaceRange("", from, to);
+      editor.setCursor(from);
+      this.displayLen = 0;
+      this.tracker.trackInsertAtCursor(editor, this.slowText);
+      this.insertOffset = editor.posToOffset(
+        editor.getCursor()
+      );
+    }
+    this.slowCommitted = 0;
+    this.slowText = "";
+    this.fastText = "";
+    this.slowTurnDelta = 0;
+    this.slowPrevRaw = "";
+    this.fastPrevRaw = "";
+    const slowDelay = this.settings.dualDelaySlowMs;
+    this.slowTranscriber = new RealtimeTranscriber(
+      this.settings,
+      {
+        onSessionCreated: () => vlog.debug(
+          "Voxtral: Slow stream reconnected"
+        ),
+        onDelta: (text) => {
+          this.handleSlowDelta(text);
+          this.renderText(editor);
+          this.processSlowCommands(editor);
+        },
+        onDone: () => {
+          this.renderText(editor);
+          this.processSlowCommands(editor);
+        },
+        onError: (message) => vlog.error(
+          "Voxtral: Slow stream error:",
+          message
+        ),
+        onDisconnect: () => void this.handleStreamDisconnect("slow")
+      },
+      slowDelay
+    );
+    await this.slowTranscriber.connect();
+  }
+  // ── Delta handlers ──
+  handleFastDelta(text) {
+    const isCumulative = this.fastPrevRaw && text.startsWith(this.fastPrevRaw);
+    if (isCumulative) {
+      const newPart = text.substring(this.fastPrevRaw.length);
+      if (newPart) this.fastText += newPart;
+    } else {
+      this.fastText += text;
+    }
+    this.fastPrevRaw = isCumulative ? text : this.fastPrevRaw + text;
+  }
+  handleSlowDelta(text) {
+    const isCumulative = this.slowPrevRaw && text.startsWith(this.slowPrevRaw);
+    if (isCumulative) {
+      const newPart = text.substring(this.slowPrevRaw.length);
+      if (newPart) {
+        this.slowText += newPart;
+        this.slowTurnDelta += newPart.length;
+      }
+    } else {
+      this.slowText += text;
+      this.slowTurnDelta += text.length;
+    }
+    this.slowPrevRaw = isCumulative ? text : this.slowPrevRaw + text;
+  }
+  // ── Editor rendering ──
+  /**
+   * Update the editor with the current dual-delay text.
+   * Shows slow (confirmed) text + any fast text beyond slow.
+   */
+  renderText(editor) {
+    const cursorOffset = editor.posToOffset(editor.getCursor());
+    const expectedEnd = this.insertOffset + this.displayLen;
+    if (cursorOffset !== expectedEnd) {
+      if (this.displayLen > 0) {
+        const slowText = this.slowText;
+        const from2 = editor.offsetToPos(this.insertOffset);
+        const to2 = editor.offsetToPos(expectedEnd);
+        editor.replaceRange(slowText, from2, to2);
+        const shift = slowText.length - this.displayLen;
+        const newCursor = cursorOffset >= expectedEnd ? cursorOffset + shift : cursorOffset;
+        editor.setCursor(editor.offsetToPos(newCursor));
+        this.slowCommitted += slowText.length;
+        this.slowText = "";
+        this.fastText = "";
+        this.displayLen = 0;
+        this.insertOffset = newCursor;
+        return;
+      }
+      this.insertOffset = cursorOffset;
+    }
+    const slowLen = this.slowText.length;
+    const fastLen = this.fastText.length;
+    let displayText;
+    if (fastLen > slowLen) {
+      displayText = this.slowText + this.fastText.substring(slowLen);
+    } else {
+      displayText = this.slowText;
+    }
+    const from = editor.offsetToPos(this.insertOffset);
+    const to = editor.offsetToPos(
+      this.insertOffset + this.displayLen
+    );
+    if (from.ch === 0 && this.displayLen === 0) {
+      displayText = displayText.replace(/^\s+/, "");
+    }
+    editor.replaceRange(displayText, from, to);
+    this.displayLen = displayText.length;
+    const endOffset = this.insertOffset + this.displayLen;
+    editor.setCursor(editor.offsetToPos(endOffset));
+  }
+  // ── Voice command processing ──
+  /**
+   * Process voice commands from the slow stream (more accurate).
+   * Checks completed sentences in slowText for voice commands.
+   */
+  processSlowCommands(editor) {
+    if (!this.slowText) return;
+    if (this.commandJustRan && /^[\s.!?,;:]*$/.test(this.slowText)) {
+      this.commandJustRan = false;
+      if (this.displayLen > 0) {
+        const from2 = editor.offsetToPos(this.insertOffset);
+        const to2 = editor.offsetToPos(
+          this.insertOffset + this.displayLen
+        );
+        editor.replaceRange("", from2, to2);
+        editor.setCursor(from2);
+        this.displayLen = 0;
+      }
+      this.slowCommitted += this.slowText.length;
+      this.slowText = "";
+      this.fastText = "";
+      this.insertOffset = editor.posToOffset(
+        editor.getCursor()
+      );
+      return;
+    }
+    this.commandJustRan = false;
+    const segments = this.slowText.match(
+      /[^.!?]+[.!?]+\s*/g
+    );
+    const segmentText = segments ? segments.join("") : "";
+    const remainder = this.slowText.substring(segmentText.length);
+    if (!segments && remainder.trim()) {
+      const cmdMatch = matchCommand(remainder.trim());
+      if (cmdMatch && !cmdMatch.textBefore) {
+        const from2 = editor.offsetToPos(this.insertOffset);
+        const to2 = editor.offsetToPos(
+          this.insertOffset + this.displayLen
+        );
+        editor.replaceRange("", from2, to2);
+        editor.setCursor(from2);
+        this.displayLen = 0;
+        cmdMatch.command.action(editor);
+        if (cmdMatch.command.id === "stopRecording") {
+          setTimeout(
+            () => this.callbacks.stopRecording(),
+            0
+          );
+        }
+        if (isSlotActive()) {
+          this.callbacks.updateStatusBar("slot");
+        }
+        this.commandJustRan = true;
+        this.slowCommitted += this.slowText.length;
+        this.slowText = "";
+        this.fastText = "";
+        this.insertOffset = editor.posToOffset(
+          editor.getCursor()
+        );
+        return;
+      }
+      return;
+    }
+    if (!segments) return;
+    const matchedLength = segmentText.length;
+    const from = editor.offsetToPos(this.insertOffset);
+    const to = editor.offsetToPos(
+      this.insertOffset + this.displayLen
+    );
+    editor.replaceRange("", from, to);
+    editor.setCursor(from);
+    this.displayLen = 0;
+    for (const segment of segments) {
+      const match = matchCommand(segment);
+      if (match) {
+        if (match.textBefore) {
+          let before = match.textBefore;
+          if (match.command.punctuation) {
+            before = before.replace(
+              /[,;.!?]+\s*$/,
+              ""
+            );
+          }
+          this.tracker.trackInsertAtCursor(
+            editor,
+            before
+          );
+        }
+        match.command.action(editor);
+        this.commandJustRan = true;
+        if (match.command.id === "stopRecording") {
+          setTimeout(
+            () => this.callbacks.stopRecording(),
+            0
+          );
+        }
+        if (isSlotActive()) {
+          this.callbacks.updateStatusBar("slot");
+        }
+      } else {
+        this.tracker.trackInsertAtCursor(editor, segment);
+      }
+    }
+    this.slowCommitted += matchedLength;
+    this.slowText = remainder;
+    this.fastText = "";
+    this.insertOffset = editor.posToOffset(editor.getCursor());
+    this.displayLen = 0;
+    if (this.slowText || this.fastText) {
+      this.renderText(editor);
+    }
+  }
+};
+
+// src/main.ts
+var VoxtralPlugin = class extends import_obsidian7.Plugin {
   constructor() {
     super(...arguments);
-    this.realtimeTranscriber = null;
+    this.realtimeSession = null;
+    this.dualDelaySession = null;
+    this.tracker = new DictationTracker();
     this.isRecording = false;
     this.isPaused = false;
     this.isTypingMuted = false;
@@ -2991,46 +3936,15 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
     this.statusBarEl = null;
     this.sendRibbonEl = null;
     this.mobileActionEl = null;
-    this.pendingText = "";
-    this.realtimePrevRaw = "";
-    // raw cumulative text from API (for delta detection)
-    this.realtimeTurnDelta = 0;
-    // bytes received via deltas in current realtime turn
-    this.realtimeTurnProcessed = 0;
-    // bytes already flushed from pendingText in current turn
     this.chunkIndex = 0;
     this.consecutiveFailures = 0;
     this.maxConsecutiveFailures = 5;
     this.currentEditor = null;
     this.keydownHandler = null;
-    /** Text buffered while a slot is active (transcription paused) */
-    this.slotBuffer = "";
-    /** Ranges of text inserted during realtime dictation.
-     *  Offsets are always in the current document coordinate system —
-     *  existing ranges are adjusted when a new insertion happens. */
-    this.dictatedRanges = [];
-    // ── Dual-delay state ──
-    this.dualSlowTranscriber = null;
-    this.dualFastText = "";
-    this.dualSlowText = "";
-    this.dualInsertOffset = 0;
-    // editor offset where dual-delay text starts
-    this.dualDisplayLen = 0;
-    // length of text currently shown in editor
-    this.dualSlowCommitted = 0;
-    // bytes trimmed from dualSlowText by processDualSlowCommands
-    this.dualSlowTurnDelta = 0;
-    // bytes received via deltas in current slow turn
-    this.dualFastPrevRaw = "";
-    // raw cumulative text from fast API (for delta detection)
-    this.dualSlowPrevRaw = "";
-    // raw cumulative text from slow API (for delta detection)
-    this.dualCommandJustRan = false;
   }
-  // true after a voice command was executed (for orphaned punctuation detection)
   /** Whether realtime mode is available on this platform */
   get canRealtime() {
-    return !import_obsidian5.Platform.isMobile;
+    return !import_obsidian7.Platform.isMobile;
   }
   /** Effective mode: fall back to batch on mobile */
   get effectiveMode() {
@@ -3038,6 +3952,20 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
       return "realtime";
     }
     return "batch";
+  }
+  /** Callbacks shared by realtime and dual-delay sessions. */
+  get sessionCallbacks() {
+    return {
+      updateStatusBar: (state) => this.updateStatusBar(state),
+      stopRecording: () => {
+        void this.stopRecording();
+      },
+      isRecording: () => this.isRecording,
+      getEditor: () => {
+        var _a;
+        return this.currentEditor || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView)) == null ? void 0 : _a.editor) || null;
+      }
+    };
   }
   async onload() {
     await this.loadSettings();
@@ -3049,7 +3977,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
     this.addRibbonIcon("mic", "Start/stop recording", () => {
       void this.toggleRecording();
     });
-    if (!import_obsidian5.Platform.isMobile) {
+    if (!import_obsidian7.Platform.isMobile) {
       this.statusBarEl = this.addStatusBarItem();
       this.updateStatusBar("idle");
     }
@@ -3118,11 +4046,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
     }
   }
   async loadSettings() {
-    this.settings = Object.assign(
-      {},
-      DEFAULT_SETTINGS,
-      await this.loadData()
-    );
+    this.settings = migrateSettings(await this.loadData());
     setLanguage(this.settings.language);
     loadCustomCommands(this.settings.customCommands);
     loadCustomCommandTriggers(this.settings.customCommands);
@@ -3136,6 +4060,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
     this.setupTemplates();
     this.refreshHelpView();
   }
+  // ── Templates ──
   /** Scan templates folder and register the pre-match hook */
   setupTemplates() {
     scanTemplates(this.app, this.settings.templatesFolder);
@@ -3227,8 +4152,8 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
       }
     );
     this.sendRibbonEl.addClass("voxtral-send-button");
-    if (import_obsidian5.Platform.isMobile) {
-      const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+    if (import_obsidian7.Platform.isMobile) {
+      const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
       if (view) {
         this.mobileActionEl = view.addAction(
           "send",
@@ -3289,7 +4214,7 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
     this.isPaused = false;
     this.recorder.resume();
     this.updateStatusBar("recording");
-    new import_obsidian5.Notice("Recording resumed");
+    new import_obsidian7.Notice("Recording resumed");
     vlog.debug("Voxtral: Recording resumed (app foregrounded)");
   }
   clearFocusPauseTimer() {
@@ -3306,18 +4231,22 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
         e.preventDefault();
         cancelSlot();
         this.updateStatusBar("recording");
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
-        if (view) this.flushSlotBuffer(view.editor);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+        if (view && this.realtimeSession) {
+          this.realtimeSession.flushSlotBuffer(view.editor);
+        }
         return;
       }
       const isEnterExit = (slot == null ? void 0 : slot.def.exitTrigger) === "enter" || (slot == null ? void 0 : slot.def.exitTrigger) === "enter-or-space";
       const isSpaceExit = (slot == null ? void 0 : slot.def.exitTrigger) === "space" || (slot == null ? void 0 : slot.def.exitTrigger) === "enter-or-space";
       if (e.key === "Enter" && isEnterExit || e.key === " " && isSpaceExit) {
         e.preventDefault();
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
         if (view) {
           closeSlot(view.editor);
-          this.flushSlotBuffer(view.editor);
+          if (this.realtimeSession) {
+            this.realtimeSession.flushSlotBuffer(view.editor);
+          }
         }
         this.updateStatusBar("recording");
         return;
@@ -3371,12 +4300,12 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
   }
   async startRecording() {
     if (!this.settings.apiKey) {
-      new import_obsidian5.Notice("Please set your API key in the plugin settings.");
+      new import_obsidian7.Notice("Please set your API key in the plugin settings.");
       return;
     }
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
     if (!view) {
-      new import_obsidian5.Notice("Open a note first to start dictating.");
+      new import_obsidian7.Notice("Open a note first to start dictating.");
       return;
     }
     const editor = view.editor;
@@ -3392,13 +4321,13 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
       this.chunkIndex = 0;
       this.consecutiveFailures = 0;
       this.updateStatusBar("recording");
-      if (!import_obsidian5.Platform.isMobile) {
+      if (!import_obsidian7.Platform.isMobile) {
         void this.openHelpPanel();
       }
       const micName = this.recorder.activeMicLabel;
       if (this.effectiveMode === "batch") {
         const enterHint = this.settings.enterToSend ? " Press Enter (when not typing) or tap send to transcribe chunks." : " Tap send to transcribe chunks while you keep talking.";
-        if (import_obsidian5.Platform.isMobile && !this.settings.dismissMobileBatchNotice) {
+        if (import_obsidian7.Platform.isMobile && !this.settings.dismissMobileBatchNotice) {
           const frag = document.createDocumentFragment();
           frag.createSpan({
             text: `Recording started (${micName}). Tap the send button (\u2191) to transcribe chunks while you keep talking.`
@@ -3414,20 +4343,20 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
             this.settings.dismissMobileBatchNotice = true;
             void this.saveSettings();
           });
-          new import_obsidian5.Notice(frag, 8e3);
+          new import_obsidian7.Notice(frag, 8e3);
         } else {
-          new import_obsidian5.Notice(
+          new import_obsidian7.Notice(
             `Voxtral: Recording started (${micName})
 ` + enterHint.trim(),
             6e3
           );
         }
       } else {
-        new import_obsidian5.Notice(`Recording started (${micName})`);
+        new import_obsidian7.Notice(`Recording started (${micName})`);
       }
     } catch (e) {
       vlog.error("Voxtral: Failed to start recording", e);
-      new import_obsidian5.Notice(`Could not start recording: ${e}`);
+      new import_obsidian7.Notice(`Could not start recording: ${e}`);
       this.updateStatusBar("idle");
     }
   }
@@ -3450,19 +4379,19 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
       }
     } catch (e) {
       vlog.error("Voxtral: Failed to stop recording", e);
-      new import_obsidian5.Notice(`Error stopping recording: ${e}`);
+      new import_obsidian7.Notice(`Error stopping recording: ${e}`);
     }
     this.currentEditor = null;
-    this.dictatedRanges = [];
+    this.tracker.reset();
     this.updateStatusBar("idle");
-    new import_obsidian5.Notice("Recording stopped");
+    new import_obsidian7.Notice("Recording stopped");
   }
   // ── Tap-to-send: flush current audio chunk without stopping ──
   async sendChunk() {
     if (!this.isRecording || this.effectiveMode !== "batch") {
       return;
     }
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
     if (!view) return;
     const editor = view.editor;
     this.chunkIndex++;
@@ -3493,559 +4422,54 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
     } catch (e) {
       vlog.error("Voxtral: Chunk transcription failed", e);
       this.updateStatusBar("recording");
-      new import_obsidian5.Notice(`Chunk failed: ${e}`);
+      new import_obsidian7.Notice(`Chunk failed: ${e}`);
     }
   }
-  // ── Realtime recording ──
+  // ── Realtime recording (delegates to session classes) ──
   async startRealtimeRecording(editor) {
+    this.tracker.reset();
     if (this.settings.dualDelay) {
-      return this.startDualDelayRecording(editor);
+      this.dualDelaySession = new DualDelaySession(
+        this.settings,
+        this.tracker,
+        this.sessionCallbacks
+      );
+      await this.dualDelaySession.start(editor);
+    } else {
+      this.realtimeSession = new RealtimeSession(
+        this.settings,
+        this.tracker,
+        this.sessionCallbacks
+      );
+      await this.realtimeSession.start(editor);
     }
-    this.pendingText = "";
-    this.realtimePrevRaw = "";
-    this.realtimeTurnDelta = 0;
-    this.realtimeTurnProcessed = 0;
-    this.dictatedRanges = [];
-    await this.connectRealtimeWebSocket(editor);
     const deviceId = this.settings.microphoneDeviceId || void 0;
     await this.recorder.start(deviceId, (pcmData) => {
-      var _a;
-      (_a = this.realtimeTranscriber) == null ? void 0 : _a.sendAudio(pcmData);
+      if (this.dualDelaySession) {
+        this.dualDelaySession.sendAudio(pcmData);
+      } else if (this.realtimeSession) {
+        this.realtimeSession.sendAudio(pcmData);
+      }
     }, this.settings.noiseSuppression);
     if (this.recorder.fallbackUsed) {
-      new import_obsidian5.Notice("Selected mic unavailable \u2014 using default");
-    }
-  }
-  async connectRealtimeWebSocket(editor) {
-    this.realtimeTranscriber = new RealtimeTranscriber(this.settings, {
-      onSessionCreated: () => {
-        vlog.debug("Voxtral: Realtime session created");
-      },
-      onDelta: (text) => {
-        this.handleRealtimeDelta(editor, text);
-      },
-      onDone: (text) => {
-        this.handleRealtimeDone(editor, text);
-      },
-      onError: (message) => {
-        vlog.error("Voxtral: Realtime error:", message);
-        new import_obsidian5.Notice(`Streaming error: ${message}`);
-      },
-      onDisconnect: () => {
-        void this.handleRealtimeDisconnect();
-      }
-    });
-    await this.realtimeTranscriber.connect();
-  }
-  /**
-   * Handle WebSocket closure during recording.
-   *
-   * The Mistral realtime API closes the connection after each
-   * transcription.done event (end of utterance / silence detected).
-   * This is NORMAL — not an error. We silently reconnect so the
-   * user can keep talking without interruption.
-   *
-   * Only shows a warning if reconnection fails repeatedly.
-   */
-  async handleRealtimeDisconnect() {
-    var _a;
-    if (!this.isRecording) return;
-    const editor = this.currentEditor || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView)) == null ? void 0 : _a.editor);
-    if (!editor) {
-      void this.stopRecording();
-      return;
-    }
-    vlog.debug("Voxtral: Session ended, reconnecting silently...");
-    this.realtimePrevRaw = "";
-    this.realtimeTurnDelta = 0;
-    this.realtimeTurnProcessed = 0;
-    try {
-      await this.connectRealtimeWebSocket(editor);
-      this.consecutiveFailures = 0;
-      vlog.debug("Voxtral: Session reconnected");
-    } catch (e) {
-      this.consecutiveFailures++;
-      console.error(
-        `Voxtral: Reconnect failed (${this.consecutiveFailures}/${this.maxConsecutiveFailures})`,
-        e
-      );
-      if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
-        new import_obsidian5.Notice(
-          "Cannot connect to the API. Recording stopped.",
-          6e3
-        );
-        void this.stopRecording();
-        return;
-      }
-      const delay = Math.min(
-        500 * this.consecutiveFailures,
-        3e3
-      );
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      if (this.isRecording) {
-        void this.handleRealtimeDisconnect();
-      }
-    }
-  }
-  handleRealtimeDelta(editor, text) {
-    const isCumulative = this.realtimePrevRaw && text.startsWith(this.realtimePrevRaw);
-    const newText = isCumulative ? text.substring(this.realtimePrevRaw.length) : text;
-    this.realtimePrevRaw = isCumulative ? text : this.realtimePrevRaw + text;
-    if (!newText) return;
-    if (isSlotActive()) {
-      this.slotBuffer += newText;
-      this.realtimeTurnDelta += newText.length;
-      return;
-    }
-    this.pendingText += newText;
-    this.realtimeTurnDelta += newText.length;
-    const sentenceEnd = /[.!?]\s*$/;
-    const longEnough = this.pendingText.length > 120;
-    if (sentenceEnd.test(this.pendingText) || longEnough) {
-      const sentence = this.pendingText.trim();
-      this.realtimeTurnProcessed += this.pendingText.length;
-      this.pendingText = "";
-      const normalized = normalizeCommand(sentence);
-      const stopPatterns = [
-        "beeindig opname",
-        "beeindig de opname",
-        "beeindigt opname",
-        "beeindigt de opname",
-        "beeindigde opname",
-        "beeindigde de opname",
-        "stop opname",
-        "stopopname",
-        "stop de opname",
-        "stop recording"
-      ];
-      if (stopPatterns.some((p) => normalized.includes(p))) {
-        void this.stopRecording();
-        return;
-      }
-      this.trackProcessText(editor, sentence + " ");
-    }
-  }
-  handleRealtimeDone(editor, doneText) {
-    if (isSlotActive()) {
-      return;
-    }
-    if (doneText && doneText.length > this.realtimeTurnDelta) {
-      this.pendingText += doneText.substring(this.realtimeTurnDelta);
-    }
-    if (this.pendingText.trim()) {
-      this.trackProcessText(editor, this.pendingText.trim() + " ");
-      this.pendingText = "";
-    }
-    this.realtimeTurnDelta = 0;
-    this.realtimeTurnProcessed = 0;
-  }
-  /** Flush buffered transcription text after a slot closes.
-   *  Atomic: captures and clears slotBuffer before processing
-   *  to prevent race conditions with incoming deltas. */
-  flushSlotBuffer(editor) {
-    const buffered = this.slotBuffer;
-    this.slotBuffer = "";
-    if (buffered.trim()) {
-      this.pendingText += buffered;
-      if (this.pendingText.trim()) {
-        this.trackProcessText(editor, this.pendingText.trim() + " ");
-        this.pendingText = "";
-      }
+      new import_obsidian7.Notice("Selected mic unavailable \u2014 using default");
     }
   }
   async stopRealtimeRecording() {
-    var _a, _b;
-    if (this.dualSlowTranscriber) {
-      return this.stopDualDelayRecording();
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+    if (this.dualDelaySession) {
+      await this.dualDelaySession.stop();
+      this.dualDelaySession = null;
+    } else if (this.realtimeSession) {
+      const editor = view == null ? void 0 : view.editor;
+      if (editor) {
+        await this.realtimeSession.stop(editor);
+      }
+      this.realtimeSession = null;
     }
-    (_a = this.realtimeTranscriber) == null ? void 0 : _a.endAudio();
-    await new Promise((resolve) => setTimeout(resolve, 1e3));
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
-    if (view && this.pendingText.trim()) {
-      this.trackProcessText(view.editor, this.pendingText.trim());
-      this.pendingText = "";
-    }
-    (_b = this.realtimeTranscriber) == null ? void 0 : _b.close();
-    this.realtimeTranscriber = null;
     await this.recorder.stop();
     if (this.settings.autoCorrect && view) {
-      await this.autoCorrectAfterStop(view.editor);
-    }
-  }
-  // ── Dual-delay realtime recording ──
-  async startDualDelayRecording(editor) {
-    this.pendingText = "";
-    this.dictatedRanges = [];
-    this.dualFastText = "";
-    this.dualSlowText = "";
-    this.dualInsertOffset = editor.posToOffset(editor.getCursor());
-    this.dualDisplayLen = 0;
-    this.dualSlowCommitted = 0;
-    this.dualSlowTurnDelta = 0;
-    this.dualFastPrevRaw = "";
-    this.dualSlowPrevRaw = "";
-    this.dualCommandJustRan = false;
-    await this.connectDualDelayWebSockets(editor);
-    const deviceId = this.settings.microphoneDeviceId || void 0;
-    await this.recorder.start(deviceId, (pcmData) => {
-      var _a, _b;
-      (_a = this.realtimeTranscriber) == null ? void 0 : _a.sendAudio(pcmData);
-      (_b = this.dualSlowTranscriber) == null ? void 0 : _b.sendAudio(pcmData);
-    }, this.settings.noiseSuppression);
-    if (this.recorder.fallbackUsed) {
-      new import_obsidian5.Notice("Selected mic unavailable \u2014 using default");
-    }
-  }
-  async connectDualDelayWebSockets(editor) {
-    const fastDelay = this.settings.dualDelayFastMs;
-    const slowDelay = this.settings.dualDelaySlowMs;
-    this.realtimeTranscriber = new RealtimeTranscriber(this.settings, {
-      onSessionCreated: () => {
-        vlog.debug("Voxtral: Fast stream session created");
-      },
-      onDelta: (text) => {
-        const isCumulative = this.dualFastPrevRaw && text.startsWith(this.dualFastPrevRaw);
-        if (isCumulative) {
-          const newPart = text.substring(this.dualFastPrevRaw.length);
-          if (newPart) this.dualFastText += newPart;
-        } else {
-          this.dualFastText += text;
-        }
-        this.dualFastPrevRaw = isCumulative ? text : this.dualFastPrevRaw + text;
-        this.renderDualText(editor);
-      },
-      onDone: (_text) => {
-        this.renderDualText(editor);
-      },
-      onError: (message) => {
-        vlog.error("Voxtral: Fast stream error:", message);
-      },
-      onDisconnect: () => {
-        void this.handleDualStreamDisconnect("fast");
-      }
-    }, fastDelay);
-    this.dualSlowTranscriber = new RealtimeTranscriber(this.settings, {
-      onSessionCreated: () => {
-        vlog.debug("Voxtral: Slow stream session created");
-      },
-      onDelta: (text) => {
-        const isCumulative = this.dualSlowPrevRaw && text.startsWith(this.dualSlowPrevRaw);
-        if (isCumulative) {
-          const newPart = text.substring(this.dualSlowPrevRaw.length);
-          if (newPart) {
-            this.dualSlowText += newPart;
-            this.dualSlowTurnDelta += newPart.length;
-          }
-        } else {
-          this.dualSlowText += text;
-          this.dualSlowTurnDelta += text.length;
-        }
-        this.dualSlowPrevRaw = isCumulative ? text : this.dualSlowPrevRaw + text;
-        this.renderDualText(editor);
-        this.processDualSlowCommands(editor);
-      },
-      onDone: (_text) => {
-        this.renderDualText(editor);
-        this.processDualSlowCommands(editor);
-      },
-      onError: (message) => {
-        vlog.error("Voxtral: Slow stream error:", message);
-      },
-      onDisconnect: () => {
-        void this.handleDualStreamDisconnect("slow");
-      }
-    }, slowDelay);
-    await Promise.all([
-      this.realtimeTranscriber.connect(),
-      this.dualSlowTranscriber.connect()
-    ]);
-  }
-  async handleDualStreamDisconnect(stream) {
-    var _a;
-    if (!this.isRecording) return;
-    const editor = this.currentEditor || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView)) == null ? void 0 : _a.editor);
-    if (!editor) {
-      void this.stopRecording();
-      return;
-    }
-    vlog.debug(`Voxtral: ${stream} stream ended, reconnecting...`);
-    try {
-      if (stream === "fast" && this.realtimeTranscriber) {
-        const fastDelay = this.settings.dualDelayFastMs;
-        this.realtimeTranscriber = new RealtimeTranscriber(this.settings, {
-          onSessionCreated: () => vlog.debug("Voxtral: Fast stream reconnected"),
-          onDelta: (text) => {
-            this.dualFastText += text;
-            this.renderDualText(editor);
-          },
-          onDone: () => this.renderDualText(editor),
-          onError: (message) => vlog.error("Voxtral: Fast stream error:", message),
-          onDisconnect: () => void this.handleDualStreamDisconnect("fast")
-        }, fastDelay);
-        await this.realtimeTranscriber.connect();
-      } else if (stream === "slow" && this.dualSlowTranscriber) {
-        if (this.dualSlowText.trim()) {
-          const from = editor.offsetToPos(this.dualInsertOffset);
-          const to = editor.offsetToPos(this.dualInsertOffset + this.dualDisplayLen);
-          editor.replaceRange("", from, to);
-          editor.setCursor(from);
-          this.dualDisplayLen = 0;
-          this.trackInsertAtCursor(editor, this.dualSlowText);
-          this.dualInsertOffset = editor.posToOffset(editor.getCursor());
-        }
-        this.dualSlowCommitted = 0;
-        this.dualSlowText = "";
-        this.dualFastText = "";
-        this.dualSlowTurnDelta = 0;
-        this.dualSlowPrevRaw = "";
-        this.dualFastPrevRaw = "";
-        const slowDelay = this.settings.dualDelaySlowMs;
-        this.dualSlowTranscriber = new RealtimeTranscriber(this.settings, {
-          onSessionCreated: () => vlog.debug("Voxtral: Slow stream reconnected"),
-          onDelta: (text) => {
-            const isCumulative = this.dualSlowPrevRaw && text.startsWith(this.dualSlowPrevRaw);
-            if (isCumulative) {
-              const newPart = text.substring(this.dualSlowPrevRaw.length);
-              if (newPart) {
-                this.dualSlowText += newPart;
-                this.dualSlowTurnDelta += newPart.length;
-              }
-            } else {
-              this.dualSlowText += text;
-              this.dualSlowTurnDelta += text.length;
-            }
-            this.dualSlowPrevRaw = isCumulative ? text : this.dualSlowPrevRaw + text;
-            this.renderDualText(editor);
-            this.processDualSlowCommands(editor);
-          },
-          onDone: (_text) => {
-            this.renderDualText(editor);
-            this.processDualSlowCommands(editor);
-          },
-          onError: (message) => vlog.error("Voxtral: Slow stream error:", message),
-          onDisconnect: () => void this.handleDualStreamDisconnect("slow")
-        }, slowDelay);
-        await this.dualSlowTranscriber.connect();
-      }
-      this.consecutiveFailures = 0;
-    } catch (e) {
-      this.consecutiveFailures++;
-      vlog.error(`Voxtral: ${stream} stream reconnect failed (${this.consecutiveFailures})`, e);
-      if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
-        new import_obsidian5.Notice("Cannot reconnect. Recording stopped.", 6e3);
-        void this.stopRecording();
-        return;
-      }
-      const delay = Math.min(500 * this.consecutiveFailures, 3e3);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      if (this.isRecording) {
-        void this.handleDualStreamDisconnect(stream);
-      }
-    }
-  }
-  /**
-   * Update the editor with the current dual-delay text.
-   * Shows slow (confirmed) text + any fast text beyond slow.
-   */
-  renderDualText(editor) {
-    const cursorOffset = editor.posToOffset(editor.getCursor());
-    const expectedEnd = this.dualInsertOffset + this.dualDisplayLen;
-    if (cursorOffset !== expectedEnd) {
-      if (this.dualDisplayLen > 0) {
-        const slowText = this.dualSlowText;
-        const from2 = editor.offsetToPos(this.dualInsertOffset);
-        const to2 = editor.offsetToPos(expectedEnd);
-        editor.replaceRange(slowText, from2, to2);
-        const shift = slowText.length - this.dualDisplayLen;
-        const newCursor = cursorOffset >= expectedEnd ? cursorOffset + shift : cursorOffset;
-        editor.setCursor(editor.offsetToPos(newCursor));
-        this.dualSlowCommitted += slowText.length;
-        this.dualSlowText = "";
-        this.dualFastText = "";
-        this.dualDisplayLen = 0;
-        this.dualInsertOffset = newCursor;
-        return;
-      }
-      this.dualInsertOffset = cursorOffset;
-    }
-    const slowLen = this.dualSlowText.length;
-    const fastLen = this.dualFastText.length;
-    let displayText;
-    if (fastLen > slowLen) {
-      displayText = this.dualSlowText + this.dualFastText.substring(slowLen);
-    } else {
-      displayText = this.dualSlowText;
-    }
-    const from = editor.offsetToPos(this.dualInsertOffset);
-    const to = editor.offsetToPos(this.dualInsertOffset + this.dualDisplayLen);
-    if (from.ch === 0 && this.dualDisplayLen === 0) {
-      displayText = displayText.replace(/^\s+/, "");
-    }
-    editor.replaceRange(displayText, from, to);
-    this.dualDisplayLen = displayText.length;
-    const endOffset = this.dualInsertOffset + this.dualDisplayLen;
-    editor.setCursor(editor.offsetToPos(endOffset));
-  }
-  /**
-   * Process voice commands from the slow stream (more accurate).
-   * Checks completed sentences in dualSlowText for voice commands.
-   */
-  processDualSlowCommands(editor) {
-    if (!this.dualSlowText) return;
-    if (this.dualCommandJustRan && /^[\s.!?,;:]*$/.test(this.dualSlowText)) {
-      this.dualCommandJustRan = false;
-      if (this.dualDisplayLen > 0) {
-        const from2 = editor.offsetToPos(this.dualInsertOffset);
-        const to2 = editor.offsetToPos(this.dualInsertOffset + this.dualDisplayLen);
-        editor.replaceRange("", from2, to2);
-        editor.setCursor(from2);
-        this.dualDisplayLen = 0;
-      }
-      this.dualSlowCommitted += this.dualSlowText.length;
-      this.dualSlowText = "";
-      this.dualFastText = "";
-      this.dualInsertOffset = editor.posToOffset(editor.getCursor());
-      return;
-    }
-    this.dualCommandJustRan = false;
-    const segments = this.dualSlowText.match(/[^.!?]+[.!?]+\s*/g);
-    const segmentText = segments ? segments.join("") : "";
-    const remainder = this.dualSlowText.substring(segmentText.length);
-    if (!segments && remainder.trim()) {
-      const cmdMatch = matchCommand(remainder.trim());
-      if (cmdMatch && !cmdMatch.textBefore) {
-        const from2 = editor.offsetToPos(this.dualInsertOffset);
-        const to2 = editor.offsetToPos(this.dualInsertOffset + this.dualDisplayLen);
-        editor.replaceRange("", from2, to2);
-        editor.setCursor(from2);
-        this.dualDisplayLen = 0;
-        cmdMatch.command.action(editor);
-        if (cmdMatch.command.id === "stopRecording") {
-          setTimeout(() => {
-            void this.stopRecording();
-          }, 0);
-        }
-        if (isSlotActive()) {
-          this.updateStatusBar("slot");
-        }
-        this.dualCommandJustRan = true;
-        this.dualSlowCommitted += this.dualSlowText.length;
-        this.dualSlowText = "";
-        this.dualFastText = "";
-        this.dualInsertOffset = editor.posToOffset(editor.getCursor());
-        return;
-      }
-      return;
-    }
-    if (!segments) return;
-    const matchedLength = segmentText.length;
-    const from = editor.offsetToPos(this.dualInsertOffset);
-    const to = editor.offsetToPos(this.dualInsertOffset + this.dualDisplayLen);
-    editor.replaceRange("", from, to);
-    editor.setCursor(from);
-    this.dualDisplayLen = 0;
-    for (const segment of segments) {
-      const match = matchCommand(segment);
-      if (match) {
-        if (match.textBefore) {
-          let before = match.textBefore;
-          if (match.command.punctuation) {
-            before = before.replace(/[,;.!?]+\s*$/, "");
-          }
-          this.trackInsertAtCursor(editor, before);
-        }
-        match.command.action(editor);
-        this.dualCommandJustRan = true;
-        if (match.command.id === "stopRecording") {
-          setTimeout(() => {
-            void this.stopRecording();
-          }, 0);
-        }
-        if (isSlotActive()) {
-          this.updateStatusBar("slot");
-        }
-      } else {
-        this.trackInsertAtCursor(editor, segment);
-      }
-    }
-    this.dualSlowCommitted += matchedLength;
-    this.dualSlowText = remainder;
-    this.dualFastText = "";
-    this.dualInsertOffset = editor.posToOffset(editor.getCursor());
-    this.dualDisplayLen = 0;
-    if (this.dualSlowText || this.dualFastText) {
-      this.renderDualText(editor);
-    }
-  }
-  /**
-   * Helper: insert text at cursor and track the range for auto-correct.
-   */
-  trackInsertAtCursor(editor, text) {
-    const cursor = editor.getCursor();
-    if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
-      const charBefore = editor.getRange(
-        { line: cursor.line, ch: cursor.ch - 1 },
-        cursor
-      );
-      if (charBefore && /\S/.test(charBefore)) {
-        text = " " + text;
-      }
-    }
-    const offsetBefore = editor.posToOffset(cursor);
-    editor.replaceRange(text, cursor);
-    const lines = text.split("\n");
-    const lastLine = lines[lines.length - 1];
-    const newLine = cursor.line + lines.length - 1;
-    const newCh = lines.length === 1 ? cursor.ch + lastLine.length : lastLine.length;
-    editor.setCursor({ line: newLine, ch: newCh });
-    const offsetAfter = editor.posToOffset(editor.getCursor());
-    const delta = offsetAfter - offsetBefore;
-    if (delta > 0) {
-      for (const range of this.dictatedRanges) {
-        if (range.from >= offsetBefore) {
-          range.from += delta;
-          range.to += delta;
-        } else if (range.to > offsetBefore) {
-          range.to += delta;
-        }
-      }
-      this.dictatedRanges.push({ from: offsetBefore, to: offsetAfter });
-    }
-  }
-  async stopDualDelayRecording() {
-    var _a, _b, _c, _d;
-    (_a = this.realtimeTranscriber) == null ? void 0 : _a.endAudio();
-    (_b = this.dualSlowTranscriber) == null ? void 0 : _b.endAudio();
-    await new Promise((resolve) => setTimeout(resolve, 1e3));
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
-    if (view) {
-      const editor = view.editor;
-      this.processDualSlowCommands(editor);
-      const finalText = this.dualSlowText || this.dualFastText;
-      if (finalText) {
-        const from = editor.offsetToPos(this.dualInsertOffset);
-        const to = editor.offsetToPos(this.dualInsertOffset + this.dualDisplayLen);
-        editor.replaceRange(finalText, from, to);
-        const endOffset = this.dualInsertOffset + finalText.length;
-        editor.setCursor(editor.offsetToPos(endOffset));
-        this.dictatedRanges.push({
-          from: this.dualInsertOffset,
-          to: this.dualInsertOffset + finalText.length
-        });
-      }
-    }
-    (_c = this.realtimeTranscriber) == null ? void 0 : _c.close();
-    (_d = this.dualSlowTranscriber) == null ? void 0 : _d.close();
-    this.realtimeTranscriber = null;
-    this.dualSlowTranscriber = null;
-    await this.recorder.stop();
-    this.dualFastText = "";
-    this.dualSlowText = "";
-    this.dualDisplayLen = 0;
-    this.dualSlowCommitted = 0;
-    this.dualSlowTurnDelta = 0;
-    if (this.settings.autoCorrect && view) {
-      await this.autoCorrectAfterStop(view.editor);
+      await this.tracker.autoCorrectAfterStop(view.editor, this.settings);
     }
   }
   // ── Batch recording ──
@@ -4053,18 +4477,18 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
     const deviceId = this.settings.microphoneDeviceId || void 0;
     await this.recorder.start(deviceId, void 0, this.settings.noiseSuppression);
     if (this.recorder.fallbackUsed) {
-      new import_obsidian5.Notice("Selected mic unavailable \u2014 using default");
+      new import_obsidian7.Notice("Selected mic unavailable \u2014 using default");
     }
   }
   async stopBatchRecording() {
     const blob = await this.recorder.stop();
     if (blob.size === 0) {
-      new import_obsidian5.Notice("No audio recorded");
+      new import_obsidian7.Notice("No audio recorded");
       return;
     }
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
     if (!view) {
-      new import_obsidian5.Notice("No active note found");
+      new import_obsidian7.Notice("No active note found");
       return;
     }
     const editor = view.editor;
@@ -4086,160 +4510,62 @@ var VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
       }
     } catch (e) {
       vlog.error("Voxtral: Batch transcription failed", e);
-      new import_obsidian5.Notice(`Transcription failed: ${e}`);
-    }
-  }
-  // ── Dictation range tracking ──
-  /**
-   * Wrap processText to track what was inserted in the editor.
-   * Records the cursor offset before and after to determine the
-   * range of inserted text, and adjusts existing ranges when an
-   * insertion shifts them.
-   */
-  trackProcessText(editor, text) {
-    const offsetBefore = editor.posToOffset(editor.getCursor());
-    processText(editor, text);
-    if (isSlotActive()) {
-      this.updateStatusBar("slot");
-    }
-    const offsetAfter = editor.posToOffset(editor.getCursor());
-    const delta = offsetAfter - offsetBefore;
-    if (delta > 0) {
-      for (const range of this.dictatedRanges) {
-        if (range.from >= offsetBefore) {
-          range.from += delta;
-          range.to += delta;
-        } else if (range.to > offsetBefore) {
-          range.to += delta;
-        }
-      }
-      this.dictatedRanges.push({ from: offsetBefore, to: offsetAfter });
-    } else if (delta < 0) {
-      const deletedLen = -delta;
-      const deletedFrom = offsetAfter;
-      const deletedTo = offsetBefore;
-      for (const range of this.dictatedRanges) {
-        if (range.from >= deletedTo) {
-          range.from -= deletedLen;
-          range.to -= deletedLen;
-        } else if (range.from >= deletedFrom) {
-          range.from = deletedFrom;
-          range.to = range.to <= deletedTo ? deletedFrom : range.to - deletedLen;
-        } else if (range.to > deletedFrom) {
-          range.to = range.to <= deletedTo ? deletedFrom : range.to - deletedLen;
-        }
-      }
-      this.dictatedRanges = this.dictatedRanges.filter(
-        (r) => r.to > r.from
-      );
+      new import_obsidian7.Notice(`Transcription failed: ${e}`);
     }
   }
   // ── Text correction ──
-  /**
-   * Merge overlapping or adjacent dictated ranges into a minimal set.
-   */
-  static mergeRanges(ranges) {
-    if (ranges.length === 0) return [];
-    const sorted = [...ranges].sort((a, b) => a.from - b.from);
-    const merged = [sorted[0]];
-    for (let i = 1; i < sorted.length; i++) {
-      const prev = merged[merged.length - 1];
-      const cur = sorted[i];
-      if (cur.from <= prev.to) {
-        prev.to = Math.max(prev.to, cur.to);
-      } else {
-        merged.push({ ...cur });
-      }
-    }
-    return merged;
-  }
-  /**
-   * After stopping realtime recording, correct only the text
-   * that was actually dictated.  Each tracked range is corrected
-   * independently, processed from end to start so that earlier
-   * offsets remain valid after replacements.
-   */
-  async autoCorrectAfterStop(editor) {
-    if (this.dictatedRanges.length === 0) return;
-    const merged = _VoxtralPlugin.mergeRanges(this.dictatedRanges);
-    merged.sort((a, b) => b.from - a.from);
-    const fullText = editor.getValue();
-    const corrections = [];
-    for (const range of merged) {
-      if (range.from >= fullText.length || range.to > fullText.length) {
-        continue;
-      }
-      const text = fullText.substring(range.from, range.to);
-      if (!text.trim()) continue;
-      corrections.push({
-        from: editor.offsetToPos(range.from),
-        to: editor.offsetToPos(range.to),
-        text
-      });
-    }
-    for (const c of corrections) {
-      try {
-        const corrected = await correctText(c.text, this.settings);
-        if (corrected && corrected !== c.text) {
-          editor.replaceRange(corrected, c.from, c.to);
-        }
-      } catch (e) {
-        vlog.error("Voxtral: Auto-correct failed", e);
-      }
-    }
-  }
-  async exportLogs() {
-    if (logBuffer.length === 0) {
-      new import_obsidian5.Notice("No logs to export");
-      return;
-    }
-    const text = logBuffer.join("\n");
-    await navigator.clipboard.writeText(text);
-    new import_obsidian5.Notice(`${logBuffer.length} log entries copied to clipboard`);
-  }
   async correctSelection(editor) {
     const selection = editor.getSelection();
     if (!selection) {
-      new import_obsidian5.Notice("Select text first to correct it");
+      new import_obsidian7.Notice("Select text first to correct it");
       return;
     }
     if (!this.settings.apiKey) {
-      new import_obsidian5.Notice("Please set your API key first");
+      new import_obsidian7.Notice("Please set your API key first");
       return;
     }
     try {
-      new import_obsidian5.Notice("Correcting...");
+      new import_obsidian7.Notice("Correcting...");
       const corrected = await correctText(selection, this.settings);
       if (corrected) {
         editor.replaceSelection(corrected);
-        new import_obsidian5.Notice("Selection corrected");
+        new import_obsidian7.Notice("Selection corrected");
       }
     } catch (e) {
-      new import_obsidian5.Notice(`Correction failed: ${e}`);
+      new import_obsidian7.Notice(`Correction failed: ${e}`);
     }
   }
   async correctAll(editor) {
     const text = editor.getValue();
     if (!text.trim()) {
-      new import_obsidian5.Notice("Note is empty");
+      new import_obsidian7.Notice("Note is empty");
       return;
     }
     if (!this.settings.apiKey) {
-      new import_obsidian5.Notice("Please set your API key first");
+      new import_obsidian7.Notice("Please set your API key first");
       return;
     }
     try {
-      new import_obsidian5.Notice("Correcting...");
+      new import_obsidian7.Notice("Correcting...");
       const corrected = await correctText(text, this.settings);
       if (corrected && corrected !== text) {
         editor.setValue(corrected);
-        new import_obsidian5.Notice("Note corrected");
+        new import_obsidian7.Notice("Note corrected");
       } else {
-        new import_obsidian5.Notice("No corrections needed");
+        new import_obsidian7.Notice("No corrections needed");
       }
     } catch (e) {
-      new import_obsidian5.Notice(`Correction failed: ${e}`);
+      new import_obsidian7.Notice(`Correction failed: ${e}`);
     }
+  }
+  // ── Logs ──
+  async exportLogs() {
+    if (getLogCount() === 0) {
+      new import_obsidian7.Notice("No logs to export");
+      return;
+    }
+    await navigator.clipboard.writeText(getLogText());
+    new import_obsidian7.Notice(`${getLogCount()} log entries copied to clipboard`);
   }
   // ── Help panel ──
   async openHelpPanel() {

@@ -4,139 +4,76 @@
 /**
  * Lightweight phonetic normalization for voice command matching.
  *
- * Instead of full Soundex/Metaphone algorithms, this uses targeted
- * phonetic equivalence rules per language that catch common ASR
- * mishearings (e.g. "ij" ↔ "ei" in Dutch, "ph" → "f" in English).
- *
- * Also provides article stripping and compound-word splitting to
- * improve command matching robustness.
+ * Rules, articles and filler words are loaded from per-language JSON
+ * files in src/languages/. This module provides the processing logic
+ * that reads those rules and applies them to input text.
  */
 
-import type { LangCode } from "./lang";
+import { SUPPORTED_LANGUAGES, type LangCode } from "./lang";
 
-/**
- * Phonetic equivalence rules per language.
- * Each rule maps a pattern to its canonical phonetic form.
- * Applied after standard normalization (lowercase, no diacritics).
- */
-const PHONETIC_RULES: Partial<Record<LangCode, [RegExp, string][]>> = {
-	nl: [
-		[/ij/g, "ei"],       // ij ↔ ei (most common Dutch confusion)
-		[/au/g, "ou"],       // au ↔ ou
-		[/dt\b/g, "t"],      // -dt → -t (verb endings)
-		[/\bsch/g, "sg"],    // sch- → sg (ASR often drops the h)
-		[/ck/g, "k"],        // ck → k
-		[/ph/g, "f"],        // ph → f
-		[/th/g, "t"],        // th → t
-		[/ie/g, "i"],        // ie → i (long vs short)
-		[/oe/g, "u"],        // oe → u
-		[/ee/g, "e"],        // ee → e
-		[/oo/g, "o"],        // oo → o
-		[/uu/g, "u"],        // uu → u
-		[/aa/g, "a"],        // aa → a
-	],
-	en: [
-		[/ph/g, "f"],        // phone → fone
-		[/th/g, "t"],        // the → te (ASR simplification)
-		[/ck/g, "k"],        // check → chek
-		[/ght/g, "t"],       // right → rit
-		[/wh/g, "w"],        // what → wat
-		[/kn/g, "n"],        // know → now
-		[/wr/g, "r"],        // write → rite
-		[/tion/g, "shun"],   // action → akshun
-		[/sion/g, "shun"],   // mission → mishun
-		[/([aeiou])ll/g, "$1l"], // bullet → bulet
-		[/([aeiou])dd/g, "$1d"], // heading → heding
-		[/([aeiou])tt/g, "$1t"], // getting → geting
-	],
-	fr: [
-		[/eau/g, "o"],       // nouveau → nouvo
-		[/aux/g, "o"],       // journaux → journo
-		[/ai/g, "e"],        // faire → fere
-		[/ei/g, "e"],        // seize → seze
-		[/ph/g, "f"],        // paragraphe → paragrafe
-		[/qu/g, "k"],        // quelque → kelke
-		[/gn/g, "ny"],       // ligne → linye
-		[/oi/g, "wa"],       // enregistrement → simplified
-		[/ou/g, "u"],        // nouveau → nu
-		[/an/g, "on"],       // dans → dons (nasal equivalence)
-		[/en/g, "on"],       // enregistrement → onregistrement
-	],
-	de: [
-		[/sch/g, "sh"],      // Überschrift → ubershrift
-		[/ei/g, "ai"],       // Zeile → zaile (equivalent)
-		[/ie/g, "i"],        // Zeile → zile
-		[/ck/g, "k"],        // Rückgängig → rukgangig
-		[/ph/g, "f"],        // Paragraph → paragraf
-		[/th/g, "t"],        // Thema → tema
-		[/v/g, "f"],         // vor → for (German v = f)
-		[/tz/g, "ts"],       // Satz → sats
-		[/dt\b/g, "t"],      // Stadt → stat
-		[/aa/g, "a"],        // Saal → sal
-		[/ee/g, "e"],        // Kaffee → kafe
-		[/oo/g, "o"],        // Boot → bot
-	],
-	es: [
-		[/ll/g, "y"],        // calle → caye
-		[/v/g, "b"],         // volver → bolber
-		[/ce/g, "se"],       // sección → sesion
-		[/ci/g, "si"],       // acción → aksion
-		[/qu/g, "k"],        // borrar → borar
-		[/gu(?=[ei])/g, "g"],// guía → gia
-		[/h/g, ""],          // hacer → acer (silent h)
-	],
-	pt: [
-		[/lh/g, "ly"],       // trabalho → trabalyo
-		[/nh/g, "ny"],       // linha → linya
-		[/ch/g, "sh"],       // fechar → feshar
-		[/qu/g, "k"],        // querer → kerer
-		[/ção/g, "saun"],    // seção → sesaun
-		[/ss/g, "s"],        // passo → paso
-	],
-	it: [
-		[/gn/g, "ny"],       // registrazione → rejistratione
-		[/gl(?=[i])/g, "ly"],// taglia → talya
-		[/ch/g, "k"],        // che → ke
-		[/gh/g, "g"],        // spaghetti → spagetti
-		[/sc(?=[ei])/g, "sh"],// uscire → ushire
-		[/zz/g, "ts"],       // piazza → piatsa
-		[/cc(?=[ei])/g, "ch"],// accento → achento
-	],
+// ── JSON imports (bundled by esbuild at build time) ──
+
+import nlData from "./languages/nl.json";
+import enData from "./languages/en.json";
+import frData from "./languages/fr.json";
+import deData from "./languages/de.json";
+import esData from "./languages/es.json";
+import ptData from "./languages/pt.json";
+import itData from "./languages/it.json";
+import ruData from "./languages/ru.json";
+import zhData from "./languages/zh.json";
+import hiData from "./languages/hi.json";
+import arData from "./languages/ar.json";
+import jaData from "./languages/ja.json";
+import koData from "./languages/ko.json";
+
+interface LangPhoneticData {
+	phonetics: { pattern: string; flags: string; replacement: string }[];
+	articles: string[];
+	fillers: string[];
+}
+
+const ALL_LANGS: Record<string, LangPhoneticData> = {
+	nl: nlData, en: enData, fr: frData, de: deData,
+	es: esData, pt: ptData, it: itData, ru: ruData,
+	zh: zhData, hi: hiData, ar: arData, ja: jaData, ko: koData,
 };
 
-/**
- * Articles/determiners to strip per language.
- * These are commonly prepended by ASR before commands.
- */
-const ARTICLES: Partial<Record<LangCode, string[]>> = {
-	nl: ["een", "de", "het", "die", "dat", "deze"],
-	en: ["a", "an", "the"],
-	fr: ["un", "une", "le", "la", "les", "l", "du", "des"],
-	de: ["ein", "eine", "einen", "einem", "einer", "der", "die", "das", "den", "dem", "des"],
-	es: ["un", "una", "el", "la", "los", "las", "unos", "unas"],
-	pt: ["um", "uma", "o", "a", "os", "as", "uns", "umas"],
-	it: ["un", "uno", "una", "il", "lo", "la", "i", "gli", "le"],
-	ru: [],  // No articles in Russian
-	zh: [],
-	hi: [],
-	ar: ["ال"],  // al- prefix
-	ja: [],
-	ko: [],
-};
+/** Compile phonetic rules from JSON to [RegExp, string] pairs. */
+function compileRules(
+	data: { pattern: string; flags: string; replacement: string }[]
+): [RegExp, string][] {
+	return data.map(({ pattern, flags, replacement }) => [
+		new RegExp(pattern, flags),
+		replacement,
+	]);
+}
 
 /**
- * Common trailing filler words per language that should be ignored
- * when they appear after a command pattern.
+ * Phonetic equivalence rules per language (compiled from JSON).
  */
-const TRAILING_FILLERS: Partial<Record<LangCode, string[]>> = {
-	nl: ["alsjeblieft", "graag", "even", "maar", "eens", "dan", "nu", "hoor"],
-	en: ["please", "now", "then", "thanks"],
-	fr: ["s il vous plait", "s il te plait", "merci"],
-	de: ["bitte", "mal", "jetzt", "dann"],
-	es: ["por favor", "ahora", "gracias"],
-	pt: ["por favor", "agora", "obrigado"],
-	it: ["per favore", "ora", "adesso", "grazie"],
-};
+const PHONETIC_RULES: Partial<Record<LangCode, [RegExp, string][]>> =
+	Object.fromEntries(
+		SUPPORTED_LANGUAGES
+			.filter((code) => ALL_LANGS[code].phonetics.length > 0)
+			.map((code) => [code, compileRules(ALL_LANGS[code].phonetics)])
+	) as Partial<Record<LangCode, [RegExp, string][]>>;
+
+/**
+ * Articles/determiners to strip per language (loaded from JSON).
+ */
+const ARTICLES: Partial<Record<LangCode, string[]>> = Object.fromEntries(
+	SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].articles])
+) as Partial<Record<LangCode, string[]>>;
+
+/**
+ * Common trailing filler words per language (loaded from JSON).
+ */
+const TRAILING_FILLERS: Partial<Record<LangCode, string[]>> = Object.fromEntries(
+	SUPPORTED_LANGUAGES
+		.filter((code) => ALL_LANGS[code].fillers.length > 0)
+		.map((code) => [code, ALL_LANGS[code].fillers])
+) as Partial<Record<LangCode, string[]>>;
 
 /**
  * Apply phonetic normalization rules for the given language.

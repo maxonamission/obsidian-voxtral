@@ -26,7 +26,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Mistral API key")
-			.setDesc("Your API key from platform.mistral.ai")
+			.setDesc("Your API key from platform.mistral.ai. Stored in Obsidian\u2019s plugin data folder (data.json), unencrypted. Do not share your data.json file.")
 			.addText((text) =>
 				text
 					.setPlaceholder("Enter your API key")

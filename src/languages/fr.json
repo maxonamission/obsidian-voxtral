@@ -1,0 +1,63 @@
+{
+  "code": "fr",
+  "name": "Français",
+  "patterns": {
+    "newParagraph": ["nouveau paragraphe", "nouvelle section", "nouveau alinea"],
+    "newLine": ["nouvelle ligne", "a la ligne", "retour a la ligne"],
+    "heading1": ["titre un", "titre 1"],
+    "heading2": ["titre deux", "titre 2"],
+    "heading3": ["titre trois", "titre 3"],
+    "bulletPoint": ["nouveau point", "nouvelle puce", "point suivant", "nouvel element", "nouvel item"],
+    "todoItem": ["nouvelle tache", "nouveau todo", "nouveau to do"],
+    "numberedItem": ["point numero", "element numero", "nouveau numero"],
+    "deleteLastParagraph": ["supprimer dernier paragraphe", "effacer dernier paragraphe"],
+    "deleteLastLine": ["supprimer derniere ligne", "effacer derniere ligne", "supprimer derniere phrase"],
+    "undo": ["annuler"],
+    "stopRecording": ["arreter enregistrement", "arreter l enregistrement", "stop enregistrement"],
+    "colon": ["deux points"],
+    "wikilink": ["wiki lien", "lien wiki"],
+    "bold": ["gras"],
+    "italic": ["italique"],
+    "inlineCode": ["code"],
+    "tag": ["etiquette", "tag"]
+  },
+  "labels": {
+    "newParagraph": "Nouveau paragraphe",
+    "newLine": "Nouvelle ligne",
+    "heading1": "Titre 1",
+    "heading2": "Titre 2",
+    "heading3": "Titre 3",
+    "bulletPoint": "Puce",
+    "todoItem": "Tâche",
+    "numberedItem": "Point numéroté",
+    "deleteLastParagraph": "Supprimer dernier paragraphe",
+    "deleteLastLine": "Supprimer dernière ligne",
+    "undo": "Annuler",
+    "stopRecording": "Arrêter l'enregistrement",
+    "colon": "Deux-points",
+    "wikilink": "Wikilink [[…]]",
+    "bold": "Gras **…**",
+    "italic": "Italique *…*",
+    "inlineCode": "Code `…`",
+    "tag": "Étiquette #…"
+  },
+  "mishearings": [
+    { "pattern": "\\bnouveau ligne\\b", "flags": "g", "replacement": "nouvelle ligne" },
+    { "pattern": "\\bnouvelle paragraphe\\b", "flags": "g", "replacement": "nouveau paragraphe" }
+  ],
+  "phonetics": [
+    { "pattern": "eau", "flags": "g", "replacement": "o" },
+    { "pattern": "aux", "flags": "g", "replacement": "o" },
+    { "pattern": "ai", "flags": "g", "replacement": "e" },
+    { "pattern": "ei", "flags": "g", "replacement": "e" },
+    { "pattern": "ph", "flags": "g", "replacement": "f" },
+    { "pattern": "qu", "flags": "g", "replacement": "k" },
+    { "pattern": "gn", "flags": "g", "replacement": "ny" },
+    { "pattern": "oi", "flags": "g", "replacement": "wa" },
+    { "pattern": "ou", "flags": "g", "replacement": "u" },
+    { "pattern": "an", "flags": "g", "replacement": "on" },
+    { "pattern": "en", "flags": "g", "replacement": "on" }
+  ],
+  "articles": ["un", "une", "le", "la", "les", "l", "du", "des"],
+  "fillers": ["s il vous plait", "s il te plait", "merci"]
+}

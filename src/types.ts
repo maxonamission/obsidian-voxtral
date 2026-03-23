@@ -22,6 +22,7 @@ export interface CustomCommand {
 }
 
 export interface VoxtralSettings {
+	settingsVersion: number;
 	apiKey: string;
 	language: string;
 	realtimeModel: string;
@@ -46,6 +47,7 @@ export interface VoxtralSettings {
 }
 
 export const DEFAULT_SETTINGS: VoxtralSettings = {
+	settingsVersion: 1,
 	apiKey: "",
 	language: "nl",
 	realtimeModel: "voxtral-mini-transcribe-realtime-2602",
