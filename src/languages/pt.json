@@ -16,10 +16,16 @@
     "stopRecording": ["parar gravacao", "encerrar gravacao"],
     "colon": ["dois pontos"],
     "wikilink": ["wikilink", "link wiki"],
-    "bold": ["negrito"],
-    "italic": ["italico"],
-    "inlineCode": ["codigo"],
-    "tag": ["etiqueta", "tag"]
+    "boldOpen": ["abrir negrito", "negrito abrir"],
+    "boldClose": ["fechar negrito", "negrito fechar"],
+    "italicOpen": ["abrir italico", "italico abrir"],
+    "italicClose": ["fechar italico", "italico fechar"],
+    "inlineCodeOpen": ["abrir codigo", "codigo abrir"],
+    "inlineCodeClose": ["fechar codigo", "codigo fechar"],
+    "tagOpen": ["abrir etiqueta", "abrir tag"],
+    "tagClose": ["fechar etiqueta", "fechar tag"],
+    "codeBlockOpen": ["abrir bloco de codigo"],
+    "codeBlockClose": ["fechar bloco de codigo"]
   },
   "labels": {
     "newParagraph": "Novo parágrafo",
@@ -36,10 +42,16 @@
     "stopRecording": "Parar gravação",
     "colon": "Dois pontos",
     "wikilink": "Wikilink [[…]]",
-    "bold": "Negrito **…**",
-    "italic": "Itálico *…*",
-    "inlineCode": "Código `…`",
-    "tag": "Etiqueta #…"
+    "boldOpen": "Abrir negrito **",
+    "boldClose": "Fechar negrito **",
+    "italicOpen": "Abrir itálico *",
+    "italicClose": "Fechar itálico *",
+    "inlineCodeOpen": "Abrir código `",
+    "inlineCodeClose": "Fechar código `",
+    "tagOpen": "Abrir etiqueta #",
+    "tagClose": "Fechar etiqueta",
+    "codeBlockOpen": "Abrir bloco de código ```",
+    "codeBlockClose": "Fechar bloco de código ```"
   },
   "mishearings": [],
   "phonetics": [

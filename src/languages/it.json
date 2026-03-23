@@ -16,10 +16,16 @@
     "stopRecording": ["ferma registrazione", "interrompi registrazione", "stop registrazione"],
     "colon": ["due punti"],
     "wikilink": ["wikilink", "link wiki"],
-    "bold": ["grassetto"],
-    "italic": ["corsivo"],
-    "inlineCode": ["codice"],
-    "tag": ["tag", "etichetta"]
+    "boldOpen": ["apri grassetto", "grassetto apri"],
+    "boldClose": ["chiudi grassetto", "grassetto chiudi"],
+    "italicOpen": ["apri corsivo", "corsivo apri"],
+    "italicClose": ["chiudi corsivo", "corsivo chiudi"],
+    "inlineCodeOpen": ["apri codice", "codice apri"],
+    "inlineCodeClose": ["chiudi codice", "codice chiudi"],
+    "tagOpen": ["apri tag", "apri etichetta"],
+    "tagClose": ["chiudi tag", "chiudi etichetta"],
+    "codeBlockOpen": ["apri blocco di codice"],
+    "codeBlockClose": ["chiudi blocco di codice"]
   },
   "labels": {
     "newParagraph": "Nuovo paragrafo",
@@ -36,10 +42,16 @@
     "stopRecording": "Ferma registrazione",
     "colon": "Due punti",
     "wikilink": "Wikilink [[…]]",
-    "bold": "Grassetto **…**",
-    "italic": "Corsivo *…*",
-    "inlineCode": "Codice `…`",
-    "tag": "Tag #…"
+    "boldOpen": "Apri grassetto **",
+    "boldClose": "Chiudi grassetto **",
+    "italicOpen": "Apri corsivo *",
+    "italicClose": "Chiudi corsivo *",
+    "inlineCodeOpen": "Apri codice `",
+    "inlineCodeClose": "Chiudi codice `",
+    "tagOpen": "Apri tag #",
+    "tagClose": "Chiudi tag",
+    "codeBlockOpen": "Apri blocco di codice ```",
+    "codeBlockClose": "Chiudi blocco di codice ```"
   },
   "mishearings": [],
   "phonetics": [

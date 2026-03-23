@@ -6,6 +6,7 @@ import type VoxtralPlugin from "./main";
 import { AudioRecorder } from "./audio-recorder";
 import { listModels } from "./mistral-api";
 import type { MistralModel, } from "./mistral-api";
+import { getDefaultBuiltInCommands } from "./types";
 import type { FocusBehavior, CustomCommand } from "./types";
 import { SUPPORTED_LANGUAGES, LANGUAGE_NAMES } from "./lang";
 
@@ -347,14 +348,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl)
-			.setName("Built-in quick-templates")
-			.setDesc(
-				'Say "tabel", "codeblok", "callout", "tip", or "waarschuwing" to insert ' +
-				"common Markdown structures. Always active."
-			);
-
-		// Custom voice commands
+		// Custom voice commands (includes pre-configured table, callout, etc.)
 		new Setting(containerEl).setName("Custom voice commands").setHeading();
 		this.renderCustomCommands(containerEl);
 
@@ -439,9 +433,10 @@ export class VoxtralSettingTab extends PluginSettingTab {
 			const typeLabel = cmd.type === "slot"
 				? `${cmd.slotPrefix ?? ""}…${cmd.slotSuffix ?? ""}`
 				: (cmd.insertText ?? "").replace(/\n/g, "↵").slice(0, 30);
+			const namePrefix = cmd.builtIn ? "⚙ " : "";
 
 			new Setting(containerEl)
-				.setName(triggers.join(", ") || cmd.id)
+				.setName(namePrefix + (triggers.join(", ") || cmd.id))
 				.setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`)
 				.addButton((btn) =>
 					btn
@@ -478,6 +473,26 @@ export class VoxtralSettingTab extends PluginSettingTab {
 						};
 						commands.push(newCmd);
 						this.openCommandEditor(newCmd, commands.length - 1);
+					})
+			);
+
+		// Reset built-in commands to defaults
+		new Setting(containerEl)
+			.setDesc(
+				"Restore the built-in commands (table, callout, etc.) to their defaults. " +
+				"Your own custom commands are not affected."
+			)
+			.addButton((btn) =>
+				btn
+					.setButtonText("Reset built-ins")
+					.onClick(async () => {
+						const userCommands = commands.filter((c) => !c.builtIn);
+						this.plugin.settings.customCommands = [
+							...getDefaultBuiltInCommands(),
+							...userCommands,
+						];
+						await this.plugin.saveSettings();
+						this.display();
 					})
 			);
 	}
@@ -577,12 +592,13 @@ export class VoxtralSettingTab extends PluginSettingTab {
 				new Setting(slotContainer)
 					.setName("Close slot on")
 					.addDropdown((drop) => {
+						drop.addOption("voice", "Voice command only");
 						drop.addOption("enter", "Enter");
 						drop.addOption("space", "Space");
 						drop.addOption("enter-or-space", "Enter or space");
 						drop.setValue(exitValue);
 						drop.onChange((value) => {
-							exitValue = value as "enter" | "space" | "enter-or-space";
+							exitValue = value as "voice" | "enter" | "space" | "enter-or-space";
 						});
 					});
 

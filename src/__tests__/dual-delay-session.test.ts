@@ -328,8 +328,8 @@ describe("DualDelaySession", () => {
 			await session.start(editor);
 			const tc = getTranscriberCallbacks();
 
-			// Slow stream detects bold command
-			tc.slow.onDelta("vet");
+			// Slow stream detects bold-open command
+			tc.slow.onDelta("vet openen");
 
 			// Verify bold markers were inserted
 			expect(editor.getValue()).toContain("**");
@@ -349,8 +349,8 @@ describe("DualDelaySession", () => {
 			await session.start(editor);
 			const tc = getTranscriberCallbacks();
 
-			// Slow stream detects bold command
-			tc.slow.onDelta("vet");
+			// Slow stream detects bold-open command
+			tc.slow.onDelta("vet openen");
 
 			// Slow stream sends next text with leading space
 			tc.slow.onDelta(" Dit is vet tekst.");
@@ -365,7 +365,7 @@ describe("DualDelaySession", () => {
 			await session.start(editor);
 			const tc = getTranscriberCallbacks();
 
-			tc.slow.onDelta("vet");
+			tc.slow.onDelta("vet openen");
 
 			expect(mockUpdateStatusBar).toHaveBeenCalledWith("slot");
 		});

@@ -43,14 +43,16 @@ interface CommandDef {
 export interface SlotDef {
 	prefix: string;
 	suffix: string;
-	/** What closes the slot: "enter" (default), "space", or "enter-or-space" */
-	exitTrigger: "enter" | "space" | "enter-or-space";
+	/** What closes the slot: "voice" = only via voice command, or keyboard triggers */
+	exitTrigger: "voice" | "enter" | "space" | "enter-or-space";
 }
 
 /** Currently active slot, or null */
 export interface ActiveSlot {
 	def: SlotDef;
 	commandId: CommandId;
+	/** Cursor position right after the opening prefix was inserted */
+	startPos?: { line: number; ch: number };
 }
 
 let activeSlot: ActiveSlot | null = null;
@@ -72,11 +74,23 @@ export function getActiveSlot(): ActiveSlot | null {
 export function closeSlot(editor: Editor): boolean {
 	if (!activeSlot) return false;
 	let pos = editor.getCursor();
+	const suffix = activeSlot.def.suffix;
+
+	// If the suffix already appears between the slot start and the cursor,
+	// Obsidian's autocomplete (e.g. wikilink suggester) already closed it.
+	// Just clear the slot — don't insert a duplicate suffix.
+	if (suffix && activeSlot.startPos) {
+		const textSinceOpen = editor.getRange(activeSlot.startPos, pos);
+		if (textSinceOpen.includes(suffix)) {
+			activeSlot = null;
+			return true;
+		}
+	}
 
 	// Trim trailing whitespace before inserting suffix so that
 	// markdown formatting is not broken (e.g. "**text **" won't
 	// render as bold — we want "**text**").
-	if (activeSlot.def.suffix) {
+	if (suffix) {
 		const line = editor.getLine(pos.line);
 		const before = line.substring(0, pos.ch);
 		const trimmed = before.replace(/\s+$/, "");
@@ -89,7 +103,6 @@ export function closeSlot(editor: Editor): boolean {
 
 	// Check if the suffix is already present at the cursor position
 	// (e.g. Obsidian's autocomplete or auto-pair may have inserted it).
-	const suffix = activeSlot.def.suffix;
 	const line = editor.getLine(pos.line);
 	const afterCursor = line.substring(pos.ch, pos.ch + suffix.length);
 	if (afterCursor === suffix) {
@@ -113,8 +126,8 @@ export function cancelSlot(): void {
 /**
  * Programmatically open a slot (for quick-templates like code blocks).
  */
-export function openSlot(commandId: string, def: SlotDef): void {
-	activeSlot = { def, commandId: commandId as CommandId };
+export function openSlot(commandId: string, def: SlotDef, startPos?: { line: number; ch: number }): void {
+	activeSlot = { def, commandId: commandId as CommandId, startPos };
 }
 
 // Normalize text for command matching: remove diacritics, hyphens, punctuation
@@ -236,6 +249,24 @@ function colonAction(editor: Editor): void {
 }
 
 /**
+ * Close the active slot (if it matches the expected open command) and add
+ * a trailing space so the user can continue dictating after the marker.
+ */
+function closeSlotAndSpace(editor: Editor, expectedOpenId: CommandId): void {
+	if (activeSlot?.commandId === expectedOpenId) {
+		closeSlot(editor);
+	} else {
+		// No matching open slot — insert suffix directly as a fallback
+		// (e.g. user says "vet sluiten" without "vet openen")
+		return;
+	}
+	// Add a space after the closing marker
+	const pos = editor.getCursor();
+	editor.replaceRange(" ", pos);
+	editor.setCursor({ line: pos.line, ch: pos.ch + 1 });
+}
+
+/**
  * Command definitions — the action logic is language-independent.
  * Patterns are resolved at runtime from lang.ts.
  */
@@ -286,65 +317,88 @@ const COMMAND_DEFS: CommandDef[] = [
 		action: () => { /* handled by caller */ },
 	},
 	{ id: "colon", punctuation: true, action: colonAction },
-	// ── Slot commands: open prefix, user types, exit closes suffix ──
+	// ── Wikilink: just insert [[, Obsidian handles ]] via autocomplete ──
 	{
 		id: "wikilink",
-		slot: { prefix: "[[", suffix: "]]", exitTrigger: "enter" },
 		action: (editor) => {
 			const cursor = editor.getCursor();
-			editor.replaceRange("[[", cursor);
-			editor.setCursor({ line: cursor.line, ch: cursor.ch + 2 });
-			activeSlot = {
-				def: { prefix: "[[", suffix: "]]", exitTrigger: "enter" },
-				commandId: "wikilink",
-			};
+			const line = editor.getLine(cursor.line);
+			const before = line.substring(0, cursor.ch);
+			const needsSpace = before.length > 0 && !/\s$/.test(before);
+			const insert = needsSpace ? " [[" : "[[";
+			editor.replaceRange(insert, cursor);
+			editor.setCursor({ line: cursor.line, ch: cursor.ch + insert.length });
 		},
 	},
+	// ── Open/close commands: voice command opens, voice command closes ──
 	{
-		id: "bold",
-		slot: { prefix: "**", suffix: "**", exitTrigger: "enter" },
+		id: "boldOpen",
+		slot: { prefix: "**", suffix: "**", exitTrigger: "voice" },
 		action: (editor) => {
 			const cursor = editor.getCursor();
 			editor.replaceRange("**", cursor);
-			editor.setCursor({ line: cursor.line, ch: cursor.ch + 2 });
+			const endCh = cursor.ch + 2;
+			editor.setCursor({ line: cursor.line, ch: endCh });
 			activeSlot = {
-				def: { prefix: "**", suffix: "**", exitTrigger: "enter" },
-				commandId: "bold",
+				def: { prefix: "**", suffix: "**", exitTrigger: "voice" },
+				commandId: "boldOpen",
+				startPos: { line: cursor.line, ch: endCh },
 			};
 		},
 	},
 	{
-		id: "italic",
-		slot: { prefix: "*", suffix: "*", exitTrigger: "enter" },
+		id: "boldClose",
+		action: (editor) => {
+			closeSlotAndSpace(editor, "boldOpen");
+		},
+	},
+	{
+		id: "italicOpen",
+		slot: { prefix: "*", suffix: "*", exitTrigger: "voice" },
 		action: (editor) => {
 			const cursor = editor.getCursor();
 			editor.replaceRange("*", cursor);
-			editor.setCursor({ line: cursor.line, ch: cursor.ch + 1 });
+			const endCh = cursor.ch + 1;
+			editor.setCursor({ line: cursor.line, ch: endCh });
 			activeSlot = {
-				def: { prefix: "*", suffix: "*", exitTrigger: "enter" },
-				commandId: "italic",
+				def: { prefix: "*", suffix: "*", exitTrigger: "voice" },
+				commandId: "italicOpen",
+				startPos: { line: cursor.line, ch: endCh },
 			};
 		},
 	},
 	{
-		id: "inlineCode",
-		slot: { prefix: "`", suffix: "`", exitTrigger: "enter" },
+		id: "italicClose",
+		action: (editor) => {
+			closeSlotAndSpace(editor, "italicOpen");
+		},
+	},
+	{
+		id: "inlineCodeOpen",
+		slot: { prefix: "`", suffix: "`", exitTrigger: "voice" },
 		action: (editor) => {
 			const cursor = editor.getCursor();
 			editor.replaceRange("`", cursor);
-			editor.setCursor({ line: cursor.line, ch: cursor.ch + 1 });
+			const endCh = cursor.ch + 1;
+			editor.setCursor({ line: cursor.line, ch: endCh });
 			activeSlot = {
-				def: { prefix: "`", suffix: "`", exitTrigger: "enter" },
-				commandId: "inlineCode",
+				def: { prefix: "`", suffix: "`", exitTrigger: "voice" },
+				commandId: "inlineCodeOpen",
+				startPos: { line: cursor.line, ch: endCh },
 			};
 		},
 	},
 	{
-		id: "tag",
-		slot: { prefix: "#", suffix: "", exitTrigger: "enter-or-space" },
+		id: "inlineCodeClose",
+		action: (editor) => {
+			closeSlotAndSpace(editor, "inlineCodeOpen");
+		},
+	},
+	{
+		id: "tagOpen",
+		slot: { prefix: "#", suffix: "", exitTrigger: "voice" },
 		action: (editor) => {
 			const cursor = editor.getCursor();
-			// Ensure space before tag if needed
 			let prefix = "#";
 			if (cursor.ch > 0) {
 				const charBefore = editor.getRange(
@@ -356,11 +410,40 @@ const COMMAND_DEFS: CommandDef[] = [
 				}
 			}
 			editor.replaceRange(prefix, cursor);
-			editor.setCursor({ line: cursor.line, ch: cursor.ch + prefix.length });
+			const endCh = cursor.ch + prefix.length;
+			editor.setCursor({ line: cursor.line, ch: endCh });
 			activeSlot = {
-				def: { prefix: "#", suffix: "", exitTrigger: "enter-or-space" },
-				commandId: "tag",
+				def: { prefix: "#", suffix: "", exitTrigger: "voice" },
+				commandId: "tagOpen",
+				startPos: { line: cursor.line, ch: endCh },
 			};
+		},
+	},
+	{
+		id: "tagClose",
+		action: (editor) => {
+			closeSlotAndSpace(editor, "tagOpen");
+		},
+	},
+	{
+		id: "codeBlockOpen",
+		slot: { prefix: "```", suffix: "\n```", exitTrigger: "voice" },
+		action: (editor) => {
+			const cursor = editor.getCursor();
+			editor.replaceRange("\n```\n", cursor);
+			const endLine = cursor.line + 2;
+			editor.setCursor({ line: endLine, ch: 0 });
+			activeSlot = {
+				def: { prefix: "```", suffix: "\n```", exitTrigger: "voice" },
+				commandId: "codeBlockOpen",
+				startPos: { line: endLine, ch: 0 },
+			};
+		},
+	},
+	{
+		id: "codeBlockClose",
+		action: (editor) => {
+			closeSlotAndSpace(editor, "codeBlockOpen");
 		},
 	},
 ];
@@ -390,6 +473,7 @@ export function loadCustomCommands(commands: CustomCommand[]): void {
 					activeSlot = {
 						def: { prefix, suffix, exitTrigger: exit },
 						commandId: cmd.id as CommandId,
+						startPos: { line: cursor.line, ch: cursor.ch + prefix.length },
 					};
 				},
 			};

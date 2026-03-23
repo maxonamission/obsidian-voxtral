@@ -78,10 +78,16 @@ export type CommandId =
 	| "stopRecording"
 	| "colon"
 	| "wikilink"
-	| "bold"
-	| "italic"
-	| "inlineCode"
-	| "tag";
+	| "boldOpen"
+	| "boldClose"
+	| "italicOpen"
+	| "italicClose"
+	| "inlineCodeOpen"
+	| "inlineCodeClose"
+	| "tagOpen"
+	| "tagClose"
+	| "codeBlockOpen"
+	| "codeBlockClose";
 
 /** Patterns per language per command (loaded from JSON) */
 export const PATTERNS: Partial<Record<LangCode, Partial<Record<CommandId, string[]>>>> =

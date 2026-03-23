@@ -25,6 +25,94 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian7 = require("obsidian");
 
 // src/types.ts
+function getDefaultBuiltInCommands() {
+  return [
+    {
+      id: "builtin-table",
+      builtIn: true,
+      type: "insert",
+      insertText: "\n\n| Kolom 1 | Kolom 2 | Kolom 3 |\n| --- | --- | --- |\n| | | |\n",
+      triggers: {
+        nl: ["tabel", "nieuwe tabel"],
+        en: ["table", "new table"],
+        fr: ["tableau", "nouveau tableau"],
+        de: ["tabelle", "neue tabelle"],
+        es: ["tabla", "nueva tabla"],
+        pt: ["tabela", "nova tabela"],
+        it: ["tabella", "nuova tabella"],
+        ru: ["\u0442\u0430\u0431\u043B\u0438\u0446\u0430", "\u043D\u043E\u0432\u0430\u044F \u0442\u0430\u0431\u043B\u0438\u0446\u0430"],
+        zh: ["\u8868\u683C", "\u65B0\u8868\u683C"],
+        ja: ["\u30C6\u30FC\u30D6\u30EB", "\u65B0\u3057\u3044\u30C6\u30FC\u30D6\u30EB"],
+        ko: ["\uD14C\uC774\uBE14", "\uC0C8 \uD14C\uC774\uBE14"],
+        hi: ["\u091F\u0947\u092C\u0932", "\u0928\u0908 \u091F\u0947\u092C\u0932"],
+        ar: ["\u062C\u062F\u0648\u0644", "\u062C\u062F\u0648\u0644 \u062C\u062F\u064A\u062F"]
+      }
+    },
+    {
+      id: "builtin-callout",
+      builtIn: true,
+      type: "insert",
+      insertText: "\n\n> [!note]\n> ",
+      triggers: {
+        nl: ["callout", "opmerking", "notitie blok"],
+        en: ["callout", "note block"],
+        fr: ["callout", "bloc de note"],
+        de: ["callout", "hinweisblock"],
+        es: ["callout", "bloque de nota"],
+        pt: ["callout", "bloco de nota"],
+        it: ["callout", "blocco nota"],
+        ru: ["\u0437\u0430\u043C\u0435\u0442\u043A\u0430", "\u0431\u043B\u043E\u043A \u0437\u0430\u043C\u0435\u0442\u043A\u0438"],
+        zh: ["\u6807\u6CE8", "\u6CE8\u91CA\u5757"],
+        ja: ["\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8", "\u6CE8\u91C8"],
+        ko: ["\uCF5C\uC544\uC6C3", "\uBA54\uBAA8 \uBE14\uB85D"],
+        hi: ["\u0915\u0949\u0932\u0906\u0909\u091F", "\u0928\u094B\u091F \u092C\u094D\u0932\u0949\u0915"],
+        ar: ["\u062A\u0646\u0628\u064A\u0647", "\u0643\u062A\u0644\u0629 \u0645\u0644\u0627\u062D\u0638\u0629"]
+      }
+    },
+    {
+      id: "builtin-warning",
+      builtIn: true,
+      type: "insert",
+      insertText: "\n\n> [!warning]\n> ",
+      triggers: {
+        nl: ["waarschuwing", "waarschuwing blok"],
+        en: ["warning", "warning block"],
+        fr: ["avertissement"],
+        de: ["warnung"],
+        es: ["advertencia"],
+        pt: ["aviso"],
+        it: ["avviso"],
+        ru: ["\u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435"],
+        zh: ["\u8B66\u544A"],
+        ja: ["\u8B66\u544A"],
+        ko: ["\uACBD\uACE0"],
+        hi: ["\u091A\u0947\u0924\u093E\u0935\u0928\u0940"],
+        ar: ["\u062A\u062D\u0630\u064A\u0631"]
+      }
+    },
+    {
+      id: "builtin-tip",
+      builtIn: true,
+      type: "insert",
+      insertText: "\n\n> [!tip]\n> ",
+      triggers: {
+        nl: ["tip", "tip blok"],
+        en: ["tip", "tip block"],
+        fr: ["astuce"],
+        de: ["tipp"],
+        es: ["consejo"],
+        pt: ["dica"],
+        it: ["suggerimento"],
+        ru: ["\u0441\u043E\u0432\u0435\u0442"],
+        zh: ["\u63D0\u793A"],
+        ja: ["\u30D2\u30F3\u30C8"],
+        ko: ["\uD301"],
+        hi: ["\u0938\u0941\u091D\u093E\u0935"],
+        ar: ["\u0646\u0635\u064A\u062D\u0629"]
+      }
+    }
+  ];
+}
 var DEFAULT_SETTINGS = {
   settingsVersion: 1,
   apiKey: "",
@@ -893,10 +981,16 @@ var nl_default = {
     stopRecording: ["beeindig opname", "beeindig de opname", "stop opname", "stop de opname"],
     colon: ["dubbele punt", "double punt", "dubbelepunt"],
     wikilink: ["wikilink", "wiki link", "link"],
-    bold: ["vet", "dikgedrukt"],
-    italic: ["cursief", "schuingedrukt"],
-    inlineCode: ["code"],
-    tag: ["tag", "label"]
+    boldOpen: ["vet openen", "dikgedrukt openen", "vet open"],
+    boldClose: ["vet sluiten", "dikgedrukt sluiten", "vet dicht"],
+    italicOpen: ["cursief openen", "schuingedrukt openen", "cursief open"],
+    italicClose: ["cursief sluiten", "schuingedrukt sluiten", "cursief dicht"],
+    inlineCodeOpen: ["code openen", "code open"],
+    inlineCodeClose: ["code sluiten", "code dicht"],
+    tagOpen: ["tag openen", "label openen", "tag open"],
+    tagClose: ["tag sluiten", "label sluiten", "tag dicht"],
+    codeBlockOpen: ["codeblok openen", "code blok openen", "codeblok open"],
+    codeBlockClose: ["codeblok sluiten", "code blok sluiten", "codeblok dicht"]
   },
   labels: {
     newParagraph: "Nieuwe alinea",
@@ -913,10 +1007,16 @@ var nl_default = {
     stopRecording: "Stop opname",
     colon: "Dubbele punt",
     wikilink: "Wikilink [[\u2026]]",
-    bold: "Vet **\u2026**",
-    italic: "Cursief *\u2026*",
-    inlineCode: "Code `\u2026`",
-    tag: "Tag #\u2026"
+    boldOpen: "Vet openen **",
+    boldClose: "Vet sluiten **",
+    italicOpen: "Cursief openen *",
+    italicClose: "Cursief sluiten *",
+    inlineCodeOpen: "Code openen `",
+    inlineCodeClose: "Code sluiten `",
+    tagOpen: "Tag openen #",
+    tagClose: "Tag sluiten",
+    codeBlockOpen: "Codeblok openen ```",
+    codeBlockClose: "Codeblok sluiten ```"
   },
   mishearings: [
     { pattern: "\\bniveau\\b", flags: "g", replacement: "nieuwe" },
@@ -966,10 +1066,16 @@ var en_default = {
     stopRecording: ["stop recording"],
     colon: ["colon"],
     wikilink: ["wiki link", "wikilink", "link"],
-    bold: ["bold"],
-    italic: ["italic"],
-    inlineCode: ["code", "inline code"],
-    tag: ["tag"]
+    boldOpen: ["open bold", "bold open", "start bold"],
+    boldClose: ["close bold", "bold close", "end bold"],
+    italicOpen: ["open italic", "italic open", "start italic"],
+    italicClose: ["close italic", "italic close", "end italic"],
+    inlineCodeOpen: ["open code", "code open", "start code"],
+    inlineCodeClose: ["close code", "code close", "end code"],
+    tagOpen: ["open tag", "tag open", "start tag"],
+    tagClose: ["close tag", "tag close", "end tag"],
+    codeBlockOpen: ["open code block", "code block open", "start code block"],
+    codeBlockClose: ["close code block", "code block close", "end code block"]
   },
   labels: {
     newParagraph: "New paragraph",
@@ -986,10 +1092,16 @@ var en_default = {
     stopRecording: "Stop recording",
     colon: "Colon",
     wikilink: "Wikilink [[\u2026]]",
-    bold: "Bold **\u2026**",
-    italic: "Italic *\u2026*",
-    inlineCode: "Code `\u2026`",
-    tag: "Tag #\u2026"
+    boldOpen: "Open bold **",
+    boldClose: "Close bold **",
+    italicOpen: "Open italic *",
+    italicClose: "Close italic *",
+    inlineCodeOpen: "Open code `",
+    inlineCodeClose: "Close code `",
+    tagOpen: "Open tag #",
+    tagClose: "Close tag",
+    codeBlockOpen: "Open code block ```",
+    codeBlockClose: "Close code block ```"
   },
   mishearings: [],
   phonetics: [
@@ -1029,10 +1141,16 @@ var fr_default = {
     stopRecording: ["arreter enregistrement", "arreter l enregistrement", "stop enregistrement"],
     colon: ["deux points"],
     wikilink: ["wiki lien", "lien wiki"],
-    bold: ["gras"],
-    italic: ["italique"],
-    inlineCode: ["code"],
-    tag: ["etiquette", "tag"]
+    boldOpen: ["ouvrir gras", "gras ouvrir"],
+    boldClose: ["fermer gras", "gras fermer"],
+    italicOpen: ["ouvrir italique", "italique ouvrir"],
+    italicClose: ["fermer italique", "italique fermer"],
+    inlineCodeOpen: ["ouvrir code", "code ouvrir"],
+    inlineCodeClose: ["fermer code", "code fermer"],
+    tagOpen: ["ouvrir etiquette", "ouvrir tag"],
+    tagClose: ["fermer etiquette", "fermer tag"],
+    codeBlockOpen: ["ouvrir bloc de code"],
+    codeBlockClose: ["fermer bloc de code"]
   },
   labels: {
     newParagraph: "Nouveau paragraphe",
@@ -1049,10 +1167,16 @@ var fr_default = {
     stopRecording: "Arr\xEAter l'enregistrement",
     colon: "Deux-points",
     wikilink: "Wikilink [[\u2026]]",
-    bold: "Gras **\u2026**",
-    italic: "Italique *\u2026*",
-    inlineCode: "Code `\u2026`",
-    tag: "\xC9tiquette #\u2026"
+    boldOpen: "Ouvrir gras **",
+    boldClose: "Fermer gras **",
+    italicOpen: "Ouvrir italique *",
+    italicClose: "Fermer italique *",
+    inlineCodeOpen: "Ouvrir code `",
+    inlineCodeClose: "Fermer code `",
+    tagOpen: "Ouvrir \xE9tiquette #",
+    tagClose: "Fermer \xE9tiquette",
+    codeBlockOpen: "Ouvrir bloc de code ```",
+    codeBlockClose: "Fermer bloc de code ```"
   },
   mishearings: [
     { pattern: "\\bnouveau ligne\\b", flags: "g", replacement: "nouvelle ligne" },
@@ -1094,10 +1218,16 @@ var de_default = {
     stopRecording: ["aufnahme beenden", "aufnahme stoppen"],
     colon: ["doppelpunkt"],
     wikilink: ["wikilink", "wiki link"],
-    bold: ["fett"],
-    italic: ["kursiv"],
-    inlineCode: ["code"],
-    tag: ["tag", "schlagwort"]
+    boldOpen: ["fett offnen", "fett auf"],
+    boldClose: ["fett schliessen", "fett zu"],
+    italicOpen: ["kursiv offnen", "kursiv auf"],
+    italicClose: ["kursiv schliessen", "kursiv zu"],
+    inlineCodeOpen: ["code offnen", "code auf"],
+    inlineCodeClose: ["code schliessen", "code zu"],
+    tagOpen: ["tag offnen", "tag auf"],
+    tagClose: ["tag schliessen", "tag zu"],
+    codeBlockOpen: ["codeblock offnen", "code block offnen"],
+    codeBlockClose: ["codeblock schliessen", "code block schliessen"]
   },
   labels: {
     newParagraph: "Neuer Absatz",
@@ -1114,10 +1244,16 @@ var de_default = {
     stopRecording: "Aufnahme beenden",
     colon: "Doppelpunkt",
     wikilink: "Wikilink [[\u2026]]",
-    bold: "Fett **\u2026**",
-    italic: "Kursiv *\u2026*",
-    inlineCode: "Code `\u2026`",
-    tag: "Tag #\u2026"
+    boldOpen: "Fett \xF6ffnen **",
+    boldClose: "Fett schlie\xDFen **",
+    italicOpen: "Kursiv \xF6ffnen *",
+    italicClose: "Kursiv schlie\xDFen *",
+    inlineCodeOpen: "Code \xF6ffnen `",
+    inlineCodeClose: "Code schlie\xDFen `",
+    tagOpen: "Tag \xF6ffnen #",
+    tagClose: "Tag schlie\xDFen",
+    codeBlockOpen: "Codeblock \xF6ffnen ```",
+    codeBlockClose: "Codeblock schlie\xDFen ```"
   },
   mishearings: [
     { pattern: "\\bneue absatz\\b", flags: "g", replacement: "neuer absatz" },
@@ -1160,10 +1296,16 @@ var es_default = {
     stopRecording: ["parar grabacion", "detener grabacion"],
     colon: ["dos puntos"],
     wikilink: ["wikilink", "enlace wiki"],
-    bold: ["negrita"],
-    italic: ["cursiva"],
-    inlineCode: ["codigo"],
-    tag: ["etiqueta", "tag"]
+    boldOpen: ["abrir negrita", "negrita abrir"],
+    boldClose: ["cerrar negrita", "negrita cerrar"],
+    italicOpen: ["abrir cursiva", "cursiva abrir"],
+    italicClose: ["cerrar cursiva", "cursiva cerrar"],
+    inlineCodeOpen: ["abrir codigo", "codigo abrir"],
+    inlineCodeClose: ["cerrar codigo", "codigo cerrar"],
+    tagOpen: ["abrir etiqueta", "abrir tag"],
+    tagClose: ["cerrar etiqueta", "cerrar tag"],
+    codeBlockOpen: ["abrir bloque de codigo"],
+    codeBlockClose: ["cerrar bloque de codigo"]
   },
   labels: {
     newParagraph: "Nuevo p\xE1rrafo",
@@ -1180,10 +1322,16 @@ var es_default = {
     stopRecording: "Parar grabaci\xF3n",
     colon: "Dos puntos",
     wikilink: "Wikilink [[\u2026]]",
-    bold: "Negrita **\u2026**",
-    italic: "Cursiva *\u2026*",
-    inlineCode: "C\xF3digo `\u2026`",
-    tag: "Etiqueta #\u2026"
+    boldOpen: "Abrir negrita **",
+    boldClose: "Cerrar negrita **",
+    italicOpen: "Abrir cursiva *",
+    italicClose: "Cerrar cursiva *",
+    inlineCodeOpen: "Abrir c\xF3digo `",
+    inlineCodeClose: "Cerrar c\xF3digo `",
+    tagOpen: "Abrir etiqueta #",
+    tagClose: "Cerrar etiqueta",
+    codeBlockOpen: "Abrir bloque de c\xF3digo ```",
+    codeBlockClose: "Cerrar bloque de c\xF3digo ```"
   },
   mishearings: [],
   phonetics: [
@@ -1218,10 +1366,16 @@ var pt_default = {
     stopRecording: ["parar gravacao", "encerrar gravacao"],
     colon: ["dois pontos"],
     wikilink: ["wikilink", "link wiki"],
-    bold: ["negrito"],
-    italic: ["italico"],
-    inlineCode: ["codigo"],
-    tag: ["etiqueta", "tag"]
+    boldOpen: ["abrir negrito", "negrito abrir"],
+    boldClose: ["fechar negrito", "negrito fechar"],
+    italicOpen: ["abrir italico", "italico abrir"],
+    italicClose: ["fechar italico", "italico fechar"],
+    inlineCodeOpen: ["abrir codigo", "codigo abrir"],
+    inlineCodeClose: ["fechar codigo", "codigo fechar"],
+    tagOpen: ["abrir etiqueta", "abrir tag"],
+    tagClose: ["fechar etiqueta", "fechar tag"],
+    codeBlockOpen: ["abrir bloco de codigo"],
+    codeBlockClose: ["fechar bloco de codigo"]
   },
   labels: {
     newParagraph: "Novo par\xE1grafo",
@@ -1238,10 +1392,16 @@ var pt_default = {
     stopRecording: "Parar grava\xE7\xE3o",
     colon: "Dois pontos",
     wikilink: "Wikilink [[\u2026]]",
-    bold: "Negrito **\u2026**",
-    italic: "It\xE1lico *\u2026*",
-    inlineCode: "C\xF3digo `\u2026`",
-    tag: "Etiqueta #\u2026"
+    boldOpen: "Abrir negrito **",
+    boldClose: "Fechar negrito **",
+    italicOpen: "Abrir it\xE1lico *",
+    italicClose: "Fechar it\xE1lico *",
+    inlineCodeOpen: "Abrir c\xF3digo `",
+    inlineCodeClose: "Fechar c\xF3digo `",
+    tagOpen: "Abrir etiqueta #",
+    tagClose: "Fechar etiqueta",
+    codeBlockOpen: "Abrir bloco de c\xF3digo ```",
+    codeBlockClose: "Fechar bloco de c\xF3digo ```"
   },
   mishearings: [],
   phonetics: [
@@ -1275,10 +1435,16 @@ var it_default = {
     stopRecording: ["ferma registrazione", "interrompi registrazione", "stop registrazione"],
     colon: ["due punti"],
     wikilink: ["wikilink", "link wiki"],
-    bold: ["grassetto"],
-    italic: ["corsivo"],
-    inlineCode: ["codice"],
-    tag: ["tag", "etichetta"]
+    boldOpen: ["apri grassetto", "grassetto apri"],
+    boldClose: ["chiudi grassetto", "grassetto chiudi"],
+    italicOpen: ["apri corsivo", "corsivo apri"],
+    italicClose: ["chiudi corsivo", "corsivo chiudi"],
+    inlineCodeOpen: ["apri codice", "codice apri"],
+    inlineCodeClose: ["chiudi codice", "codice chiudi"],
+    tagOpen: ["apri tag", "apri etichetta"],
+    tagClose: ["chiudi tag", "chiudi etichetta"],
+    codeBlockOpen: ["apri blocco di codice"],
+    codeBlockClose: ["chiudi blocco di codice"]
   },
   labels: {
     newParagraph: "Nuovo paragrafo",
@@ -1295,10 +1461,16 @@ var it_default = {
     stopRecording: "Ferma registrazione",
     colon: "Due punti",
     wikilink: "Wikilink [[\u2026]]",
-    bold: "Grassetto **\u2026**",
-    italic: "Corsivo *\u2026*",
-    inlineCode: "Codice `\u2026`",
-    tag: "Tag #\u2026"
+    boldOpen: "Apri grassetto **",
+    boldClose: "Chiudi grassetto **",
+    italicOpen: "Apri corsivo *",
+    italicClose: "Chiudi corsivo *",
+    inlineCodeOpen: "Apri codice `",
+    inlineCodeClose: "Chiudi codice `",
+    tagOpen: "Apri tag #",
+    tagClose: "Chiudi tag",
+    codeBlockOpen: "Apri blocco di codice ```",
+    codeBlockClose: "Chiudi blocco di codice ```"
   },
   mishearings: [],
   phonetics: [
@@ -1333,10 +1505,16 @@ var ru_default = {
     stopRecording: ["\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C", "\u0441\u0442\u043E\u043F \u0437\u0430\u043F\u0438\u0441\u044C"],
     colon: ["\u0434\u0432\u043E\u0435\u0442\u043E\u0447\u0438\u0435"],
     wikilink: ["\u0432\u0438\u043A\u0438 \u0441\u0441\u044B\u043B\u043A\u0430", "\u0432\u0438\u043A\u0438 \u043B\u0438\u043D\u043A"],
-    bold: ["\u0436\u0438\u0440\u043D\u044B\u0439"],
-    italic: ["\u043A\u0443\u0440\u0441\u0438\u0432"],
-    inlineCode: ["\u043A\u043E\u0434"],
-    tag: ["\u0442\u0435\u0433", "\u043C\u0435\u0442\u043A\u0430"]
+    boldOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439", "\u0436\u0438\u0440\u043D\u044B\u0439 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
+    boldClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439", "\u0436\u0438\u0440\u043D\u044B\u0439 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
+    italicOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432", "\u043A\u0443\u0440\u0441\u0438\u0432 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
+    italicClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432", "\u043A\u0443\u0440\u0441\u0438\u0432 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
+    inlineCodeOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434", "\u043A\u043E\u0434 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
+    inlineCodeClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434", "\u043A\u043E\u0434 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
+    tagOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433", "\u0442\u0435\u0433 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
+    tagClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433", "\u0442\u0435\u0433 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
+    codeBlockOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430"],
+    codeBlockClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430"]
   },
   labels: {
     newParagraph: "\u041D\u043E\u0432\u044B\u0439 \u0430\u0431\u0437\u0430\u0446",
@@ -1353,10 +1531,16 @@ var ru_default = {
     stopRecording: "\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C",
     colon: "\u0414\u0432\u043E\u0435\u0442\u043E\u0447\u0438\u0435",
     wikilink: "\u0412\u0438\u043A\u0438-\u0441\u0441\u044B\u043B\u043A\u0430 [[\u2026]]",
-    bold: "\u0416\u0438\u0440\u043D\u044B\u0439 **\u2026**",
-    italic: "\u041A\u0443\u0440\u0441\u0438\u0432 *\u2026*",
-    inlineCode: "\u041A\u043E\u0434 `\u2026`",
-    tag: "\u0422\u0435\u0433 #\u2026"
+    boldOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439 **",
+    boldClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439 **",
+    italicOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432 *",
+    italicClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432 *",
+    inlineCodeOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434 `",
+    inlineCodeClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434 `",
+    tagOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433 #",
+    tagClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433",
+    codeBlockOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430 ```",
+    codeBlockClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430 ```"
   },
   mishearings: [],
   phonetics: [],
@@ -1383,10 +1567,16 @@ var zh_default = {
     stopRecording: ["\u505C\u6B62\u5F55\u97F3", "\u7ED3\u675F\u5F55\u97F3"],
     colon: ["\u5192\u53F7"],
     wikilink: ["\u7EF4\u57FA\u94FE\u63A5", "\u94FE\u63A5"],
-    bold: ["\u52A0\u7C97", "\u7C97\u4F53"],
-    italic: ["\u659C\u4F53"],
-    inlineCode: ["\u4EE3\u7801"],
-    tag: ["\u6807\u7B7E"]
+    boldOpen: ["\u5F00\u59CB\u52A0\u7C97", "\u52A0\u7C97\u5F00\u59CB", "\u6253\u5F00\u7C97\u4F53"],
+    boldClose: ["\u7ED3\u675F\u52A0\u7C97", "\u52A0\u7C97\u7ED3\u675F", "\u5173\u95ED\u7C97\u4F53"],
+    italicOpen: ["\u5F00\u59CB\u659C\u4F53", "\u659C\u4F53\u5F00\u59CB", "\u6253\u5F00\u659C\u4F53"],
+    italicClose: ["\u7ED3\u675F\u659C\u4F53", "\u659C\u4F53\u7ED3\u675F", "\u5173\u95ED\u659C\u4F53"],
+    inlineCodeOpen: ["\u5F00\u59CB\u4EE3\u7801", "\u4EE3\u7801\u5F00\u59CB", "\u6253\u5F00\u4EE3\u7801"],
+    inlineCodeClose: ["\u7ED3\u675F\u4EE3\u7801", "\u4EE3\u7801\u7ED3\u675F", "\u5173\u95ED\u4EE3\u7801"],
+    tagOpen: ["\u5F00\u59CB\u6807\u7B7E", "\u6253\u5F00\u6807\u7B7E"],
+    tagClose: ["\u7ED3\u675F\u6807\u7B7E", "\u5173\u95ED\u6807\u7B7E"],
+    codeBlockOpen: ["\u5F00\u59CB\u4EE3\u7801\u5757", "\u6253\u5F00\u4EE3\u7801\u5757"],
+    codeBlockClose: ["\u7ED3\u675F\u4EE3\u7801\u5757", "\u5173\u95ED\u4EE3\u7801\u5757"]
   },
   labels: {
     newParagraph: "\u65B0\u6BB5\u843D",
@@ -1403,10 +1593,16 @@ var zh_default = {
     stopRecording: "\u505C\u6B62\u5F55\u97F3",
     colon: "\u5192\u53F7",
     wikilink: "\u7EF4\u57FA\u94FE\u63A5 [[\u2026]]",
-    bold: "\u52A0\u7C97 **\u2026**",
-    italic: "\u659C\u4F53 *\u2026*",
-    inlineCode: "\u4EE3\u7801 `\u2026`",
-    tag: "\u6807\u7B7E #\u2026"
+    boldOpen: "\u5F00\u59CB\u52A0\u7C97 **",
+    boldClose: "\u7ED3\u675F\u52A0\u7C97 **",
+    italicOpen: "\u5F00\u59CB\u659C\u4F53 *",
+    italicClose: "\u7ED3\u675F\u659C\u4F53 *",
+    inlineCodeOpen: "\u5F00\u59CB\u4EE3\u7801 `",
+    inlineCodeClose: "\u7ED3\u675F\u4EE3\u7801 `",
+    tagOpen: "\u5F00\u59CB\u6807\u7B7E #",
+    tagClose: "\u7ED3\u675F\u6807\u7B7E",
+    codeBlockOpen: "\u5F00\u59CB\u4EE3\u7801\u5757 ```",
+    codeBlockClose: "\u7ED3\u675F\u4EE3\u7801\u5757 ```"
   },
   mishearings: [],
   phonetics: [],
@@ -1433,10 +1629,16 @@ var hi_default = {
     stopRecording: ["\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B", "\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u0930\u094B\u0915\u094B"],
     colon: ["\u0915\u094B\u0932\u0928"],
     wikilink: ["\u0935\u093F\u0915\u093F \u0932\u093F\u0902\u0915", "\u0932\u093F\u0902\u0915"],
-    bold: ["\u092C\u094B\u0932\u094D\u0921", "\u092E\u094B\u091F\u093E"],
-    italic: ["\u0907\u091F\u0948\u0932\u093F\u0915", "\u0924\u093F\u0930\u091B\u093E"],
-    inlineCode: ["\u0915\u094B\u0921"],
-    tag: ["\u091F\u0948\u0917"]
+    boldOpen: ["\u092C\u094B\u0932\u094D\u0921 \u0916\u094B\u0932\u094B", "\u092E\u094B\u091F\u093E \u0916\u094B\u0932\u094B"],
+    boldClose: ["\u092C\u094B\u0932\u094D\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B", "\u092E\u094B\u091F\u093E \u092C\u0902\u0926 \u0915\u0930\u094B"],
+    italicOpen: ["\u0907\u091F\u0948\u0932\u093F\u0915 \u0916\u094B\u0932\u094B", "\u0924\u093F\u0930\u091B\u093E \u0916\u094B\u0932\u094B"],
+    italicClose: ["\u0907\u091F\u0948\u0932\u093F\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B", "\u0924\u093F\u0930\u091B\u093E \u092C\u0902\u0926 \u0915\u0930\u094B"],
+    inlineCodeOpen: ["\u0915\u094B\u0921 \u0916\u094B\u0932\u094B"],
+    inlineCodeClose: ["\u0915\u094B\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B"],
+    tagOpen: ["\u091F\u0948\u0917 \u0916\u094B\u0932\u094B"],
+    tagClose: ["\u091F\u0948\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B"],
+    codeBlockOpen: ["\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u0916\u094B\u0932\u094B"],
+    codeBlockClose: ["\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B"]
   },
   labels: {
     newParagraph: "\u0928\u092F\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B",
@@ -1453,10 +1655,16 @@ var hi_default = {
     stopRecording: "\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B",
     colon: "\u0915\u094B\u0932\u0928",
     wikilink: "\u0935\u093F\u0915\u093F \u0932\u093F\u0902\u0915 [[\u2026]]",
-    bold: "\u092C\u094B\u0932\u094D\u0921 **\u2026**",
-    italic: "\u0907\u091F\u0948\u0932\u093F\u0915 *\u2026*",
-    inlineCode: "\u0915\u094B\u0921 `\u2026`",
-    tag: "\u091F\u0948\u0917 #\u2026"
+    boldOpen: "\u092C\u094B\u0932\u094D\u0921 \u0916\u094B\u0932\u094B **",
+    boldClose: "\u092C\u094B\u0932\u094D\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B **",
+    italicOpen: "\u0907\u091F\u0948\u0932\u093F\u0915 \u0916\u094B\u0932\u094B *",
+    italicClose: "\u0907\u091F\u0948\u0932\u093F\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B *",
+    inlineCodeOpen: "\u0915\u094B\u0921 \u0916\u094B\u0932\u094B `",
+    inlineCodeClose: "\u0915\u094B\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B `",
+    tagOpen: "\u091F\u0948\u0917 \u0916\u094B\u0932\u094B #",
+    tagClose: "\u091F\u0948\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B",
+    codeBlockOpen: "\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u0916\u094B\u0932\u094B ```",
+    codeBlockClose: "\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B ```"
   },
   mishearings: [],
   phonetics: [],
@@ -1483,10 +1691,16 @@ var ar_default = {
     stopRecording: ["\u0623\u0648\u0642\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644", "\u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644"],
     colon: ["\u0646\u0642\u0637\u062A\u0627\u0646"],
     wikilink: ["\u0631\u0627\u0628\u0637 \u0648\u064A\u0643\u064A", "\u0631\u0627\u0628\u0637"],
-    bold: ["\u063A\u0627\u0645\u0642", "\u0639\u0631\u064A\u0636"],
-    italic: ["\u0645\u0627\u0626\u0644"],
-    inlineCode: ["\u0643\u0648\u062F"],
-    tag: ["\u0648\u0633\u0645"]
+    boldOpen: ["\u0627\u0641\u062A\u062D \u063A\u0627\u0645\u0642", "\u063A\u0627\u0645\u0642 \u0627\u0641\u062A\u062D"],
+    boldClose: ["\u0623\u063A\u0644\u0642 \u063A\u0627\u0645\u0642", "\u063A\u0627\u0645\u0642 \u0623\u063A\u0644\u0642"],
+    italicOpen: ["\u0627\u0641\u062A\u062D \u0645\u0627\u0626\u0644", "\u0645\u0627\u0626\u0644 \u0627\u0641\u062A\u062D"],
+    italicClose: ["\u0623\u063A\u0644\u0642 \u0645\u0627\u0626\u0644", "\u0645\u0627\u0626\u0644 \u0623\u063A\u0644\u0642"],
+    inlineCodeOpen: ["\u0627\u0641\u062A\u062D \u0643\u0648\u062F", "\u0643\u0648\u062F \u0627\u0641\u062A\u062D"],
+    inlineCodeClose: ["\u0623\u063A\u0644\u0642 \u0643\u0648\u062F", "\u0643\u0648\u062F \u0623\u063A\u0644\u0642"],
+    tagOpen: ["\u0627\u0641\u062A\u062D \u0648\u0633\u0645", "\u0648\u0633\u0645 \u0627\u0641\u062A\u062D"],
+    tagClose: ["\u0623\u063A\u0644\u0642 \u0648\u0633\u0645", "\u0648\u0633\u0645 \u0623\u063A\u0644\u0642"],
+    codeBlockOpen: ["\u0627\u0641\u062A\u062D \u0643\u062A\u0644\u0629 \u0643\u0648\u062F"],
+    codeBlockClose: ["\u0623\u063A\u0644\u0642 \u0643\u062A\u0644\u0629 \u0643\u0648\u062F"]
   },
   labels: {
     newParagraph: "\u0641\u0642\u0631\u0629 \u062C\u062F\u064A\u062F\u0629",
@@ -1503,10 +1717,16 @@ var ar_default = {
     stopRecording: "\u0623\u0648\u0642\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644",
     colon: "\u0646\u0642\u0637\u062A\u0627\u0646",
     wikilink: "[[\u2026]] \u0631\u0627\u0628\u0637 \u0648\u064A\u0643\u064A",
-    bold: "**\u2026** \u063A\u0627\u0645\u0642",
-    italic: "*\u2026* \u0645\u0627\u0626\u0644",
-    inlineCode: "`\u2026` \u0643\u0648\u062F",
-    tag: "#\u2026 \u0648\u0633\u0645"
+    boldOpen: "** \u0627\u0641\u062A\u062D \u063A\u0627\u0645\u0642",
+    boldClose: "** \u0623\u063A\u0644\u0642 \u063A\u0627\u0645\u0642",
+    italicOpen: "* \u0627\u0641\u062A\u062D \u0645\u0627\u0626\u0644",
+    italicClose: "* \u0623\u063A\u0644\u0642 \u0645\u0627\u0626\u0644",
+    inlineCodeOpen: "` \u0627\u0641\u062A\u062D \u0643\u0648\u062F",
+    inlineCodeClose: "` \u0623\u063A\u0644\u0642 \u0643\u0648\u062F",
+    tagOpen: "# \u0627\u0641\u062A\u062D \u0648\u0633\u0645",
+    tagClose: "\u0623\u063A\u0644\u0642 \u0648\u0633\u0645",
+    codeBlockOpen: "``` \u0627\u0641\u062A\u062D \u0643\u062A\u0644\u0629 \u0643\u0648\u062F",
+    codeBlockClose: "``` \u0623\u063A\u0644\u0642 \u0643\u062A\u0644\u0629 \u0643\u0648\u062F"
   },
   mishearings: [],
   phonetics: [],
@@ -1533,10 +1753,16 @@ var ja_default = {
     stopRecording: ["\u9332\u97F3\u505C\u6B62", "\u9332\u97F3\u3092\u6B62\u3081\u3066"],
     colon: ["\u30B3\u30ED\u30F3"],
     wikilink: ["\u30A6\u30A3\u30AD\u30EA\u30F3\u30AF", "\u30EA\u30F3\u30AF"],
-    bold: ["\u592A\u5B57", "\u30DC\u30FC\u30EB\u30C9"],
-    italic: ["\u659C\u4F53", "\u30A4\u30BF\u30EA\u30C3\u30AF"],
-    inlineCode: ["\u30B3\u30FC\u30C9"],
-    tag: ["\u30BF\u30B0"]
+    boldOpen: ["\u592A\u5B57\u958B\u59CB", "\u30DC\u30FC\u30EB\u30C9\u958B\u59CB", "\u592A\u5B57\u958B\u304F"],
+    boldClose: ["\u592A\u5B57\u7D42\u4E86", "\u30DC\u30FC\u30EB\u30C9\u7D42\u4E86", "\u592A\u5B57\u9589\u3058\u308B"],
+    italicOpen: ["\u659C\u4F53\u958B\u59CB", "\u30A4\u30BF\u30EA\u30C3\u30AF\u958B\u59CB", "\u659C\u4F53\u958B\u304F"],
+    italicClose: ["\u659C\u4F53\u7D42\u4E86", "\u30A4\u30BF\u30EA\u30C3\u30AF\u7D42\u4E86", "\u659C\u4F53\u9589\u3058\u308B"],
+    inlineCodeOpen: ["\u30B3\u30FC\u30C9\u958B\u59CB", "\u30B3\u30FC\u30C9\u958B\u304F"],
+    inlineCodeClose: ["\u30B3\u30FC\u30C9\u7D42\u4E86", "\u30B3\u30FC\u30C9\u9589\u3058\u308B"],
+    tagOpen: ["\u30BF\u30B0\u958B\u59CB", "\u30BF\u30B0\u958B\u304F"],
+    tagClose: ["\u30BF\u30B0\u7D42\u4E86", "\u30BF\u30B0\u9589\u3058\u308B"],
+    codeBlockOpen: ["\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u958B\u59CB", "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u958B\u304F"],
+    codeBlockClose: ["\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u7D42\u4E86", "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u9589\u3058\u308B"]
   },
   labels: {
     newParagraph: "\u65B0\u3057\u3044\u6BB5\u843D",
@@ -1553,10 +1779,16 @@ var ja_default = {
     stopRecording: "\u9332\u97F3\u505C\u6B62",
     colon: "\u30B3\u30ED\u30F3",
     wikilink: "\u30A6\u30A3\u30AD\u30EA\u30F3\u30AF [[\u2026]]",
-    bold: "\u592A\u5B57 **\u2026**",
-    italic: "\u659C\u4F53 *\u2026*",
-    inlineCode: "\u30B3\u30FC\u30C9 `\u2026`",
-    tag: "\u30BF\u30B0 #\u2026"
+    boldOpen: "\u592A\u5B57\u958B\u59CB **",
+    boldClose: "\u592A\u5B57\u7D42\u4E86 **",
+    italicOpen: "\u659C\u4F53\u958B\u59CB *",
+    italicClose: "\u659C\u4F53\u7D42\u4E86 *",
+    inlineCodeOpen: "\u30B3\u30FC\u30C9\u958B\u59CB `",
+    inlineCodeClose: "\u30B3\u30FC\u30C9\u7D42\u4E86 `",
+    tagOpen: "\u30BF\u30B0\u958B\u59CB #",
+    tagClose: "\u30BF\u30B0\u7D42\u4E86",
+    codeBlockOpen: "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u958B\u59CB ```",
+    codeBlockClose: "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u7D42\u4E86 ```"
   },
   mishearings: [],
   phonetics: [],
@@ -1583,10 +1815,16 @@ var ko_default = {
     stopRecording: ["\uB179\uC74C \uC911\uC9C0", "\uB179\uC74C \uBA48\uCDB0"],
     colon: ["\uCF5C\uB860"],
     wikilink: ["\uC704\uD0A4\uB9C1\uD06C", "\uB9C1\uD06C"],
-    bold: ["\uAD75\uAC8C", "\uBCFC\uB4DC"],
-    italic: ["\uAE30\uC6B8\uC784", "\uC774\uD0E4\uB9AD"],
-    inlineCode: ["\uCF54\uB4DC"],
-    tag: ["\uD0DC\uADF8"]
+    boldOpen: ["\uAD75\uAC8C \uC5F4\uAE30", "\uBCFC\uB4DC \uC5F4\uAE30"],
+    boldClose: ["\uAD75\uAC8C \uB2EB\uAE30", "\uBCFC\uB4DC \uB2EB\uAE30"],
+    italicOpen: ["\uAE30\uC6B8\uC784 \uC5F4\uAE30", "\uC774\uD0E4\uB9AD \uC5F4\uAE30"],
+    italicClose: ["\uAE30\uC6B8\uC784 \uB2EB\uAE30", "\uC774\uD0E4\uB9AD \uB2EB\uAE30"],
+    inlineCodeOpen: ["\uCF54\uB4DC \uC5F4\uAE30"],
+    inlineCodeClose: ["\uCF54\uB4DC \uB2EB\uAE30"],
+    tagOpen: ["\uD0DC\uADF8 \uC5F4\uAE30"],
+    tagClose: ["\uD0DC\uADF8 \uB2EB\uAE30"],
+    codeBlockOpen: ["\uCF54\uB4DC\uBE14\uB85D \uC5F4\uAE30", "\uCF54\uB4DC \uBE14\uB85D \uC5F4\uAE30"],
+    codeBlockClose: ["\uCF54\uB4DC\uBE14\uB85D \uB2EB\uAE30", "\uCF54\uB4DC \uBE14\uB85D \uB2EB\uAE30"]
   },
   labels: {
     newParagraph: "\uC0C8 \uB2E8\uB77D",
@@ -1603,10 +1841,16 @@ var ko_default = {
     stopRecording: "\uB179\uC74C \uC911\uC9C0",
     colon: "\uCF5C\uB860",
     wikilink: "\uC704\uD0A4\uB9C1\uD06C [[\u2026]]",
-    bold: "\uAD75\uAC8C **\u2026**",
-    italic: "\uAE30\uC6B8\uC784 *\u2026*",
-    inlineCode: "\uCF54\uB4DC `\u2026`",
-    tag: "\uD0DC\uADF8 #\u2026"
+    boldOpen: "\uAD75\uAC8C \uC5F4\uAE30 **",
+    boldClose: "\uAD75\uAC8C \uB2EB\uAE30 **",
+    italicOpen: "\uAE30\uC6B8\uC784 \uC5F4\uAE30 *",
+    italicClose: "\uAE30\uC6B8\uC784 \uB2EB\uAE30 *",
+    inlineCodeOpen: "\uCF54\uB4DC \uC5F4\uAE30 `",
+    inlineCodeClose: "\uCF54\uB4DC \uB2EB\uAE30 `",
+    tagOpen: "\uD0DC\uADF8 \uC5F4\uAE30 #",
+    tagClose: "\uD0DC\uADF8 \uB2EB\uAE30",
+    codeBlockOpen: "\uCF54\uB4DC\uBE14\uB85D \uC5F4\uAE30 ```",
+    codeBlockClose: "\uCF54\uB4DC\uBE14\uB85D \uB2EB\uAE30 ```"
   },
   mishearings: [],
   phonetics: [],
@@ -1897,9 +2141,6 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian2.Setting(containerEl).setName("Built-in quick-templates").setDesc(
-      'Say "tabel", "codeblok", "callout", "tip", or "waarschuwing" to insert common Markdown structures. Always active.'
-    );
     new import_obsidian2.Setting(containerEl).setName("Custom voice commands").setHeading();
     this.renderCustomCommands(containerEl);
     new import_obsidian2.Setting(containerEl).setName("Advanced").setHeading();
@@ -1966,7 +2207,8 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       const cmd = commands[i];
       const triggers = (_b = (_a = cmd.triggers[lang]) != null ? _a : cmd.triggers["en"]) != null ? _b : [];
       const typeLabel = cmd.type === "slot" ? `${(_c = cmd.slotPrefix) != null ? _c : ""}\u2026${(_d = cmd.slotSuffix) != null ? _d : ""}` : ((_e = cmd.insertText) != null ? _e : "").replace(/\n/g, "\u21B5").slice(0, 30);
-      new import_obsidian2.Setting(containerEl).setName(triggers.join(", ") || cmd.id).setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`).addButton(
+      const namePrefix = cmd.builtIn ? "\u2699 " : "";
+      new import_obsidian2.Setting(containerEl).setName(namePrefix + (triggers.join(", ") || cmd.id)).setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`).addButton(
         (btn) => btn.setButtonText("Edit").onClick(() => {
           this.openCommandEditor(cmd, i);
         })
@@ -1988,6 +2230,19 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         };
         commands.push(newCmd);
         this.openCommandEditor(newCmd, commands.length - 1);
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setDesc(
+      "Restore the built-in commands (table, callout, etc.) to their defaults. Your own custom commands are not affected."
+    ).addButton(
+      (btn) => btn.setButtonText("Reset built-ins").onClick(async () => {
+        const userCommands = commands.filter((c) => !c.builtIn);
+        this.plugin.settings.customCommands = [
+          ...getDefaultBuiltInCommands(),
+          ...userCommands
+        ];
+        await this.plugin.saveSettings();
+        this.display();
       })
     );
   }
@@ -2055,6 +2310,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
           text.setValue((_a2 = cmd.slotSuffix) != null ? _a2 : "");
         });
         new import_obsidian2.Setting(slotContainer).setName("Close slot on").addDropdown((drop) => {
+          drop.addOption("voice", "Voice command only");
           drop.addOption("enter", "Enter");
           drop.addOption("space", "Space");
           drop.addOption("enter-or-space", "Enter or space");
@@ -2248,7 +2504,15 @@ function getActiveSlot() {
 function closeSlot(editor) {
   if (!activeSlot) return false;
   let pos = editor.getCursor();
-  if (activeSlot.def.suffix) {
+  const suffix = activeSlot.def.suffix;
+  if (suffix && activeSlot.startPos) {
+    const textSinceOpen = editor.getRange(activeSlot.startPos, pos);
+    if (textSinceOpen.includes(suffix)) {
+      activeSlot = null;
+      return true;
+    }
+  }
+  if (suffix) {
     const line2 = editor.getLine(pos.line);
     const before = line2.substring(0, pos.ch);
     const trimmed = before.replace(/\s+$/, "");
@@ -2258,7 +2522,6 @@ function closeSlot(editor) {
       pos = { line: pos.line, ch: trimmed.length };
     }
   }
-  const suffix = activeSlot.def.suffix;
   const line = editor.getLine(pos.line);
   const afterCursor = line.substring(pos.ch, pos.ch + suffix.length);
   if (afterCursor === suffix) {
@@ -2272,9 +2535,6 @@ function closeSlot(editor) {
 }
 function cancelSlot() {
   activeSlot = null;
-}
-function openSlot(commandId, def) {
-  activeSlot = { def, commandId };
 }
 function normalizeCommand(text) {
   return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-/g, " ").replace(/[.,!?;:'"()[\]{}]/g, "").toLowerCase().trim();
@@ -2364,6 +2624,16 @@ function colonAction(editor) {
   editor.replaceRange(": ", pos);
   editor.setCursor({ line: pos.line, ch: pos.ch + 2 });
 }
+function closeSlotAndSpace(editor, expectedOpenId) {
+  if ((activeSlot == null ? void 0 : activeSlot.commandId) === expectedOpenId) {
+    closeSlot(editor);
+  } else {
+    return;
+  }
+  const pos = editor.getCursor();
+  editor.replaceRange(" ", pos);
+  editor.setCursor({ line: pos.line, ch: pos.ch + 1 });
+}
 var COMMAND_DEFS = [
   { id: "newParagraph", action: (editor) => insertAtCursor(editor, "\n\n") },
   { id: "newLine", action: (editor) => insertAtCursor(editor, "\n") },
@@ -2413,62 +2683,86 @@ ${nextNum}. `);
     }
   },
   { id: "colon", punctuation: true, action: colonAction },
-  // ── Slot commands: open prefix, user types, exit closes suffix ──
+  // ── Wikilink: just insert [[, Obsidian handles ]] via autocomplete ──
   {
     id: "wikilink",
-    slot: { prefix: "[[", suffix: "]]", exitTrigger: "enter" },
     action: (editor) => {
       const cursor = editor.getCursor();
-      editor.replaceRange("[[", cursor);
-      editor.setCursor({ line: cursor.line, ch: cursor.ch + 2 });
-      activeSlot = {
-        def: { prefix: "[[", suffix: "]]", exitTrigger: "enter" },
-        commandId: "wikilink"
-      };
+      const line = editor.getLine(cursor.line);
+      const before = line.substring(0, cursor.ch);
+      const needsSpace = before.length > 0 && !/\s$/.test(before);
+      const insert = needsSpace ? " [[" : "[[";
+      editor.replaceRange(insert, cursor);
+      editor.setCursor({ line: cursor.line, ch: cursor.ch + insert.length });
     }
   },
+  // ── Open/close commands: voice command opens, voice command closes ──
   {
-    id: "bold",
-    slot: { prefix: "**", suffix: "**", exitTrigger: "enter" },
+    id: "boldOpen",
+    slot: { prefix: "**", suffix: "**", exitTrigger: "voice" },
     action: (editor) => {
       const cursor = editor.getCursor();
       editor.replaceRange("**", cursor);
-      editor.setCursor({ line: cursor.line, ch: cursor.ch + 2 });
+      const endCh = cursor.ch + 2;
+      editor.setCursor({ line: cursor.line, ch: endCh });
       activeSlot = {
-        def: { prefix: "**", suffix: "**", exitTrigger: "enter" },
-        commandId: "bold"
+        def: { prefix: "**", suffix: "**", exitTrigger: "voice" },
+        commandId: "boldOpen",
+        startPos: { line: cursor.line, ch: endCh }
       };
     }
   },
   {
-    id: "italic",
-    slot: { prefix: "*", suffix: "*", exitTrigger: "enter" },
+    id: "boldClose",
+    action: (editor) => {
+      closeSlotAndSpace(editor, "boldOpen");
+    }
+  },
+  {
+    id: "italicOpen",
+    slot: { prefix: "*", suffix: "*", exitTrigger: "voice" },
     action: (editor) => {
       const cursor = editor.getCursor();
       editor.replaceRange("*", cursor);
-      editor.setCursor({ line: cursor.line, ch: cursor.ch + 1 });
+      const endCh = cursor.ch + 1;
+      editor.setCursor({ line: cursor.line, ch: endCh });
       activeSlot = {
-        def: { prefix: "*", suffix: "*", exitTrigger: "enter" },
-        commandId: "italic"
+        def: { prefix: "*", suffix: "*", exitTrigger: "voice" },
+        commandId: "italicOpen",
+        startPos: { line: cursor.line, ch: endCh }
       };
     }
   },
   {
-    id: "inlineCode",
-    slot: { prefix: "`", suffix: "`", exitTrigger: "enter" },
+    id: "italicClose",
+    action: (editor) => {
+      closeSlotAndSpace(editor, "italicOpen");
+    }
+  },
+  {
+    id: "inlineCodeOpen",
+    slot: { prefix: "`", suffix: "`", exitTrigger: "voice" },
     action: (editor) => {
       const cursor = editor.getCursor();
       editor.replaceRange("`", cursor);
-      editor.setCursor({ line: cursor.line, ch: cursor.ch + 1 });
+      const endCh = cursor.ch + 1;
+      editor.setCursor({ line: cursor.line, ch: endCh });
       activeSlot = {
-        def: { prefix: "`", suffix: "`", exitTrigger: "enter" },
-        commandId: "inlineCode"
+        def: { prefix: "`", suffix: "`", exitTrigger: "voice" },
+        commandId: "inlineCodeOpen",
+        startPos: { line: cursor.line, ch: endCh }
       };
     }
   },
   {
-    id: "tag",
-    slot: { prefix: "#", suffix: "", exitTrigger: "enter-or-space" },
+    id: "inlineCodeClose",
+    action: (editor) => {
+      closeSlotAndSpace(editor, "inlineCodeOpen");
+    }
+  },
+  {
+    id: "tagOpen",
+    slot: { prefix: "#", suffix: "", exitTrigger: "voice" },
     action: (editor) => {
       const cursor = editor.getCursor();
       let prefix = "#";
@@ -2482,11 +2776,40 @@ ${nextNum}. `);
         }
       }
       editor.replaceRange(prefix, cursor);
-      editor.setCursor({ line: cursor.line, ch: cursor.ch + prefix.length });
+      const endCh = cursor.ch + prefix.length;
+      editor.setCursor({ line: cursor.line, ch: endCh });
       activeSlot = {
-        def: { prefix: "#", suffix: "", exitTrigger: "enter-or-space" },
-        commandId: "tag"
+        def: { prefix: "#", suffix: "", exitTrigger: "voice" },
+        commandId: "tagOpen",
+        startPos: { line: cursor.line, ch: endCh }
       };
+    }
+  },
+  {
+    id: "tagClose",
+    action: (editor) => {
+      closeSlotAndSpace(editor, "tagOpen");
+    }
+  },
+  {
+    id: "codeBlockOpen",
+    slot: { prefix: "```", suffix: "\n```", exitTrigger: "voice" },
+    action: (editor) => {
+      const cursor = editor.getCursor();
+      editor.replaceRange("\n```\n", cursor);
+      const endLine = cursor.line + 2;
+      editor.setCursor({ line: endLine, ch: 0 });
+      activeSlot = {
+        def: { prefix: "```", suffix: "\n```", exitTrigger: "voice" },
+        commandId: "codeBlockOpen",
+        startPos: { line: endLine, ch: 0 }
+      };
+    }
+  },
+  {
+    id: "codeBlockClose",
+    action: (editor) => {
+      closeSlotAndSpace(editor, "codeBlockOpen");
     }
   }
 ];
@@ -2509,7 +2832,8 @@ function loadCustomCommands(commands) {
           editor.setCursor({ line: cursor.line, ch: cursor.ch + prefix.length });
           activeSlot = {
             def: { prefix, suffix, exitTrigger: exit },
-            commandId: cmd.id
+            commandId: cmd.id,
+            startPos: { line: cursor.line, ch: cursor.ch + prefix.length }
           };
         }
       };
@@ -3014,92 +3338,6 @@ async function insertTemplate(app, editor, template) {
   const newLine = cursor.line + lines.length - 1;
   const newCh = lines.length === 1 ? cursor.ch + lastLine.length : lastLine.length;
   editor.setCursor({ line: newLine, ch: newCh });
-}
-var QUICK_TEMPLATES = [
-  {
-    id: "table",
-    triggers: {
-      nl: ["tabel", "nieuwe tabel"],
-      en: ["table", "new table"],
-      fr: ["tableau", "nouveau tableau"],
-      de: ["tabelle", "neue tabelle"],
-      es: ["tabla", "nueva tabla"],
-      pt: ["tabela", "nova tabela"],
-      it: ["tabella", "nuova tabella"]
-    },
-    content: "\n\n| Kolom 1 | Kolom 2 | Kolom 3 |\n| --- | --- | --- |\n| | | |\n"
-  },
-  {
-    id: "codeBlock",
-    triggers: {
-      nl: ["codeblok", "code blok"],
-      en: ["code block"],
-      fr: ["bloc de code"],
-      de: ["codeblock", "code block"],
-      es: ["bloque de codigo"],
-      pt: ["bloco de codigo"],
-      it: ["blocco di codice"]
-    },
-    content: "\n\n```",
-    slot: { prefix: "\n\n```", suffix: "\n```\n", exitTrigger: "enter" }
-  },
-  {
-    id: "callout",
-    triggers: {
-      nl: ["callout", "opmerking", "notitie blok"],
-      en: ["callout", "note block"],
-      fr: ["callout", "bloc de note"],
-      de: ["callout", "hinweisblock"],
-      es: ["callout", "bloque de nota"],
-      pt: ["callout", "bloco de nota"],
-      it: ["callout", "blocco nota"]
-    },
-    content: "\n\n> [!note]\n> "
-  },
-  {
-    id: "warningCallout",
-    triggers: {
-      nl: ["waarschuwing", "waarschuwing blok"],
-      en: ["warning", "warning block"],
-      fr: ["avertissement"],
-      de: ["warnung"],
-      es: ["advertencia"],
-      pt: ["aviso"],
-      it: ["avviso"]
-    },
-    content: "\n\n> [!warning]\n> "
-  },
-  {
-    id: "tipCallout",
-    triggers: {
-      nl: ["tip", "tip blok"],
-      en: ["tip", "tip block"],
-      fr: ["astuce"],
-      de: ["tipp"],
-      es: ["consejo"],
-      pt: ["dica"],
-      it: ["suggerimento"]
-    },
-    content: "\n\n> [!tip]\n> "
-  }
-];
-function matchQuickTemplate(normalizedText, lang) {
-  var _a, _b;
-  for (const tmpl of QUICK_TEMPLATES) {
-    const triggers = (_b = (_a = tmpl.triggers[lang]) != null ? _a : tmpl.triggers["en"]) != null ? _b : [];
-    for (const trigger of triggers) {
-      const normTrigger = normalizeCommand(trigger);
-      if (normalizedText === normTrigger) {
-        return { template: tmpl, textBefore: "" };
-      }
-      if (normalizedText.endsWith(" " + normTrigger)) {
-        const idx = normalizedText.lastIndexOf(" " + normTrigger);
-        const textBefore = normalizedText.substring(0, idx).trim();
-        return { template: tmpl, textBefore };
-      }
-    }
-  }
-  return null;
 }
 
 // src/plugin-logger.ts
@@ -3817,7 +4055,7 @@ var DualDelaySession = class {
     const to = editor.offsetToPos(
       this.insertOffset + this.displayLen
     );
-    if (from.ch === 0 && this.displayLen === 0) {
+    if (this.displayLen === 0) {
       displayText = displayText.replace(/^\s+/, "");
     }
     editor.replaceRange(displayText, from, to);
@@ -3992,7 +4230,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       VIEW_TYPE_VOXTRAL_HELP,
       (leaf) => new VoxtralHelpView(leaf)
     );
-    this.addRibbonIcon("mic", "Start/stop recording", () => {
+    this.addRibbonIcon("mic", "Voxtral: start/stop recording", () => {
       void this.toggleRecording();
     });
     if (!import_obsidian7.Platform.isMobile) {
@@ -4065,6 +4303,13 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
   }
   async loadSettings() {
     this.settings = migrateSettings(await this.loadData());
+    const hasBuiltIn = this.settings.customCommands.some((c) => c.builtIn);
+    if (!hasBuiltIn) {
+      this.settings.customCommands = [
+        ...getDefaultBuiltInCommands(),
+        ...this.settings.customCommands
+      ];
+    }
     setLanguage(this.settings.language);
     loadCustomCommands(this.settings.customCommands);
     loadCustomCommandTriggers(this.settings.customCommands);
@@ -4084,32 +4329,6 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
     scanTemplates(this.app, this.settings.templatesFolder);
     setPreMatchHook((editor, normalizedText, rawText) => {
       const lang = this.settings.language;
-      const quickMatch = matchQuickTemplate(normalizedText, lang);
-      if (quickMatch) {
-        if (quickMatch.textBefore) {
-          const cmdWords = normalizedText.length - quickMatch.textBefore.length;
-          const before = rawText.substring(0, rawText.length - cmdWords).trimEnd();
-          if (before) {
-            const cursor = editor.getCursor();
-            if (cursor.ch > 0 && !/^[\s\n]/.test(before)) {
-              const charBefore = editor.getRange(
-                { line: cursor.line, ch: cursor.ch - 1 },
-                cursor
-              );
-              const prefix = charBefore && /\S/.test(charBefore) ? " " : "";
-              editor.replaceRange(prefix + before, cursor);
-              const newCh = cursor.ch + prefix.length + before.length;
-              editor.setCursor({ line: cursor.line, ch: newCh });
-            } else {
-              editor.replaceRange(before, cursor);
-              const newCh = cursor.ch + before.length;
-              editor.setCursor({ line: cursor.line, ch: newCh });
-            }
-          }
-        }
-        this.insertQuickTemplate(editor, quickMatch.template);
-        return true;
-      }
       const tmplMatch = matchTemplate(normalizedText, lang);
       if (tmplMatch) {
         if (tmplMatch.textBefore) {
@@ -4127,28 +4346,6 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       }
       return false;
     });
-  }
-  /** Insert a quick-template at the cursor, optionally opening a slot */
-  insertQuickTemplate(editor, tmpl) {
-    if (tmpl.slot) {
-      const cursor = editor.getCursor();
-      editor.replaceRange(tmpl.slot.prefix, cursor);
-      const lines = tmpl.slot.prefix.split("\n");
-      const lastLine = lines[lines.length - 1];
-      const newLine = cursor.line + lines.length - 1;
-      const newCh = lines.length === 1 ? cursor.ch + lastLine.length : lastLine.length;
-      editor.setCursor({ line: newLine, ch: newCh });
-      openSlot(tmpl.id, tmpl.slot);
-      this.updateStatusBar("slot");
-    } else {
-      const cursor = editor.getCursor();
-      editor.replaceRange(tmpl.content, cursor);
-      const lines = tmpl.content.split("\n");
-      const lastLine = lines[lines.length - 1];
-      const newLine = cursor.line + lines.length - 1;
-      const newCh = lines.length === 1 ? cursor.ch + lastLine.length : lastLine.length;
-      editor.setCursor({ line: newLine, ch: newCh });
-    }
   }
   /** Re-render the help panel with the current language. */
   refreshHelpView() {
@@ -4249,6 +4446,9 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
         e.preventDefault();
         cancelSlot();
         this.updateStatusBar("recording");
+        return;
+      }
+      if ((slot == null ? void 0 : slot.def.exitTrigger) === "voice") {
         return;
       }
       const isEnterExit = (slot == null ? void 0 : slot.def.exitTrigger) === "enter" || (slot == null ? void 0 : slot.def.exitTrigger) === "enter-or-space";

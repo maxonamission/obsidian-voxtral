@@ -16,10 +16,16 @@
     "stopRecording": ["aufnahme beenden", "aufnahme stoppen"],
     "colon": ["doppelpunkt"],
     "wikilink": ["wikilink", "wiki link"],
-    "bold": ["fett"],
-    "italic": ["kursiv"],
-    "inlineCode": ["code"],
-    "tag": ["tag", "schlagwort"]
+    "boldOpen": ["fett offnen", "fett auf"],
+    "boldClose": ["fett schliessen", "fett zu"],
+    "italicOpen": ["kursiv offnen", "kursiv auf"],
+    "italicClose": ["kursiv schliessen", "kursiv zu"],
+    "inlineCodeOpen": ["code offnen", "code auf"],
+    "inlineCodeClose": ["code schliessen", "code zu"],
+    "tagOpen": ["tag offnen", "tag auf"],
+    "tagClose": ["tag schliessen", "tag zu"],
+    "codeBlockOpen": ["codeblock offnen", "code block offnen"],
+    "codeBlockClose": ["codeblock schliessen", "code block schliessen"]
   },
   "labels": {
     "newParagraph": "Neuer Absatz",
@@ -36,10 +42,16 @@
     "stopRecording": "Aufnahme beenden",
     "colon": "Doppelpunkt",
     "wikilink": "Wikilink [[…]]",
-    "bold": "Fett **…**",
-    "italic": "Kursiv *…*",
-    "inlineCode": "Code `…`",
-    "tag": "Tag #…"
+    "boldOpen": "Fett öffnen **",
+    "boldClose": "Fett schließen **",
+    "italicOpen": "Kursiv öffnen *",
+    "italicClose": "Kursiv schließen *",
+    "inlineCodeOpen": "Code öffnen `",
+    "inlineCodeClose": "Code schließen `",
+    "tagOpen": "Tag öffnen #",
+    "tagClose": "Tag schließen",
+    "codeBlockOpen": "Codeblock öffnen ```",
+    "codeBlockClose": "Codeblock schließen ```"
   },
   "mishearings": [
     { "pattern": "\\bneue absatz\\b", "flags": "g", "replacement": "neuer absatz" },

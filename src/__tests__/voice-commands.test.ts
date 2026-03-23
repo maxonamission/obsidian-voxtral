@@ -112,12 +112,20 @@ describe("Dutch command matching", () => {
 		expect(match("nl", "wikilink")).toBe("wikilink");
 	});
 
-	it("matches 'vet'", () => {
-		expect(match("nl", "vet")).toBe("bold");
+	it("matches 'vet openen'", () => {
+		expect(match("nl", "vet openen")).toBe("boldOpen");
 	});
 
-	it("matches 'cursief'", () => {
-		expect(match("nl", "cursief")).toBe("italic");
+	it("matches 'vet sluiten'", () => {
+		expect(match("nl", "vet sluiten")).toBe("boldClose");
+	});
+
+	it("matches 'cursief openen'", () => {
+		expect(match("nl", "cursief openen")).toBe("italicOpen");
+	});
+
+	it("matches 'cursief sluiten'", () => {
+		expect(match("nl", "cursief sluiten")).toBe("italicClose");
 	});
 
 	it("matches 'verwijder laatste alinea'", () => {
@@ -266,16 +274,28 @@ describe("English command matching", () => {
 		expect(match("en", "delete last sentence")).toBe("deleteLastLine");
 	});
 
-	it("matches 'bold'", () => {
-		expect(match("en", "bold")).toBe("bold");
+	it("matches 'open bold'", () => {
+		expect(match("en", "open bold")).toBe("boldOpen");
 	});
 
-	it("matches 'italic'", () => {
-		expect(match("en", "italic")).toBe("italic");
+	it("matches 'close bold'", () => {
+		expect(match("en", "close bold")).toBe("boldClose");
 	});
 
-	it("matches 'inline code'", () => {
-		expect(match("en", "inline code")).toBe("inlineCode");
+	it("matches 'open italic'", () => {
+		expect(match("en", "open italic")).toBe("italicOpen");
+	});
+
+	it("matches 'close italic'", () => {
+		expect(match("en", "close italic")).toBe("italicClose");
+	});
+
+	it("matches 'open code'", () => {
+		expect(match("en", "open code")).toBe("inlineCodeOpen");
+	});
+
+	it("matches 'close code'", () => {
+		expect(match("en", "close code")).toBe("inlineCodeClose");
 	});
 
 	// Filler stripping
@@ -331,8 +351,8 @@ describe("French command matching", () => {
 		expect(match("fr", "arreter enregistrement")).toBe("stopRecording");
 	});
 
-	it("matches 'gras'", () => {
-		expect(match("fr", "gras")).toBe("bold");
+	it("matches 'ouvrir gras'", () => {
+		expect(match("fr", "ouvrir gras")).toBe("boldOpen");
 	});
 
 	// Mishearing: "nouvelle paragraphe" → "nouveau paragraphe"
@@ -371,8 +391,8 @@ describe("German command matching", () => {
 		expect(match("de", "aufnahme beenden")).toBe("stopRecording");
 	});
 
-	it("matches 'fett'", () => {
-		expect(match("de", "fett")).toBe("bold");
+	it("matches 'fett offnen'", () => {
+		expect(match("de", "fett offnen")).toBe("boldOpen");
 	});
 
 	// Mishearing: "neue absatz" → "neuer absatz"

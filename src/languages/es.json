@@ -16,10 +16,16 @@
     "stopRecording": ["parar grabacion", "detener grabacion"],
     "colon": ["dos puntos"],
     "wikilink": ["wikilink", "enlace wiki"],
-    "bold": ["negrita"],
-    "italic": ["cursiva"],
-    "inlineCode": ["codigo"],
-    "tag": ["etiqueta", "tag"]
+    "boldOpen": ["abrir negrita", "negrita abrir"],
+    "boldClose": ["cerrar negrita", "negrita cerrar"],
+    "italicOpen": ["abrir cursiva", "cursiva abrir"],
+    "italicClose": ["cerrar cursiva", "cursiva cerrar"],
+    "inlineCodeOpen": ["abrir codigo", "codigo abrir"],
+    "inlineCodeClose": ["cerrar codigo", "codigo cerrar"],
+    "tagOpen": ["abrir etiqueta", "abrir tag"],
+    "tagClose": ["cerrar etiqueta", "cerrar tag"],
+    "codeBlockOpen": ["abrir bloque de codigo"],
+    "codeBlockClose": ["cerrar bloque de codigo"]
   },
   "labels": {
     "newParagraph": "Nuevo párrafo",
@@ -36,10 +42,16 @@
     "stopRecording": "Parar grabación",
     "colon": "Dos puntos",
     "wikilink": "Wikilink [[…]]",
-    "bold": "Negrita **…**",
-    "italic": "Cursiva *…*",
-    "inlineCode": "Código `…`",
-    "tag": "Etiqueta #…"
+    "boldOpen": "Abrir negrita **",
+    "boldClose": "Cerrar negrita **",
+    "italicOpen": "Abrir cursiva *",
+    "italicClose": "Cerrar cursiva *",
+    "inlineCodeOpen": "Abrir código `",
+    "inlineCodeClose": "Cerrar código `",
+    "tagOpen": "Abrir etiqueta #",
+    "tagClose": "Cerrar etiqueta",
+    "codeBlockOpen": "Abrir bloque de código ```",
+    "codeBlockClose": "Cerrar bloque de código ```"
   },
   "mishearings": [],
   "phonetics": [

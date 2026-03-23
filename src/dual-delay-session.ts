@@ -542,10 +542,11 @@ export class DualDelaySession {
 			this.insertOffset + this.displayLen,
 		);
 
-		// Strip leading whitespace when inserting at start of a line —
+		// Strip leading whitespace when the display region is empty —
 		// the API often prepends a space for word separation, but at
-		// column 0 this would cause unwanted indentation.
-		if (from.ch === 0 && this.displayLen === 0) {
+		// the start of a new sentence (after the previous one was
+		// committed) this would cause an unwanted leading space.
+		if (this.displayLen === 0) {
 			displayText = displayText.replace(/^\s+/, "");
 		}
 

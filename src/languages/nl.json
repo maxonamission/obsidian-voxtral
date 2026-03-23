@@ -16,10 +16,16 @@
     "stopRecording": ["beeindig opname", "beeindig de opname", "stop opname", "stop de opname"],
     "colon": ["dubbele punt", "double punt", "dubbelepunt"],
     "wikilink": ["wikilink", "wiki link", "link"],
-    "bold": ["vet", "dikgedrukt"],
-    "italic": ["cursief", "schuingedrukt"],
-    "inlineCode": ["code"],
-    "tag": ["tag", "label"]
+    "boldOpen": ["vet openen", "dikgedrukt openen", "vet open"],
+    "boldClose": ["vet sluiten", "dikgedrukt sluiten", "vet dicht"],
+    "italicOpen": ["cursief openen", "schuingedrukt openen", "cursief open"],
+    "italicClose": ["cursief sluiten", "schuingedrukt sluiten", "cursief dicht"],
+    "inlineCodeOpen": ["code openen", "code open"],
+    "inlineCodeClose": ["code sluiten", "code dicht"],
+    "tagOpen": ["tag openen", "label openen", "tag open"],
+    "tagClose": ["tag sluiten", "label sluiten", "tag dicht"],
+    "codeBlockOpen": ["codeblok openen", "code blok openen", "codeblok open"],
+    "codeBlockClose": ["codeblok sluiten", "code blok sluiten", "codeblok dicht"]
   },
   "labels": {
     "newParagraph": "Nieuwe alinea",
@@ -36,10 +42,16 @@
     "stopRecording": "Stop opname",
     "colon": "Dubbele punt",
     "wikilink": "Wikilink [[…]]",
-    "bold": "Vet **…**",
-    "italic": "Cursief *…*",
-    "inlineCode": "Code `…`",
-    "tag": "Tag #…"
+    "boldOpen": "Vet openen **",
+    "boldClose": "Vet sluiten **",
+    "italicOpen": "Cursief openen *",
+    "italicClose": "Cursief sluiten *",
+    "inlineCodeOpen": "Code openen `",
+    "inlineCodeClose": "Code sluiten `",
+    "tagOpen": "Tag openen #",
+    "tagClose": "Tag sluiten",
+    "codeBlockOpen": "Codeblok openen ```",
+    "codeBlockClose": "Codeblok sluiten ```"
   },
   "mishearings": [
     { "pattern": "\\bniveau\\b", "flags": "g", "replacement": "nieuwe" },

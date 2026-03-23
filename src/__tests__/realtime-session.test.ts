@@ -343,8 +343,8 @@ describe("RealtimeSession", () => {
 			const tc = getTranscriberCallbacks();
 
 			// Simulate a voice command that opens a slot by sending text
-			// that triggers the bold command
-			tc.onDelta("Vet. ");
+			// that triggers the bold-open command
+			tc.onDelta("Vet openen. ");
 
 			// Bold command should have fired, inserting **
 			const textAfterCommand = editor.getValue();

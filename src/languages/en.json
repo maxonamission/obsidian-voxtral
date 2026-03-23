@@ -16,10 +16,16 @@
     "stopRecording": ["stop recording"],
     "colon": ["colon"],
     "wikilink": ["wiki link", "wikilink", "link"],
-    "bold": ["bold"],
-    "italic": ["italic"],
-    "inlineCode": ["code", "inline code"],
-    "tag": ["tag"]
+    "boldOpen": ["open bold", "bold open", "start bold"],
+    "boldClose": ["close bold", "bold close", "end bold"],
+    "italicOpen": ["open italic", "italic open", "start italic"],
+    "italicClose": ["close italic", "italic close", "end italic"],
+    "inlineCodeOpen": ["open code", "code open", "start code"],
+    "inlineCodeClose": ["close code", "code close", "end code"],
+    "tagOpen": ["open tag", "tag open", "start tag"],
+    "tagClose": ["close tag", "tag close", "end tag"],
+    "codeBlockOpen": ["open code block", "code block open", "start code block"],
+    "codeBlockClose": ["close code block", "code block close", "end code block"]
   },
   "labels": {
     "newParagraph": "New paragraph",
@@ -36,10 +42,16 @@
     "stopRecording": "Stop recording",
     "colon": "Colon",
     "wikilink": "Wikilink [[…]]",
-    "bold": "Bold **…**",
-    "italic": "Italic *…*",
-    "inlineCode": "Code `…`",
-    "tag": "Tag #…"
+    "boldOpen": "Open bold **",
+    "boldClose": "Close bold **",
+    "italicOpen": "Open italic *",
+    "italicClose": "Close italic *",
+    "inlineCodeOpen": "Open code `",
+    "inlineCodeClose": "Close code `",
+    "tagOpen": "Open tag #",
+    "tagClose": "Close tag",
+    "codeBlockOpen": "Open code block ```",
+    "codeBlockClose": "Close code block ```"
   },
   "mishearings": [],
   "phonetics": [

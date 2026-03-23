@@ -18,7 +18,99 @@ export interface CustomCommand {
 	/** Slot suffix (for type "slot") */
 	slotSuffix?: string;
 	/** Slot exit trigger (for type "slot") */
-	slotExit?: "enter" | "space" | "enter-or-space";
+	slotExit?: "voice" | "enter" | "space" | "enter-or-space";
+	/** Pre-configured built-in command (reset to defaults only touches these) */
+	builtIn?: boolean;
+}
+
+/** Default built-in custom commands (table, callouts) */
+export function getDefaultBuiltInCommands(): CustomCommand[] {
+	return [
+		{
+			id: "builtin-table",
+			builtIn: true,
+			type: "insert",
+			insertText: "\n\n| Kolom 1 | Kolom 2 | Kolom 3 |\n| --- | --- | --- |\n| | | |\n",
+			triggers: {
+				nl: ["tabel", "nieuwe tabel"],
+				en: ["table", "new table"],
+				fr: ["tableau", "nouveau tableau"],
+				de: ["tabelle", "neue tabelle"],
+				es: ["tabla", "nueva tabla"],
+				pt: ["tabela", "nova tabela"],
+				it: ["tabella", "nuova tabella"],
+				ru: ["таблица", "новая таблица"],
+				zh: ["表格", "新表格"],
+				ja: ["テーブル", "新しいテーブル"],
+				ko: ["테이블", "새 테이블"],
+				hi: ["टेबल", "नई टेबल"],
+				ar: ["جدول", "جدول جديد"],
+			},
+		},
+		{
+			id: "builtin-callout",
+			builtIn: true,
+			type: "insert",
+			insertText: "\n\n> [!note]\n> ",
+			triggers: {
+				nl: ["callout", "opmerking", "notitie blok"],
+				en: ["callout", "note block"],
+				fr: ["callout", "bloc de note"],
+				de: ["callout", "hinweisblock"],
+				es: ["callout", "bloque de nota"],
+				pt: ["callout", "bloco de nota"],
+				it: ["callout", "blocco nota"],
+				ru: ["заметка", "блок заметки"],
+				zh: ["标注", "注释块"],
+				ja: ["コールアウト", "注釈"],
+				ko: ["콜아웃", "메모 블록"],
+				hi: ["कॉलआउट", "नोट ब्लॉक"],
+				ar: ["تنبيه", "كتلة ملاحظة"],
+			},
+		},
+		{
+			id: "builtin-warning",
+			builtIn: true,
+			type: "insert",
+			insertText: "\n\n> [!warning]\n> ",
+			triggers: {
+				nl: ["waarschuwing", "waarschuwing blok"],
+				en: ["warning", "warning block"],
+				fr: ["avertissement"],
+				de: ["warnung"],
+				es: ["advertencia"],
+				pt: ["aviso"],
+				it: ["avviso"],
+				ru: ["предупреждение"],
+				zh: ["警告"],
+				ja: ["警告"],
+				ko: ["경고"],
+				hi: ["चेतावनी"],
+				ar: ["تحذير"],
+			},
+		},
+		{
+			id: "builtin-tip",
+			builtIn: true,
+			type: "insert",
+			insertText: "\n\n> [!tip]\n> ",
+			triggers: {
+				nl: ["tip", "tip blok"],
+				en: ["tip", "tip block"],
+				fr: ["astuce"],
+				de: ["tipp"],
+				es: ["consejo"],
+				pt: ["dica"],
+				it: ["suggerimento"],
+				ru: ["совет"],
+				zh: ["提示"],
+				ja: ["ヒント"],
+				ko: ["팁"],
+				hi: ["सुझाव"],
+				ar: ["نصيحة"],
+			},
+		},
+	];
 }
 
 export interface VoxtralSettings {

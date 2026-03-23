@@ -16,10 +16,16 @@
     "stopRecording": ["arreter enregistrement", "arreter l enregistrement", "stop enregistrement"],
     "colon": ["deux points"],
     "wikilink": ["wiki lien", "lien wiki"],
-    "bold": ["gras"],
-    "italic": ["italique"],
-    "inlineCode": ["code"],
-    "tag": ["etiquette", "tag"]
+    "boldOpen": ["ouvrir gras", "gras ouvrir"],
+    "boldClose": ["fermer gras", "gras fermer"],
+    "italicOpen": ["ouvrir italique", "italique ouvrir"],
+    "italicClose": ["fermer italique", "italique fermer"],
+    "inlineCodeOpen": ["ouvrir code", "code ouvrir"],
+    "inlineCodeClose": ["fermer code", "code fermer"],
+    "tagOpen": ["ouvrir etiquette", "ouvrir tag"],
+    "tagClose": ["fermer etiquette", "fermer tag"],
+    "codeBlockOpen": ["ouvrir bloc de code"],
+    "codeBlockClose": ["fermer bloc de code"]
   },
   "labels": {
     "newParagraph": "Nouveau paragraphe",
@@ -36,10 +42,16 @@
     "stopRecording": "Arrêter l'enregistrement",
     "colon": "Deux-points",
     "wikilink": "Wikilink [[…]]",
-    "bold": "Gras **…**",
-    "italic": "Italique *…*",
-    "inlineCode": "Code `…`",
-    "tag": "Étiquette #…"
+    "boldOpen": "Ouvrir gras **",
+    "boldClose": "Fermer gras **",
+    "italicOpen": "Ouvrir italique *",
+    "italicClose": "Fermer italique *",
+    "inlineCodeOpen": "Ouvrir code `",
+    "inlineCodeClose": "Fermer code `",
+    "tagOpen": "Ouvrir étiquette #",
+    "tagClose": "Fermer étiquette",
+    "codeBlockOpen": "Ouvrir bloc de code ```",
+    "codeBlockClose": "Fermer bloc de code ```"
   },
   "mishearings": [
     { "pattern": "\\bnouveau ligne\\b", "flags": "g", "replacement": "nouvelle ligne" },
