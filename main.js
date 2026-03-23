@@ -43,7 +43,7 @@ var DEFAULT_SETTINGS = {
   focusBehavior: "pause",
   focusPauseDelaySec: 30,
   dismissMobileBatchNotice: false,
-  enterToSend: true,
+  enterToSend: false,
   typingCooldownMs: 800,
   noiseSuppression: false,
   customCommands: [],
@@ -1903,10 +1903,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
     new import_obsidian2.Setting(containerEl).setName("Custom voice commands").setHeading();
     this.renderCustomCommands(containerEl);
     new import_obsidian2.Setting(containerEl).setName("Advanced").setHeading();
-    const isRealtimeModel = (m) => {
-      var _a;
-      return !!((_a = m.capabilities) == null ? void 0 : _a.audio_transcription) && m.id.includes("realtime");
-    };
+    const isRealtimeModel = (m) => m.id.includes("realtime");
     const isBatchModel = (m) => {
       var _a;
       return !!((_a = m.capabilities) == null ? void 0 : _a.audio_transcription) && !m.id.includes("realtime");
@@ -2252,8 +2249,8 @@ function closeSlot(editor) {
   if (!activeSlot) return false;
   let pos = editor.getCursor();
   if (activeSlot.def.suffix) {
-    const line = editor.getLine(pos.line);
-    const before = line.substring(0, pos.ch);
+    const line2 = editor.getLine(pos.line);
+    const before = line2.substring(0, pos.ch);
     const trimmed = before.replace(/\s+$/, "");
     if (trimmed.length < before.length) {
       const trimFrom = { line: pos.line, ch: trimmed.length };
@@ -2261,9 +2258,15 @@ function closeSlot(editor) {
       pos = { line: pos.line, ch: trimmed.length };
     }
   }
-  editor.replaceRange(activeSlot.def.suffix, pos);
-  const newCh = pos.ch + activeSlot.def.suffix.length;
-  editor.setCursor({ line: pos.line, ch: newCh });
+  const suffix = activeSlot.def.suffix;
+  const line = editor.getLine(pos.line);
+  const afterCursor = line.substring(pos.ch, pos.ch + suffix.length);
+  if (afterCursor === suffix) {
+    editor.setCursor({ line: pos.line, ch: pos.ch + suffix.length });
+  } else {
+    editor.replaceRange(suffix, pos);
+    editor.setCursor({ line: pos.line, ch: pos.ch + suffix.length });
+  }
   activeSlot = null;
   return true;
 }
@@ -2662,24 +2665,30 @@ function setPreMatchHook(hook) {
   preMatchHook = hook;
 }
 function processText(editor, text) {
+  let stopRequested = false;
   const segments = text.match(/[^.!?]+[.!?]+\s*/g);
   if (!segments) {
-    processSegment(editor, text);
-    return;
+    stopRequested = processSegment(editor, text);
+    return stopRequested;
   }
   const joined = segments.join("");
   const remainder = text.slice(joined.length);
   for (const segment of segments) {
-    processSegment(editor, segment);
+    if (processSegment(editor, segment)) {
+      stopRequested = true;
+    }
   }
   if (remainder.trim()) {
-    processSegment(editor, remainder);
+    if (processSegment(editor, remainder)) {
+      stopRequested = true;
+    }
   }
+  return stopRequested;
 }
 function processSegment(editor, text) {
   if (preMatchHook) {
     const normalized = fixMishearings(normalizeCommand(text));
-    if (preMatchHook(editor, normalized, text)) return;
+    if (preMatchHook(editor, normalized, text)) return false;
   }
   const match = matchCommand(text);
   if (match) {
@@ -2691,9 +2700,11 @@ function processSegment(editor, text) {
       insertAtCursor(editor, before);
     }
     match.command.action(editor);
+    return match.command.id === "stopRecording";
   } else {
     insertAtCursor(editor, text);
   }
+  return false;
 }
 function getCommandList() {
   const builtIn = COMMAND_DEFS.map((c) => ({
@@ -4423,7 +4434,11 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       }
       this.updateStatusBar("recording");
       if (text) {
-        processText(editor, text);
+        const stopRequested = processText(editor, text);
+        if (stopRequested) {
+          await this.stopRecording();
+          return;
+        }
       }
     } catch (e) {
       vlog.error("Voxtral: Chunk transcription failed", e);

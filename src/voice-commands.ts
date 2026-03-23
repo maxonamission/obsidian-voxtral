@@ -87,9 +87,18 @@ export function closeSlot(editor: Editor): boolean {
 		}
 	}
 
-	editor.replaceRange(activeSlot.def.suffix, pos);
-	const newCh = pos.ch + activeSlot.def.suffix.length;
-	editor.setCursor({ line: pos.line, ch: newCh });
+	// Check if the suffix is already present at the cursor position
+	// (e.g. Obsidian's autocomplete or auto-pair may have inserted it).
+	const suffix = activeSlot.def.suffix;
+	const line = editor.getLine(pos.line);
+	const afterCursor = line.substring(pos.ch, pos.ch + suffix.length);
+	if (afterCursor === suffix) {
+		// Suffix already present — just move past it
+		editor.setCursor({ line: pos.line, ch: pos.ch + suffix.length });
+	} else {
+		editor.replaceRange(suffix, pos);
+		editor.setCursor({ line: pos.line, ch: pos.ch + suffix.length });
+	}
 	activeSlot = null;
 	return true;
 }
@@ -635,30 +644,36 @@ export function setPreMatchHook(hook: PreMatchHook | null): void {
  * Process transcribed text: split into sentences, check each for voice
  * commands, and execute them or insert the text as-is.
  */
-export function processText(editor: Editor, text: string): void {
+export function processText(editor: Editor, text: string): boolean {
+	let stopRequested = false;
 	const segments = text.match(/[^.!?]+[.!?]+\s*/g);
 
 	if (!segments) {
-		processSegment(editor, text);
-		return;
+		stopRequested = processSegment(editor, text);
+		return stopRequested;
 	}
 
 	const joined = segments.join("");
 	const remainder = text.slice(joined.length);
 
 	for (const segment of segments) {
-		processSegment(editor, segment);
+		if (processSegment(editor, segment)) {
+			stopRequested = true;
+		}
 	}
 	if (remainder.trim()) {
-		processSegment(editor, remainder);
+		if (processSegment(editor, remainder)) {
+			stopRequested = true;
+		}
 	}
+	return stopRequested;
 }
 
-function processSegment(editor: Editor, text: string): void {
+function processSegment(editor: Editor, text: string): boolean {
 	// Try pre-match hook (templates) first
 	if (preMatchHook) {
 		const normalized = fixMishearings(normalizeCommand(text));
-		if (preMatchHook(editor, normalized, text)) return;
+		if (preMatchHook(editor, normalized, text)) return false;
 	}
 
 	const match = matchCommand(text);
@@ -671,9 +686,11 @@ function processSegment(editor: Editor, text: string): void {
 			insertAtCursor(editor, before);
 		}
 		match.command.action(editor);
+		return match.command.id === "stopRecording";
 	} else {
 		insertAtCursor(editor, text);
 	}
+	return false;
 }
 
 /**

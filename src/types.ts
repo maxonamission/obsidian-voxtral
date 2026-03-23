@@ -64,7 +64,7 @@ export const DEFAULT_SETTINGS: VoxtralSettings = {
 	focusBehavior: "pause",
 	focusPauseDelaySec: 30,
 	dismissMobileBatchNotice: false,
-	enterToSend: true,
+	enterToSend: false,
 	typingCooldownMs: 800,
 	noiseSuppression: false,
 	customCommands: [],

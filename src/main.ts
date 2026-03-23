@@ -676,7 +676,11 @@ export default class VoxtralPlugin extends Plugin {
 
 			this.updateStatusBar("recording");
 			if (text) {
-				processText(editor, text);
+				const stopRequested = processText(editor, text);
+				if (stopRequested) {
+					await this.stopRecording();
+					return;
+				}
 			}
 		} catch (e) {
 			vlog.error("Voxtral: Chunk transcription failed", e);

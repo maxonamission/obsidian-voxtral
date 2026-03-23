@@ -363,7 +363,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 
 		// Filter helpers based on model capabilities
 		const isRealtimeModel = (m: MistralModel) =>
-			!!m.capabilities?.audio_transcription && m.id.includes("realtime");
+			m.id.includes("realtime");
 		const isBatchModel = (m: MistralModel) =>
 			!!m.capabilities?.audio_transcription && !m.id.includes("realtime");
 		const isTextChatModel = (m: MistralModel) =>
