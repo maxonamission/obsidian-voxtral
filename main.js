@@ -1908,8 +1908,8 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       return !!((_a = m.capabilities) == null ? void 0 : _a.audio_transcription);
     };
     const isTextChatModel = (m) => {
-      var _a, _b, _c;
-      return !!((_a = m.capabilities) == null ? void 0 : _a.completion_chat) && !((_b = m.capabilities) == null ? void 0 : _b.audio_transcription) && !((_c = m.capabilities) == null ? void 0 : _c.vision);
+      var _a, _b;
+      return !!((_a = m.capabilities) == null ? void 0 : _a.completion_chat) && !((_b = m.capabilities) == null ? void 0 : _b.audio_transcription) && !m.id.startsWith("voxtral");
     };
     this.addModelDropdown(
       containerEl,

@@ -367,7 +367,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 		const isTextChatModel = (m: MistralModel) =>
 			!!m.capabilities?.completion_chat &&
 			!m.capabilities?.audio_transcription &&
-			!m.capabilities?.vision;
+			!m.id.startsWith("voxtral");
 
 		this.addModelDropdown(
 			containerEl,
