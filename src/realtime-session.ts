@@ -5,7 +5,6 @@ import { Editor, Notice } from "obsidian";
 import { RealtimeTranscriber } from "./mistral-api";
 import {
 	normalizeCommand,
-	isSlotActive,
 } from "./voice-commands";
 import { VoxtralSettings } from "./types";
 import { DictationTracker } from "./dictation-tracker";
@@ -30,7 +29,6 @@ export class RealtimeSession {
 	private prevRaw = "";
 	private turnDelta = 0;
 	private turnProcessed = 0;
-	private slotBuffer = "";
 	private consecutiveFailures = 0;
 	private maxConsecutiveFailures = 5;
 
@@ -46,7 +44,6 @@ export class RealtimeSession {
 		this.prevRaw = "";
 		this.turnDelta = 0;
 		this.turnProcessed = 0;
-		this.slotBuffer = "";
 		this.consecutiveFailures = 0;
 
 		await this.connectWebSocket(editor);
@@ -76,24 +73,15 @@ export class RealtimeSession {
 		this.transcriber = null;
 	}
 
-	/** Flush buffered transcription text after a slot closes. */
-	flushSlotBuffer(editor: Editor): void {
-		// Atomically capture and clear the buffer so any delta arriving
-		// between closeSlot() and this flush goes to pendingText instead
-		// of being double-processed.
-		const buffered = this.slotBuffer;
-		this.slotBuffer = "";
-
-		if (buffered.trim()) {
-			this.pendingText += buffered;
-			if (this.pendingText.trim()) {
-				this.tracker.trackProcessText(
-					editor,
-					this.pendingText.trim() + " ",
-					() => this.callbacks.updateStatusBar("slot"),
-				);
-				this.pendingText = "";
-			}
+	/** Flush any remaining pending text (called after slot close). */
+	flushAfterSlot(editor: Editor): void {
+		if (this.pendingText.trim()) {
+			this.tracker.trackProcessText(
+				editor,
+				this.pendingText.trim() + " ",
+				() => this.callbacks.updateStatusBar("slot"),
+			);
+			this.pendingText = "";
 		}
 	}
 
@@ -199,13 +187,6 @@ export class RealtimeSession {
 
 		if (!newText) return;
 
-		// While a slot is active, buffer incoming transcription
-		if (isSlotActive()) {
-			this.slotBuffer += newText;
-			this.turnDelta += newText.length;
-			return;
-		}
-
 		this.pendingText += newText;
 		this.turnDelta += newText.length;
 
@@ -245,11 +226,6 @@ export class RealtimeSession {
 	}
 
 	private handleDone(editor: Editor, doneText: string): void {
-		// While a slot is active, buffer incoming transcription
-		if (isSlotActive()) {
-			return;
-		}
-
 		// The done event contains the COMPLETE transcription for this turn.
 		// If the API sent final word(s) only in the done event (not as deltas),
 		// append the missing portion to pendingText before flushing.

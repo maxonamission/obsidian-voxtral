@@ -2246,10 +2246,20 @@ function getActiveSlot() {
 }
 function closeSlot(editor) {
   if (!activeSlot) return false;
-  const cursor = editor.getCursor();
-  editor.replaceRange(activeSlot.def.suffix, cursor);
-  const newCh = cursor.ch + activeSlot.def.suffix.length;
-  editor.setCursor({ line: cursor.line, ch: newCh });
+  let pos = editor.getCursor();
+  if (activeSlot.def.suffix) {
+    const line = editor.getLine(pos.line);
+    const before = line.substring(0, pos.ch);
+    const trimmed = before.replace(/\s+$/, "");
+    if (trimmed.length < before.length) {
+      const trimFrom = { line: pos.line, ch: trimmed.length };
+      editor.replaceRange("", trimFrom, pos);
+      pos = { line: pos.line, ch: trimmed.length };
+    }
+  }
+  editor.replaceRange(activeSlot.def.suffix, pos);
+  const newCh = pos.ch + activeSlot.def.suffix.length;
+  editor.setCursor({ line: pos.line, ch: newCh });
   activeSlot = null;
   return true;
 }
@@ -2282,7 +2292,7 @@ function levenshtein(a, b) {
 }
 function insertAtCursor(editor, text) {
   const cursor = editor.getCursor();
-  if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
+  if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !isSlotActive()) {
     const charBefore = editor.getRange(
       { line: cursor.line, ch: cursor.ch - 1 },
       cursor
@@ -3179,7 +3189,7 @@ var DictationTracker = class _DictationTracker {
    */
   trackInsertAtCursor(editor, text) {
     const cursor = editor.getCursor();
-    if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
+    if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !isSlotActive()) {
       const charBefore = editor.getRange(
         { line: cursor.line, ch: cursor.ch - 1 },
         cursor
@@ -3280,7 +3290,6 @@ var RealtimeSession = class {
     this.prevRaw = "";
     this.turnDelta = 0;
     this.turnProcessed = 0;
-    this.slotBuffer = "";
     this.consecutiveFailures = 0;
     this.maxConsecutiveFailures = 5;
   }
@@ -3290,7 +3299,6 @@ var RealtimeSession = class {
     this.prevRaw = "";
     this.turnDelta = 0;
     this.turnProcessed = 0;
-    this.slotBuffer = "";
     this.consecutiveFailures = 0;
     await this.connectWebSocket(editor);
   }
@@ -3315,20 +3323,15 @@ var RealtimeSession = class {
     (_b = this.transcriber) == null ? void 0 : _b.close();
     this.transcriber = null;
   }
-  /** Flush buffered transcription text after a slot closes. */
-  flushSlotBuffer(editor) {
-    const buffered = this.slotBuffer;
-    this.slotBuffer = "";
-    if (buffered.trim()) {
-      this.pendingText += buffered;
-      if (this.pendingText.trim()) {
-        this.tracker.trackProcessText(
-          editor,
-          this.pendingText.trim() + " ",
-          () => this.callbacks.updateStatusBar("slot")
-        );
-        this.pendingText = "";
-      }
+  /** Flush any remaining pending text (called after slot close). */
+  flushAfterSlot(editor) {
+    if (this.pendingText.trim()) {
+      this.tracker.trackProcessText(
+        editor,
+        this.pendingText.trim() + " ",
+        () => this.callbacks.updateStatusBar("slot")
+      );
+      this.pendingText = "";
     }
   }
   // ── WebSocket lifecycle ──
@@ -3410,11 +3413,6 @@ var RealtimeSession = class {
     const newText = isCumulative ? text.substring(this.prevRaw.length) : text;
     this.prevRaw = isCumulative ? text : this.prevRaw + text;
     if (!newText) return;
-    if (isSlotActive()) {
-      this.slotBuffer += newText;
-      this.turnDelta += newText.length;
-      return;
-    }
     this.pendingText += newText;
     this.turnDelta += newText.length;
     const sentenceEnd = /[.!?]\s*$/;
@@ -3448,9 +3446,6 @@ var RealtimeSession = class {
     }
   }
   handleDone(editor, doneText) {
-    if (isSlotActive()) {
-      return;
-    }
     if (doneText && doneText.length > this.turnDelta) {
       this.pendingText += doneText.substring(this.turnDelta);
     }
@@ -3514,6 +3509,11 @@ var DualDelaySession = class {
     this.consecutiveFailures = 0;
     await this.connectWebSockets(editor);
     this.setState("streaming" /* Streaming */);
+  }
+  /** Update insert offset after a slot closes so subsequent text
+   *  continues at the correct cursor position. */
+  flushAfterSlot(editor) {
+    this.insertOffset = editor.posToOffset(editor.getCursor());
   }
   /** Send PCM audio data to both transcribers. */
   sendAudio(pcmData) {
@@ -3739,27 +3739,26 @@ var DualDelaySession = class {
   // ── Delta handlers ──
   handleFastDelta(text) {
     const isCumulative = this.fastPrevRaw && text.startsWith(this.fastPrevRaw);
-    if (isCumulative) {
-      const newPart = text.substring(this.fastPrevRaw.length);
-      if (newPart) this.fastText += newPart;
-    } else {
-      this.fastText += text;
-    }
+    let newPart = isCumulative ? text.substring(this.fastPrevRaw.length) : text;
     this.fastPrevRaw = isCumulative ? text : this.fastPrevRaw + text;
+    if (!newPart) return;
+    if (isSlotActive() && this.fastText === "") {
+      newPart = newPart.replace(/^\s+/, "");
+      if (!newPart) return;
+    }
+    this.fastText += newPart;
   }
   handleSlowDelta(text) {
     const isCumulative = this.slowPrevRaw && text.startsWith(this.slowPrevRaw);
-    if (isCumulative) {
-      const newPart = text.substring(this.slowPrevRaw.length);
-      if (newPart) {
-        this.slowText += newPart;
-        this.slowTurnDelta += newPart.length;
-      }
-    } else {
-      this.slowText += text;
-      this.slowTurnDelta += text.length;
-    }
+    let newPart = isCumulative ? text.substring(this.slowPrevRaw.length) : text;
     this.slowPrevRaw = isCumulative ? text : this.slowPrevRaw + text;
+    if (!newPart) return;
+    if (isSlotActive() && this.slowText === "") {
+      newPart = newPart.replace(/^\s+/, "");
+      if (!newPart) return;
+    }
+    this.slowText += newPart;
+    this.slowTurnDelta += newPart.length;
   }
   // ── Editor rendering ──
   /**
@@ -4231,10 +4230,6 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
         e.preventDefault();
         cancelSlot();
         this.updateStatusBar("recording");
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
-        if (view && this.realtimeSession) {
-          this.realtimeSession.flushSlotBuffer(view.editor);
-        }
         return;
       }
       const isEnterExit = (slot == null ? void 0 : slot.def.exitTrigger) === "enter" || (slot == null ? void 0 : slot.def.exitTrigger) === "enter-or-space";
@@ -4245,7 +4240,10 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
         if (view) {
           closeSlot(view.editor);
           if (this.realtimeSession) {
-            this.realtimeSession.flushSlotBuffer(view.editor);
+            this.realtimeSession.flushAfterSlot(view.editor);
+          }
+          if (this.dualDelaySession) {
+            this.dualDelaySession.flushAfterSlot(view.editor);
           }
         }
         this.updateStatusBar("recording");

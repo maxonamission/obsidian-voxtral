@@ -71,10 +71,25 @@ export function getActiveSlot(): ActiveSlot | null {
  */
 export function closeSlot(editor: Editor): boolean {
 	if (!activeSlot) return false;
-	const cursor = editor.getCursor();
-	editor.replaceRange(activeSlot.def.suffix, cursor);
-	const newCh = cursor.ch + activeSlot.def.suffix.length;
-	editor.setCursor({ line: cursor.line, ch: newCh });
+	let pos = editor.getCursor();
+
+	// Trim trailing whitespace before inserting suffix so that
+	// markdown formatting is not broken (e.g. "**text **" won't
+	// render as bold — we want "**text**").
+	if (activeSlot.def.suffix) {
+		const line = editor.getLine(pos.line);
+		const before = line.substring(0, pos.ch);
+		const trimmed = before.replace(/\s+$/, "");
+		if (trimmed.length < before.length) {
+			const trimFrom = { line: pos.line, ch: trimmed.length };
+			editor.replaceRange("", trimFrom, pos);
+			pos = { line: pos.line, ch: trimmed.length };
+		}
+	}
+
+	editor.replaceRange(activeSlot.def.suffix, pos);
+	const newCh = pos.ch + activeSlot.def.suffix.length;
+	editor.setCursor({ line: pos.line, ch: newCh });
 	activeSlot = null;
 	return true;
 }
@@ -132,7 +147,9 @@ function insertAtCursor(editor: Editor, text: string): void {
 	const cursor = editor.getCursor();
 
 	// Ensure a space between existing text and new text when needed.
-	if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
+	// Skip when a slot is active — text is inserted right after a
+	// formatting prefix (e.g. "**") and a space would break markdown.
+	if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !isSlotActive()) {
 		const charBefore = editor.getRange(
 			{ line: cursor.line, ch: cursor.ch - 1 },
 			cursor

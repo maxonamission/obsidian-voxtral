@@ -173,6 +173,12 @@ export class DualDelaySession {
 		this.setState(SessionState.Streaming);
 	}
 
+	/** Update insert offset after a slot closes so subsequent text
+	 *  continues at the correct cursor position. */
+	flushAfterSlot(editor: Editor): void {
+		this.insertOffset = editor.posToOffset(editor.getCursor());
+	}
+
 	/** Send PCM audio data to both transcribers. */
 	sendAudio(pcmData: ArrayBuffer): void {
 		this.fastTranscriber?.sendAudio(pcmData);
@@ -437,33 +443,45 @@ export class DualDelaySession {
 	private handleFastDelta(text: string): void {
 		const isCumulative =
 			this.fastPrevRaw && text.startsWith(this.fastPrevRaw);
-		if (isCumulative) {
-			const newPart = text.substring(this.fastPrevRaw.length);
-			if (newPart) this.fastText += newPart;
-		} else {
-			this.fastText += text;
-		}
+		let newPart = isCumulative
+			? text.substring(this.fastPrevRaw.length)
+			: text;
 		this.fastPrevRaw = isCumulative
 			? text
 			: this.fastPrevRaw + text;
+
+		if (!newPart) return;
+
+		// Strip leading whitespace from first text after a slot opens
+		// (prevents "** text" which breaks markdown formatting)
+		if (isSlotActive() && this.fastText === "") {
+			newPart = newPart.replace(/^\s+/, "");
+			if (!newPart) return;
+		}
+
+		this.fastText += newPart;
 	}
 
 	private handleSlowDelta(text: string): void {
 		const isCumulative =
 			this.slowPrevRaw && text.startsWith(this.slowPrevRaw);
-		if (isCumulative) {
-			const newPart = text.substring(this.slowPrevRaw.length);
-			if (newPart) {
-				this.slowText += newPart;
-				this.slowTurnDelta += newPart.length;
-			}
-		} else {
-			this.slowText += text;
-			this.slowTurnDelta += text.length;
-		}
+		let newPart = isCumulative
+			? text.substring(this.slowPrevRaw.length)
+			: text;
 		this.slowPrevRaw = isCumulative
 			? text
 			: this.slowPrevRaw + text;
+
+		if (!newPart) return;
+
+		// Strip leading whitespace from first text after a slot opens
+		if (isSlotActive() && this.slowText === "") {
+			newPart = newPart.replace(/^\s+/, "");
+			if (!newPart) return;
+		}
+
+		this.slowText += newPart;
+		this.slowTurnDelta += newPart.length;
 	}
 
 	// ── Editor rendering ──

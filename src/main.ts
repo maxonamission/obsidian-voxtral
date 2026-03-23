@@ -404,10 +404,6 @@ export default class VoxtralPlugin extends Plugin {
 				e.preventDefault();
 				cancelSlot();
 				this.updateStatusBar("recording");
-				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (view && this.realtimeSession) {
-					this.realtimeSession.flushSlotBuffer(view.editor);
-				}
 				return;
 			}
 			const isEnterExit = slot?.def.exitTrigger === "enter" || slot?.def.exitTrigger === "enter-or-space";
@@ -417,8 +413,13 @@ export default class VoxtralPlugin extends Plugin {
 				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (view) {
 					closeSlot(view.editor);
+					// Update session state so subsequent text continues
+					// at the correct position after the closing marker
 					if (this.realtimeSession) {
-						this.realtimeSession.flushSlotBuffer(view.editor);
+						this.realtimeSession.flushAfterSlot(view.editor);
+					}
+					if (this.dualDelaySession) {
+						this.dualDelaySession.flushAfterSlot(view.editor);
 					}
 				}
 				this.updateStatusBar("recording");

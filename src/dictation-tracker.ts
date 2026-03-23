@@ -88,8 +88,9 @@ export class DictationTracker {
 	trackInsertAtCursor(editor: Editor, text: string): void {
 		const cursor = editor.getCursor();
 
-		// Auto-space
-		if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
+		// Auto-space (skip when slot is active — text follows a
+		// formatting prefix like "**" and a space would break markdown)
+		if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !isSlotActive()) {
 			const charBefore = editor.getRange(
 				{ line: cursor.line, ch: cursor.ch - 1 },
 				cursor,
