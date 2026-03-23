@@ -13,7 +13,6 @@ import { migrateSettings } from "./settings-migration";
 import { VoxtralSettingTab } from "./settings-tab";
 import {
 	VoxtralHelpView,
-	VoxtralHelpModal,
 	VIEW_TYPE_VOXTRAL_HELP,
 } from "./help-view";
 import { AudioRecorder } from "./audio-recorder";
@@ -521,11 +520,8 @@ export default class VoxtralPlugin extends Plugin {
 			this.chunkIndex = 0;
 			this.consecutiveFailures = 0;
 			this.updateStatusBar("recording");
-			// Auto-open help panel on desktop only — on mobile it
-			// takes over the whole screen which is annoying.
-			if (!Platform.isMobile) {
-				void this.openHelpPanel();
-			}
+			// Auto-open help panel (right sidebar — swipeable on mobile)
+			void this.openHelpPanel();
 
 			// Show which microphone is active
 			const micName = this.recorder.activeMicLabel;
@@ -833,11 +829,6 @@ export default class VoxtralPlugin extends Plugin {
 
 	private async openHelpPanel(): Promise<void> {
 		// On mobile, use a modal instead of a sidebar leaf
-		if (Platform.isMobile) {
-			new VoxtralHelpModal(this.app, this.settings.language).open();
-			return;
-		}
-
 		const existing = this.app.workspace.getLeavesOfType(
 			VIEW_TYPE_VOXTRAL_HELP,
 		);
@@ -852,7 +843,12 @@ export default class VoxtralPlugin extends Plugin {
 				type: VIEW_TYPE_VOXTRAL_HELP,
 				active: true,
 			});
-			void this.app.workspace.revealLeaf(leaf);
+			// On desktop, bring into view immediately.
+			// On mobile, just register it in the right sidebar —
+			// the user can swipe from the right to reveal it.
+			if (!Platform.isMobile) {
+				void this.app.workspace.revealLeaf(leaf);
+			}
 		}
 	}
 

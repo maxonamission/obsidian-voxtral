@@ -3362,19 +3362,6 @@ function renderHelpContent(container, lang) {
     privacyList.createEl("li", { text: item });
   }
 }
-var VoxtralHelpModal = class extends import_obsidian3.Modal {
-  constructor(app, lang) {
-    super(app);
-    this.lang = lang;
-  }
-  onOpen() {
-    this.modalEl.addClass("voxtral-help-modal");
-    renderHelpContent(this.contentEl, this.lang);
-  }
-  onClose() {
-    this.contentEl.empty();
-  }
-};
 
 // src/templates.ts
 var import_obsidian4 = require("obsidian");
@@ -4691,9 +4678,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       this.chunkIndex = 0;
       this.consecutiveFailures = 0;
       this.updateStatusBar("recording");
-      if (!import_obsidian7.Platform.isMobile) {
-        void this.openHelpPanel();
-      }
+      void this.openHelpPanel();
       const micName = this.recorder.activeMicLabel;
       if (this.effectiveMode === "batch") {
         const enterHint = this.settings.enterToSend ? " Press Enter (when not typing) or tap send to transcribe chunks." : " Tap send to transcribe chunks while you keep talking.";
@@ -4937,10 +4922,6 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
   }
   // ── Help panel ──
   async openHelpPanel() {
-    if (import_obsidian7.Platform.isMobile) {
-      new VoxtralHelpModal(this.app, this.settings.language).open();
-      return;
-    }
     const existing = this.app.workspace.getLeavesOfType(
       VIEW_TYPE_VOXTRAL_HELP
     );
@@ -4954,7 +4935,9 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
         type: VIEW_TYPE_VOXTRAL_HELP,
         active: true
       });
-      void this.app.workspace.revealLeaf(leaf);
+      if (!import_obsidian7.Platform.isMobile) {
+        void this.app.workspace.revealLeaf(leaf);
+      }
     }
   }
   // ── Status bar ──
