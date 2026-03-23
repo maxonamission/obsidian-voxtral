@@ -1907,9 +1907,9 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       var _a;
       return !!((_a = m.capabilities) == null ? void 0 : _a.audio_transcription);
     };
-    const isChatModel = (m) => {
-      var _a;
-      return !!((_a = m.capabilities) == null ? void 0 : _a.completion_chat);
+    const isTextChatModel = (m) => {
+      var _a, _b, _c;
+      return !!((_a = m.capabilities) == null ? void 0 : _a.completion_chat) && !((_b = m.capabilities) == null ? void 0 : _b.audio_transcription) && !((_c = m.capabilities) == null ? void 0 : _c.vision);
     };
     this.addModelDropdown(
       containerEl,
@@ -1942,7 +1942,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         this.plugin.settings.correctModel = value.trim();
         await this.plugin.saveSettings();
       },
-      isChatModel
+      isTextChatModel
     );
     new import_obsidian2.Setting(containerEl).setName("Correction system prompt").setDesc("Leave empty to use the default prompt").addTextArea(
       (text) => text.setPlaceholder("Default correction prompt will be used...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {

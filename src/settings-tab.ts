@@ -364,8 +364,10 @@ export class VoxtralSettingTab extends PluginSettingTab {
 		// Filter helpers based on model capabilities
 		const isTranscriptionModel = (m: MistralModel) =>
 			!!m.capabilities?.audio_transcription;
-		const isChatModel = (m: MistralModel) =>
-			!!m.capabilities?.completion_chat;
+		const isTextChatModel = (m: MistralModel) =>
+			!!m.capabilities?.completion_chat &&
+			!m.capabilities?.audio_transcription &&
+			!m.capabilities?.vision;
 
 		this.addModelDropdown(
 			containerEl,
@@ -400,7 +402,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 				this.plugin.settings.correctModel = value.trim();
 				await this.plugin.saveSettings();
 			},
-			isChatModel
+			isTextChatModel
 		);
 
 		new Setting(containerEl)
