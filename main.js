@@ -2765,8 +2765,12 @@ ${nextNum}. `);
     slot: { prefix: "**", suffix: "**", exitTrigger: "voice" },
     action: (editor) => {
       const cursor = editor.getCursor();
-      editor.replaceRange("**", cursor);
-      const endCh = cursor.ch + 2;
+      const line = editor.getLine(cursor.line);
+      const before = line.substring(0, cursor.ch);
+      const needsSpace = before.length > 0 && !/\s$/.test(before);
+      const insert = needsSpace ? " **" : "**";
+      editor.replaceRange(insert, cursor);
+      const endCh = cursor.ch + insert.length;
       editor.setCursor({ line: cursor.line, ch: endCh });
       activeSlot = {
         def: { prefix: "**", suffix: "**", exitTrigger: "voice" },
@@ -2786,8 +2790,12 @@ ${nextNum}. `);
     slot: { prefix: "*", suffix: "*", exitTrigger: "voice" },
     action: (editor) => {
       const cursor = editor.getCursor();
-      editor.replaceRange("*", cursor);
-      const endCh = cursor.ch + 1;
+      const line = editor.getLine(cursor.line);
+      const before = line.substring(0, cursor.ch);
+      const needsSpace = before.length > 0 && !/\s$/.test(before);
+      const insert = needsSpace ? " *" : "*";
+      editor.replaceRange(insert, cursor);
+      const endCh = cursor.ch + insert.length;
       editor.setCursor({ line: cursor.line, ch: endCh });
       activeSlot = {
         def: { prefix: "*", suffix: "*", exitTrigger: "voice" },
@@ -2807,8 +2815,12 @@ ${nextNum}. `);
     slot: { prefix: "`", suffix: "`", exitTrigger: "voice" },
     action: (editor) => {
       const cursor = editor.getCursor();
-      editor.replaceRange("`", cursor);
-      const endCh = cursor.ch + 1;
+      const line = editor.getLine(cursor.line);
+      const before = line.substring(0, cursor.ch);
+      const needsSpace = before.length > 0 && !/\s$/.test(before);
+      const insert = needsSpace ? " `" : "`";
+      editor.replaceRange(insert, cursor);
+      const endCh = cursor.ch + insert.length;
       editor.setCursor({ line: cursor.line, ch: endCh });
       activeSlot = {
         def: { prefix: "`", suffix: "`", exitTrigger: "voice" },
@@ -4146,8 +4158,14 @@ var DualDelaySession = class {
     const to = editor.offsetToPos(
       this.insertOffset + this.displayLen
     );
-    if (this.displayLen === 0) {
-      displayText = displayText.replace(/^\s+/, "");
+    if (this.displayLen === 0 && /^\s/.test(displayText)) {
+      const charBefore = from.ch > 0 ? editor.getRange(
+        { line: from.line, ch: from.ch - 1 },
+        from
+      ) : "";
+      if (from.ch === 0 || charBefore === " " || charBefore === "	") {
+        displayText = displayText.replace(/^\s+/, "");
+      }
     }
     editor.replaceRange(displayText, from, to);
     this.displayLen = displayText.length;
@@ -4394,10 +4412,23 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
   }
   async loadSettings() {
     this.settings = migrateSettings(await this.loadData());
-    const hasBuiltIn = this.settings.customCommands.some((c) => c.builtIn);
-    if (!hasBuiltIn) {
+    const defaults = getDefaultBuiltInCommands();
+    const defaultMap = new Map(defaults.map((d) => [d.id, d]));
+    const existingIds = new Set(this.settings.customCommands.map((c) => c.id));
+    for (const cmd of this.settings.customCommands) {
+      if (cmd.builtIn && defaultMap.has(cmd.id)) {
+        const def = defaultMap.get(cmd.id);
+        cmd.labels = def.labels;
+        cmd.triggers = def.triggers;
+        cmd.insertText = def.insertText;
+        cmd.slotPrefix = def.slotPrefix;
+        cmd.slotSuffix = def.slotSuffix;
+      }
+    }
+    const newBuiltIns = defaults.filter((d) => !existingIds.has(d.id));
+    if (newBuiltIns.length > 0) {
       this.settings.customCommands = [
-        ...getDefaultBuiltInCommands(),
+        ...newBuiltIns,
         ...this.settings.customCommands
       ];
     }

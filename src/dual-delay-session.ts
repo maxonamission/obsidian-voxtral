@@ -542,12 +542,22 @@ export class DualDelaySession {
 			this.insertOffset + this.displayLen,
 		);
 
-		// Strip leading whitespace when the display region is empty —
-		// the API often prepends a space for word separation, but at
-		// the start of a new sentence (after the previous one was
-		// committed) this would cause an unwanted leading space.
-		if (this.displayLen === 0) {
-			displayText = displayText.replace(/^\s+/, "");
+		// Strip leading whitespace only when it would be redundant:
+		// at column 0 (start of line) or when the preceding character
+		// is already whitespace.  Do NOT strip when the previous char
+		// is a non-space (e.g. a period) — the space is needed for
+		// word separation between sentences.
+		if (this.displayLen === 0 && /^\s/.test(displayText)) {
+			const charBefore =
+				from.ch > 0
+					? editor.getRange(
+							{ line: from.line, ch: from.ch - 1 },
+							from,
+						)
+					: "";
+			if (from.ch === 0 || charBefore === " " || charBefore === "\t") {
+				displayText = displayText.replace(/^\s+/, "");
+			}
 		}
 
 		editor.replaceRange(displayText, from, to);

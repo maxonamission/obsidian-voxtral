@@ -182,11 +182,28 @@ export default class VoxtralPlugin extends Plugin {
 
 	async loadSettings(): Promise<void> {
 		this.settings = migrateSettings(await this.loadData());
-		// Seed built-in custom commands if none present
-		const hasBuiltIn = this.settings.customCommands.some((c) => c.builtIn);
-		if (!hasBuiltIn) {
+		// Ensure built-in custom commands are present and up to date
+		// (new properties like `labels` are merged from defaults)
+		const defaults = getDefaultBuiltInCommands();
+		const defaultMap = new Map(defaults.map((d) => [d.id, d]));
+		const existingIds = new Set(this.settings.customCommands.map((c) => c.id));
+
+		// Update existing built-ins with latest defaults (labels, triggers, etc.)
+		for (const cmd of this.settings.customCommands) {
+			if (cmd.builtIn && defaultMap.has(cmd.id)) {
+				const def = defaultMap.get(cmd.id)!;
+				cmd.labels = def.labels;
+				cmd.triggers = def.triggers;
+				cmd.insertText = def.insertText;
+				cmd.slotPrefix = def.slotPrefix;
+				cmd.slotSuffix = def.slotSuffix;
+			}
+		}
+		// Add any new built-ins that don't exist yet
+		const newBuiltIns = defaults.filter((d) => !existingIds.has(d.id));
+		if (newBuiltIns.length > 0) {
 			this.settings.customCommands = [
-				...getDefaultBuiltInCommands(),
+				...newBuiltIns,
 				...this.settings.customCommands,
 			];
 		}

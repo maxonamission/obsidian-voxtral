@@ -342,8 +342,12 @@ const COMMAND_DEFS: CommandDef[] = [
 		slot: { prefix: "**", suffix: "**", exitTrigger: "voice" },
 		action: (editor) => {
 			const cursor = editor.getCursor();
-			editor.replaceRange("**", cursor);
-			const endCh = cursor.ch + 2;
+			const line = editor.getLine(cursor.line);
+			const before = line.substring(0, cursor.ch);
+			const needsSpace = before.length > 0 && !/\s$/.test(before);
+			const insert = needsSpace ? " **" : "**";
+			editor.replaceRange(insert, cursor);
+			const endCh = cursor.ch + insert.length;
 			editor.setCursor({ line: cursor.line, ch: endCh });
 			activeSlot = {
 				def: { prefix: "**", suffix: "**", exitTrigger: "voice" },
@@ -363,8 +367,12 @@ const COMMAND_DEFS: CommandDef[] = [
 		slot: { prefix: "*", suffix: "*", exitTrigger: "voice" },
 		action: (editor) => {
 			const cursor = editor.getCursor();
-			editor.replaceRange("*", cursor);
-			const endCh = cursor.ch + 1;
+			const line = editor.getLine(cursor.line);
+			const before = line.substring(0, cursor.ch);
+			const needsSpace = before.length > 0 && !/\s$/.test(before);
+			const insert = needsSpace ? " *" : "*";
+			editor.replaceRange(insert, cursor);
+			const endCh = cursor.ch + insert.length;
 			editor.setCursor({ line: cursor.line, ch: endCh });
 			activeSlot = {
 				def: { prefix: "*", suffix: "*", exitTrigger: "voice" },
@@ -384,8 +392,12 @@ const COMMAND_DEFS: CommandDef[] = [
 		slot: { prefix: "`", suffix: "`", exitTrigger: "voice" },
 		action: (editor) => {
 			const cursor = editor.getCursor();
-			editor.replaceRange("`", cursor);
-			const endCh = cursor.ch + 1;
+			const line = editor.getLine(cursor.line);
+			const before = line.substring(0, cursor.ch);
+			const needsSpace = before.length > 0 && !/\s$/.test(before);
+			const insert = needsSpace ? " `" : "`";
+			editor.replaceRange(insert, cursor);
+			const endCh = cursor.ch + insert.length;
 			editor.setCursor({ line: cursor.line, ch: endCh });
 			activeSlot = {
 				def: { prefix: "`", suffix: "`", exitTrigger: "voice" },
