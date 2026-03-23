@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-voxtral-transcribe",
-	"version": "0.8.2",
+	"version": "0.8.3",
 	"description": "Speech-to-text dictation using Mistral Voxtral. Supports real-time streaming, voice commands (headings, lists, to-dos), and automatic text correction.",
 	"main": "main.js",
 	"scripts": {

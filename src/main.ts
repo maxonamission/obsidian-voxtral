@@ -13,6 +13,7 @@ import { migrateSettings } from "./settings-migration";
 import { VoxtralSettingTab } from "./settings-tab";
 import {
 	VoxtralHelpView,
+	VoxtralHelpModal,
 	VIEW_TYPE_VOXTRAL_HELP,
 } from "./help-view";
 import { AudioRecorder } from "./audio-recorder";
@@ -831,6 +832,12 @@ export default class VoxtralPlugin extends Plugin {
 	// ── Help panel ──
 
 	private async openHelpPanel(): Promise<void> {
+		// On mobile, use a modal instead of a sidebar leaf
+		if (Platform.isMobile) {
+			new VoxtralHelpModal(this.app, this.settings.language).open();
+			return;
+		}
+
 		const existing = this.app.workspace.getLeavesOfType(
 			VIEW_TYPE_VOXTRAL_HELP,
 		);

@@ -2260,7 +2260,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
     });
   }
   renderCustomCommands(containerEl) {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i;
     const commands = this.plugin.settings.customCommands;
     const lang = this.plugin.settings.language;
     for (let i = 0; i < commands.length; i++) {
@@ -2268,7 +2268,9 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       const triggers = (_b = (_a = cmd.triggers[lang]) != null ? _a : cmd.triggers["en"]) != null ? _b : [];
       const typeLabel = cmd.type === "slot" ? `${(_c = cmd.slotPrefix) != null ? _c : ""}\u2026${(_d = cmd.slotSuffix) != null ? _d : ""}` : ((_e = cmd.insertText) != null ? _e : "").replace(/\n/g, "\u21B5").slice(0, 30);
       const namePrefix = cmd.builtIn ? "\u2699 " : "";
-      new import_obsidian2.Setting(containerEl).setName(namePrefix + (triggers.join(", ") || cmd.id)).setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`).addButton(
+      const displayLabel = (_i = (_h = (_f = cmd.labels) == null ? void 0 : _f[lang]) != null ? _h : (_g = cmd.labels) == null ? void 0 : _g["en"]) != null ? _i : "";
+      const displayName = displayLabel || triggers.join(", ") || cmd.id;
+      new import_obsidian2.Setting(containerEl).setName(namePrefix + displayName).setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`).addButton(
         (btn) => btn.setButtonText("Edit").onClick(() => {
           this.openCommandEditor(cmd, i);
         })
@@ -2338,6 +2340,12 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
           triggerInput = text.inputEl;
           text.setValue(((_a2 = cmd.triggers[lang]) != null ? _a2 : []).join(", "));
         });
+        let labelInput;
+        new import_obsidian2.Setting(contentEl).setName("Label (name in help panel)").setDesc("Leave empty to use trigger phrase").addText((text) => {
+          var _a2, _b;
+          labelInput = text.inputEl;
+          text.setValue((_b = (_a2 = cmd.labels) == null ? void 0 : _a2[lang]) != null ? _b : "");
+        });
         let typeValue = cmd.type;
         new import_obsidian2.Setting(contentEl).setName("Type").addDropdown((drop) => {
           drop.addOption("insert", "Insert text");
@@ -2399,6 +2407,13 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
               return;
             }
             cmd.triggers[lang] = triggers;
+            const labelVal = labelInput.value.trim();
+            if (labelVal) {
+              if (!cmd.labels) cmd.labels = {};
+              cmd.labels[lang] = labelVal;
+            } else if (cmd.labels) {
+              delete cmd.labels[lang];
+            }
             cmd.type = typeValue;
             if (cmd.type === "insert") {
               cmd.insertText = insertInput.value.replace(/\\n/g, "\n");
@@ -3305,42 +3320,58 @@ var VoxtralHelpView = class extends import_obsidian3.ItemView {
   render() {
     const container = this.contentEl;
     container.empty();
-    container.addClass("voxtral-help-view");
-    const strings = getStrings(this.lang);
-    container.createEl("h3", { text: strings.title });
-    const commands = getCommandList();
-    const table = container.createEl("table", {
-      cls: "voxtral-help-table"
-    });
-    const thead = table.createEl("thead");
-    const headerRow = thead.createEl("tr");
-    headerRow.createEl("th", { text: strings.command });
-    headerRow.createEl("th", { text: strings.say });
-    const tbody = table.createEl("tbody");
-    for (const cmd of commands) {
-      const row = tbody.createEl("tr");
-      row.createEl("td", {
-        text: cmd.label,
-        cls: "voxtral-help-label"
-      });
-      row.createEl("td", {
-        text: cmd.patterns.slice(0, 2).map((p) => `"${p}"`).join(" / "),
-        cls: "voxtral-help-patterns"
-      });
-    }
-    container.createEl("h4", { text: strings.tips });
-    const tips = container.createEl("ul", { cls: "voxtral-help-tips" });
-    for (const tip of strings.tipItems) {
-      tips.createEl("li", { text: tip });
-    }
-    container.createEl("h4", { text: strings.privacy });
-    const privacyList = container.createEl("ul", { cls: "voxtral-help-privacy" });
-    for (const item of strings.privacyItems) {
-      privacyList.createEl("li", { text: item });
-    }
+    renderHelpContent(container, this.lang);
   }
   // eslint-disable-next-line @typescript-eslint/require-await -- base class requires async signature
   async onClose() {
+    this.contentEl.empty();
+  }
+};
+function renderHelpContent(container, lang) {
+  container.addClass("voxtral-help-view");
+  const strings = getStrings(lang);
+  container.createEl("h3", { text: strings.title });
+  const commands = getCommandList();
+  const table = container.createEl("table", {
+    cls: "voxtral-help-table"
+  });
+  const thead = table.createEl("thead");
+  const headerRow = thead.createEl("tr");
+  headerRow.createEl("th", { text: strings.command });
+  headerRow.createEl("th", { text: strings.say });
+  const tbody = table.createEl("tbody");
+  for (const cmd of commands) {
+    const row = tbody.createEl("tr");
+    row.createEl("td", {
+      text: cmd.label,
+      cls: "voxtral-help-label"
+    });
+    row.createEl("td", {
+      text: cmd.patterns.slice(0, 2).map((p) => `"${p}"`).join(" / "),
+      cls: "voxtral-help-patterns"
+    });
+  }
+  container.createEl("h4", { text: strings.tips });
+  const tips = container.createEl("ul", { cls: "voxtral-help-tips" });
+  for (const tip of strings.tipItems) {
+    tips.createEl("li", { text: tip });
+  }
+  container.createEl("h4", { text: strings.privacy });
+  const privacyList = container.createEl("ul", { cls: "voxtral-help-privacy" });
+  for (const item of strings.privacyItems) {
+    privacyList.createEl("li", { text: item });
+  }
+}
+var VoxtralHelpModal = class extends import_obsidian3.Modal {
+  constructor(app, lang) {
+    super(app);
+    this.lang = lang;
+  }
+  onOpen() {
+    this.modalEl.addClass("voxtral-help-modal");
+    renderHelpContent(this.contentEl, this.lang);
+  }
+  onClose() {
     this.contentEl.empty();
   }
 };
@@ -4906,6 +4937,10 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
   }
   // ── Help panel ──
   async openHelpPanel() {
+    if (import_obsidian7.Platform.isMobile) {
+      new VoxtralHelpModal(this.app, this.settings.language).open();
+      return;
+    }
     const existing = this.app.workspace.getLeavesOfType(
       VIEW_TYPE_VOXTRAL_HELP
     );

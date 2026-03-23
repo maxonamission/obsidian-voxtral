@@ -1,7 +1,7 @@
 // Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
 // Licensed under GPL-3.0 — see LICENSE for details
 // https://github.com/maxonamission/voxtral-transcribe
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, Modal, WorkspaceLeaf } from "obsidian";
 import { getCommandList } from "./voice-commands";
 
 export const VIEW_TYPE_VOXTRAL_HELP = "voxtral-help";
@@ -177,53 +177,74 @@ export class VoxtralHelpView extends ItemView {
 	private render(): void {
 		const container = this.contentEl;
 		container.empty();
-		container.addClass("voxtral-help-view");
-
-		const strings = getStrings(this.lang);
-		container.createEl("h3", { text: strings.title });
-
-		const commands = getCommandList();
-
-		const table = container.createEl("table", {
-			cls: "voxtral-help-table",
-		});
-
-		const thead = table.createEl("thead");
-		const headerRow = thead.createEl("tr");
-		headerRow.createEl("th", { text: strings.command });
-		headerRow.createEl("th", { text: strings.say });
-
-		const tbody = table.createEl("tbody");
-		for (const cmd of commands) {
-			const row = tbody.createEl("tr");
-			row.createEl("td", {
-				text: cmd.label,
-				cls: "voxtral-help-label",
-			});
-			row.createEl("td", {
-				text: cmd.patterns
-					.slice(0, 2)
-					.map((p) => `"${p}"`)
-					.join(" / "),
-				cls: "voxtral-help-patterns",
-			});
-		}
-
-		container.createEl("h4", { text: strings.tips });
-		const tips = container.createEl("ul", { cls: "voxtral-help-tips" });
-		for (const tip of strings.tipItems) {
-			tips.createEl("li", { text: tip });
-		}
-
-		container.createEl("h4", { text: strings.privacy });
-		const privacyList = container.createEl("ul", { cls: "voxtral-help-privacy" });
-		for (const item of strings.privacyItems) {
-			privacyList.createEl("li", { text: item });
-		}
+		renderHelpContent(container, this.lang);
 	}
 
 	// eslint-disable-next-line @typescript-eslint/require-await -- base class requires async signature
 	async onClose(): Promise<void> {
+		this.contentEl.empty();
+	}
+}
+
+/** Shared render logic used by both the sidebar view and the mobile modal. */
+function renderHelpContent(container: HTMLElement, lang: string): void {
+	container.addClass("voxtral-help-view");
+
+	const strings = getStrings(lang);
+	container.createEl("h3", { text: strings.title });
+
+	const commands = getCommandList();
+
+	const table = container.createEl("table", {
+		cls: "voxtral-help-table",
+	});
+
+	const thead = table.createEl("thead");
+	const headerRow = thead.createEl("tr");
+	headerRow.createEl("th", { text: strings.command });
+	headerRow.createEl("th", { text: strings.say });
+
+	const tbody = table.createEl("tbody");
+	for (const cmd of commands) {
+		const row = tbody.createEl("tr");
+		row.createEl("td", {
+			text: cmd.label,
+			cls: "voxtral-help-label",
+		});
+		row.createEl("td", {
+			text: cmd.patterns
+				.slice(0, 2)
+				.map((p) => `"${p}"`)
+				.join(" / "),
+			cls: "voxtral-help-patterns",
+		});
+	}
+
+	container.createEl("h4", { text: strings.tips });
+	const tips = container.createEl("ul", { cls: "voxtral-help-tips" });
+	for (const tip of strings.tipItems) {
+		tips.createEl("li", { text: tip });
+	}
+
+	container.createEl("h4", { text: strings.privacy });
+	const privacyList = container.createEl("ul", { cls: "voxtral-help-privacy" });
+	for (const item of strings.privacyItems) {
+		privacyList.createEl("li", { text: item });
+	}
+}
+
+/** Modal variant of the help panel for mobile use. */
+export class VoxtralHelpModal extends Modal {
+	constructor(app: App, private lang: string) {
+		super(app);
+	}
+
+	onOpen(): void {
+		this.modalEl.addClass("voxtral-help-modal");
+		renderHelpContent(this.contentEl, this.lang);
+	}
+
+	onClose(): void {
 		this.contentEl.empty();
 	}
 }

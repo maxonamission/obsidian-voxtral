@@ -434,9 +434,11 @@ export class VoxtralSettingTab extends PluginSettingTab {
 				? `${cmd.slotPrefix ?? ""}…${cmd.slotSuffix ?? ""}`
 				: (cmd.insertText ?? "").replace(/\n/g, "↵").slice(0, 30);
 			const namePrefix = cmd.builtIn ? "⚙ " : "";
+			const displayLabel = cmd.labels?.[lang] ?? cmd.labels?.["en"] ?? "";
+			const displayName = displayLabel || triggers.join(", ") || cmd.id;
 
 			new Setting(containerEl)
-				.setName(namePrefix + (triggers.join(", ") || cmd.id))
+				.setName(namePrefix + displayName)
 				.setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`)
 				.addButton((btn) =>
 					btn
@@ -544,6 +546,16 @@ export class VoxtralSettingTab extends PluginSettingTab {
 						text.setValue((cmd.triggers[lang] ?? []).join(", "));
 					});
 
+				// Label (display name in help panel)
+				let labelInput: HTMLInputElement;
+				new Setting(contentEl)
+					.setName("Label (name in help panel)")
+					.setDesc("Leave empty to use trigger phrase")
+					.addText((text) => {
+						labelInput = text.inputEl;
+						text.setValue(cmd.labels?.[lang] ?? "");
+					});
+
 				// Type selector
 				let typeValue = cmd.type;
 				new Setting(contentEl)
@@ -637,6 +649,16 @@ export class VoxtralSettingTab extends PluginSettingTab {
 								}
 
 								cmd.triggers[lang] = triggers;
+
+								// Save label
+								const labelVal = labelInput.value.trim();
+								if (labelVal) {
+									if (!cmd.labels) cmd.labels = {};
+									cmd.labels[lang] = labelVal;
+								} else if (cmd.labels) {
+									delete cmd.labels[lang];
+								}
+
 								cmd.type = typeValue;
 
 								if (cmd.type === "insert") {
