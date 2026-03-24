@@ -138,6 +138,12 @@ export class DualDelaySession {
 	private slowCommitted = 0;
 	private commandJustRan = false;
 
+	// Remainder command debounce — prevents premature matching when
+	// cumulative deltas haven't finished (e.g. "nieuw todo" matching
+	// before the full "nieuw todo item" arrives)
+	private remainderTimer: ReturnType<typeof setTimeout> | null = null;
+	private static readonly REMAINDER_DEBOUNCE_MS = 400;
+
 	// Reconnection
 	private consecutiveFailures = 0;
 	private maxConsecutiveFailures = 5;
@@ -168,6 +174,10 @@ export class DualDelaySession {
 		this.slowPrevRaw = "";
 		this.commandJustRan = false;
 		this.consecutiveFailures = 0;
+		if (this.remainderTimer) {
+			clearTimeout(this.remainderTimer);
+			this.remainderTimer = null;
+		}
 
 		await this.connectWebSockets(editor);
 		this.setState(SessionState.Streaming);
@@ -191,10 +201,18 @@ export class DualDelaySession {
 		this.fastTranscriber?.endAudio();
 		this.slowTranscriber?.endAudio();
 
+		// Cancel any pending remainder command — we'll do a final check below
+		if (this.remainderTimer) {
+			clearTimeout(this.remainderTimer);
+			this.remainderTimer = null;
+		}
+
 		await new Promise((resolve) => setTimeout(resolve, 1000));
 
 		const editor = this.callbacks.getEditor();
 		if (editor) {
+			// Execute any pending standalone command immediately
+			this.executeRemainderCommand(editor);
 			// Process any remaining slow commands
 			this.processSlowCommands(editor);
 
@@ -385,6 +403,13 @@ export class DualDelaySession {
 	}
 
 	private async reconnectSlowStream(editor: Editor): Promise<void> {
+		// Cancel pending remainder command — turn is ending
+		if (this.remainderTimer) {
+			clearTimeout(this.remainderTimer);
+			this.remainderTimer = null;
+		}
+		// Execute any pending standalone command before flushing
+		this.executeRemainderCommand(editor);
 		// Flush any remaining text from the previous turn as committed text
 		// (the utterance ended, so no more text will complete the sentence)
 		if (this.slowText.trim()) {
@@ -557,6 +582,10 @@ export class DualDelaySession {
 					: "";
 			if (from.ch === 0 || charBefore === " " || charBefore === "\t") {
 				displayText = displayText.replace(/^\s+/, "");
+				// Also strip from accumulators so subsequent renders
+				// don't reintroduce the leading whitespace
+				this.slowText = this.slowText.replace(/^\s+/, "");
+				this.fastText = this.fastText.replace(/^\s+/, "");
 			}
 		}
 
@@ -616,40 +645,29 @@ export class DualDelaySession {
 
 		// If there are no complete sentences, check if the entire text
 		// is a standalone voice command (no surrounding text needed).
+		// Debounce: wait for more text before executing, to prevent
+		// premature matching on partial cumulative deltas (e.g.
+		// "nieuw todo" matching before "nieuw todo item" arrives).
 		if (!segments && remainder.trim()) {
 			const cmdMatch = matchCommand(remainder.trim());
 			if (cmdMatch && !cmdMatch.textBefore) {
-				// Pure command without text before — execute it
-				const from = editor.offsetToPos(this.insertOffset);
-				const to = editor.offsetToPos(
-					this.insertOffset + this.displayLen,
-				);
-				editor.replaceRange("", from, to);
-				editor.setCursor(from);
-				this.displayLen = 0;
-
-				cmdMatch.command.action(editor);
-				if (cmdMatch.command.id === "stopRecording") {
-					setTimeout(
-						() => this.callbacks.stopRecording(),
-						0,
-					);
-				}
-				if (isSlotActive()) {
-					this.callbacks.updateStatusBar("slot");
-				}
-
-				this.commandJustRan = true;
-				this.slowCommitted += this.slowText.length;
-				this.slowText = "";
-				this.fastText = "";
-				this.insertOffset = editor.posToOffset(
-					editor.getCursor(),
-				);
+				// Schedule execution after debounce period
+				if (this.remainderTimer) clearTimeout(this.remainderTimer);
+				this.remainderTimer = setTimeout(() => {
+					this.remainderTimer = null;
+					this.executeRemainderCommand(editor);
+				}, DualDelaySession.REMAINDER_DEBOUNCE_MS);
 				return;
 			}
 			// Not a command — leave it for later (more text may come)
 			return;
+		}
+
+		// Cancel any pending remainder command — we now have full
+		// sentences to process instead.
+		if (this.remainderTimer) {
+			clearTimeout(this.remainderTimer);
+			this.remainderTimer = null;
 		}
 
 		if (!segments) return;
@@ -719,5 +737,53 @@ export class DualDelaySession {
 		if (this.slowText || this.fastText) {
 			this.renderText(editor);
 		}
+	}
+
+	/**
+	 * Execute a standalone voice command from the remainder text.
+	 * Called after the debounce timer fires (no new deltas arrived).
+	 * Re-checks the match in case text changed before the timer fired.
+	 */
+	private executeRemainderCommand(editor: Editor): void {
+		if (!this.slowText) return;
+
+		// Re-check: text may have changed or segments may have formed
+		const segments = this.slowText.match(/[^.!?]+[.!?]+\s*/g);
+		if (segments) {
+			// Sentences appeared — let processSlowCommands handle them
+			this.processSlowCommands(editor);
+			return;
+		}
+
+		const cmdMatch = matchCommand(this.slowText.trim());
+		if (!cmdMatch || cmdMatch.textBefore) return;
+
+		// Execute the standalone command
+		const from = editor.offsetToPos(this.insertOffset);
+		const to = editor.offsetToPos(
+			this.insertOffset + this.displayLen,
+		);
+		editor.replaceRange("", from, to);
+		editor.setCursor(from);
+		this.displayLen = 0;
+
+		cmdMatch.command.action(editor);
+		if (cmdMatch.command.id === "stopRecording") {
+			setTimeout(
+				() => this.callbacks.stopRecording(),
+				0,
+			);
+		}
+		if (isSlotActive()) {
+			this.callbacks.updateStatusBar("slot");
+		}
+
+		this.commandJustRan = true;
+		this.slowCommitted += this.slowText.length;
+		this.slowText = "";
+		this.fastText = "";
+		this.insertOffset = editor.posToOffset(
+			editor.getCursor(),
+		);
 	}
 }

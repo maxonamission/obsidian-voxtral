@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Editor } from "obsidian";
 import type { SessionCallbacks } from "../realtime-session";
 import { DEFAULT_SETTINGS, VoxtralSettings } from "../types";
@@ -201,6 +201,7 @@ describe("DualDelaySession", () => {
 	let settings: VoxtralSettings;
 
 	beforeEach(() => {
+		vi.useFakeTimers();
 		vi.clearAllMocks();
 		transcriberInstances.length = 0;
 		setLanguage("nl");
@@ -208,6 +209,10 @@ describe("DualDelaySession", () => {
 		tracker = new DictationTracker();
 		settings = createSettings();
 		callbacks = createCallbacks(editor);
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
 	});
 
 	describe("reconciliation", () => {
@@ -276,6 +281,9 @@ describe("DualDelaySession", () => {
 			// Slow stream receives a standalone command
 			tc.slow.onDelta("nieuwe alinea");
 
+			// Standalone commands are debounced — advance timer
+			vi.advanceTimersByTime(400);
+
 			// The command should have been executed (new paragraph = \n\n)
 			const text = editor.getValue();
 			expect(text).toContain("\n\n");
@@ -301,8 +309,9 @@ describe("DualDelaySession", () => {
 
 			tc.slow.onDelta("stop opname");
 
-			// stopRecording should have been called (async via setTimeout)
-			await new Promise((r) => setTimeout(r, 10));
+			// Standalone command debounce + async stopRecording via setTimeout
+			vi.advanceTimersByTime(400);
+			vi.advanceTimersByTime(10);
 			expect(mockStopRecording).toHaveBeenCalled();
 		});
 
@@ -311,8 +320,10 @@ describe("DualDelaySession", () => {
 			await session.start(editor);
 			const tc = getTranscriberCallbacks();
 
-			// Command fires
+			// Command fires (standalone, debounced)
 			tc.slow.onDelta("nieuwe alinea");
+			vi.advanceTimersByTime(400);
+
 			// Then API sends trailing period (cumulative)
 			tc.slow.onDelta("nieuwe alinea.");
 
@@ -328,13 +339,13 @@ describe("DualDelaySession", () => {
 			await session.start(editor);
 			const tc = getTranscriberCallbacks();
 
-			// Slow stream detects bold-open command
+			// Slow stream detects bold-open command (standalone, debounced)
 			tc.slow.onDelta("vet openen");
+			vi.advanceTimersByTime(400);
 
 			// Verify bold markers were inserted
 			expect(editor.getValue()).toContain("**");
 
-			// Clear mock state tracking for fresh fast deltas
 			// Fast stream sends text with leading space (typical API behavior)
 			tc.fast.onDelta(" Dit is vet");
 
@@ -349,8 +360,9 @@ describe("DualDelaySession", () => {
 			await session.start(editor);
 			const tc = getTranscriberCallbacks();
 
-			// Slow stream detects bold-open command
+			// Slow stream detects bold-open command (standalone, debounced)
 			tc.slow.onDelta("vet openen");
+			vi.advanceTimersByTime(400);
 
 			// Slow stream sends next text with leading space
 			tc.slow.onDelta(" Dit is vet tekst.");
@@ -366,6 +378,7 @@ describe("DualDelaySession", () => {
 			const tc = getTranscriberCallbacks();
 
 			tc.slow.onDelta("vet openen");
+			vi.advanceTimersByTime(400);
 
 			expect(mockUpdateStatusBar).toHaveBeenCalledWith("slot");
 		});
@@ -403,7 +416,9 @@ describe("DualDelaySession", () => {
 			// Slow accurate text (no sentence end, so not auto-committed)
 			tc.slow.onDelta("Hello world");
 
-			await session.stop();
+			const stopPromise = session.stop();
+			vi.advanceTimersByTime(1000);
+			await stopPromise;
 
 			// Final text should use slow (most accurate)
 			expect(editor.getValue()).toContain("Hello world");
@@ -417,7 +432,9 @@ describe("DualDelaySession", () => {
 			// Only fast stream has text
 			tc.fast.onDelta("Quick text");
 
-			await session.stop();
+			const stopPromise = session.stop();
+			vi.advanceTimersByTime(1000);
+			await stopPromise;
 
 			expect(editor.getValue()).toContain("Quick text");
 		});
@@ -434,6 +451,109 @@ describe("DualDelaySession", () => {
 
 			// Verify no error occurred (internal state not directly testable)
 			expect(editor.getValue()).toBeDefined();
+		});
+	});
+
+	describe("leading whitespace stripping", () => {
+		it("strips leading space from accumulators so subsequent renders don't reintroduce it", async () => {
+			const session = new DualDelaySession(settings, tracker, callbacks);
+			await session.start(editor);
+			const tc = getTranscriberCallbacks();
+
+			// First slow delta has a leading space (common API behavior)
+			tc.slow.onDelta(" Hallo");
+
+			// First render strips the space — "Hallo" displayed
+			expect(editor.getValue()).toBe("Hallo");
+
+			// More text arrives (cumulative delta)
+			tc.slow.onDelta(" Hallo wereld.");
+
+			// The leading space must NOT reappear
+			const text = editor.getValue();
+			expect(text).not.toMatch(/^\s/);
+			expect(text).toContain("Hallo wereld.");
+		});
+
+		it("strips leading space at start of line (column 0)", async () => {
+			const session = new DualDelaySession(settings, tracker, callbacks);
+			await session.start(editor);
+			const tc = getTranscriberCallbacks();
+
+			// First delta has leading space at column 0
+			tc.slow.onDelta(" Begin tekst.");
+
+			const text = editor.getValue();
+			// Leading space should be stripped at column 0
+			expect(text).not.toMatch(/^\s/);
+			expect(text).toContain("Begin tekst.");
+		});
+	});
+
+	describe("remainder command debounce", () => {
+		it("does not execute standalone command immediately on delta", async () => {
+			const session = new DualDelaySession(settings, tracker, callbacks);
+			await session.start(editor);
+			const tc = getTranscriberCallbacks();
+
+			// Standalone command arrives but might be partial
+			tc.slow.onDelta("nieuw todo");
+
+			// Command should NOT have executed yet (debounce pending)
+			const text = editor.getValue();
+			expect(text).not.toContain("- [ ]");
+		});
+
+		it("executes standalone command after debounce period", async () => {
+			const session = new DualDelaySession(settings, tracker, callbacks);
+			await session.start(editor);
+			const tc = getTranscriberCallbacks();
+
+			tc.slow.onDelta("nieuw todo");
+
+			// Advance past debounce period
+			vi.advanceTimersByTime(400);
+
+			// Now the command should have executed
+			const text = editor.getValue();
+			expect(text).toContain("- [ ]");
+		});
+
+		it("cancels premature match when more text arrives", async () => {
+			const session = new DualDelaySession(settings, tracker, callbacks);
+			await session.start(editor);
+			const tc = getTranscriberCallbacks();
+
+			// Partial text that matches "nieuw todo" (todoItem)
+			tc.slow.onDelta("nieuw todo");
+
+			// More text arrives before debounce fires — cumulative delta
+			tc.slow.onDelta("nieuw todo item.");
+
+			// The debounce timer should have been cancelled,
+			// and the full sentence processed instead
+			vi.advanceTimersByTime(400);
+
+			const text = editor.getValue();
+			// Should have exactly ONE todo item, not two
+			const todoCount = (text.match(/- \[ \]/g) || []).length;
+			expect(todoCount).toBe(1);
+		});
+
+		it("executes pending remainder command on stop", async () => {
+			const session = new DualDelaySession(settings, tracker, callbacks);
+			await session.start(editor);
+			const tc = getTranscriberCallbacks();
+
+			// Standalone command without debounce completing
+			tc.slow.onDelta("nieuwe alinea");
+
+			// Stop should execute pending command immediately
+			const stopPromise = session.stop();
+			vi.advanceTimersByTime(1000);
+			await stopPromise;
+
+			expect(editor.getValue()).toContain("\n\n");
 		});
 	});
 });

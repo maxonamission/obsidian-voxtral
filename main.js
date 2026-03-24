@@ -3842,7 +3842,7 @@ var RealtimeSession = class {
 
 // src/dual-delay-session.ts
 var import_obsidian6 = require("obsidian");
-var DualDelaySession = class {
+var _DualDelaySession = class _DualDelaySession {
   constructor(settings, tracker, callbacks) {
     this.settings = settings;
     this.tracker = tracker;
@@ -3862,6 +3862,10 @@ var DualDelaySession = class {
     this.displayLen = 0;
     this.slowCommitted = 0;
     this.commandJustRan = false;
+    // Remainder command debounce — prevents premature matching when
+    // cumulative deltas haven't finished (e.g. "nieuw todo" matching
+    // before the full "nieuw todo item" arrives)
+    this.remainderTimer = null;
     // Reconnection
     this.consecutiveFailures = 0;
     this.maxConsecutiveFailures = 5;
@@ -3885,6 +3889,10 @@ var DualDelaySession = class {
     this.slowPrevRaw = "";
     this.commandJustRan = false;
     this.consecutiveFailures = 0;
+    if (this.remainderTimer) {
+      clearTimeout(this.remainderTimer);
+      this.remainderTimer = null;
+    }
     await this.connectWebSockets(editor);
     this.setState("streaming" /* Streaming */);
   }
@@ -3905,9 +3913,14 @@ var DualDelaySession = class {
     this.setState("finalizing" /* Finalizing */);
     (_a = this.fastTranscriber) == null ? void 0 : _a.endAudio();
     (_b = this.slowTranscriber) == null ? void 0 : _b.endAudio();
+    if (this.remainderTimer) {
+      clearTimeout(this.remainderTimer);
+      this.remainderTimer = null;
+    }
     await new Promise((resolve) => setTimeout(resolve, 1e3));
     const editor = this.callbacks.getEditor();
     if (editor) {
+      this.executeRemainderCommand(editor);
       this.processSlowCommands(editor);
       const finalText = this.slowText || this.fastText;
       if (finalText) {
@@ -4069,6 +4082,11 @@ var DualDelaySession = class {
     await this.fastTranscriber.connect();
   }
   async reconnectSlowStream(editor) {
+    if (this.remainderTimer) {
+      clearTimeout(this.remainderTimer);
+      this.remainderTimer = null;
+    }
+    this.executeRemainderCommand(editor);
     if (this.slowText.trim()) {
       const from = editor.offsetToPos(this.insertOffset);
       const to = editor.offsetToPos(
@@ -4183,6 +4201,8 @@ var DualDelaySession = class {
       ) : "";
       if (from.ch === 0 || charBefore === " " || charBefore === "	") {
         displayText = displayText.replace(/^\s+/, "");
+        this.slowText = this.slowText.replace(/^\s+/, "");
+        this.fastText = this.fastText.replace(/^\s+/, "");
       }
     }
     editor.replaceRange(displayText, from, to);
@@ -4225,33 +4245,18 @@ var DualDelaySession = class {
     if (!segments && remainder.trim()) {
       const cmdMatch = matchCommand(remainder.trim());
       if (cmdMatch && !cmdMatch.textBefore) {
-        const from2 = editor.offsetToPos(this.insertOffset);
-        const to2 = editor.offsetToPos(
-          this.insertOffset + this.displayLen
-        );
-        editor.replaceRange("", from2, to2);
-        editor.setCursor(from2);
-        this.displayLen = 0;
-        cmdMatch.command.action(editor);
-        if (cmdMatch.command.id === "stopRecording") {
-          setTimeout(
-            () => this.callbacks.stopRecording(),
-            0
-          );
-        }
-        if (isSlotActive()) {
-          this.callbacks.updateStatusBar("slot");
-        }
-        this.commandJustRan = true;
-        this.slowCommitted += this.slowText.length;
-        this.slowText = "";
-        this.fastText = "";
-        this.insertOffset = editor.posToOffset(
-          editor.getCursor()
-        );
+        if (this.remainderTimer) clearTimeout(this.remainderTimer);
+        this.remainderTimer = setTimeout(() => {
+          this.remainderTimer = null;
+          this.executeRemainderCommand(editor);
+        }, _DualDelaySession.REMAINDER_DEBOUNCE_MS);
         return;
       }
       return;
+    }
+    if (this.remainderTimer) {
+      clearTimeout(this.remainderTimer);
+      this.remainderTimer = null;
     }
     if (!segments) return;
     const matchedLength = segmentText.length;
@@ -4302,7 +4307,48 @@ var DualDelaySession = class {
       this.renderText(editor);
     }
   }
+  /**
+   * Execute a standalone voice command from the remainder text.
+   * Called after the debounce timer fires (no new deltas arrived).
+   * Re-checks the match in case text changed before the timer fired.
+   */
+  executeRemainderCommand(editor) {
+    if (!this.slowText) return;
+    const segments = this.slowText.match(/[^.!?]+[.!?]+\s*/g);
+    if (segments) {
+      this.processSlowCommands(editor);
+      return;
+    }
+    const cmdMatch = matchCommand(this.slowText.trim());
+    if (!cmdMatch || cmdMatch.textBefore) return;
+    const from = editor.offsetToPos(this.insertOffset);
+    const to = editor.offsetToPos(
+      this.insertOffset + this.displayLen
+    );
+    editor.replaceRange("", from, to);
+    editor.setCursor(from);
+    this.displayLen = 0;
+    cmdMatch.command.action(editor);
+    if (cmdMatch.command.id === "stopRecording") {
+      setTimeout(
+        () => this.callbacks.stopRecording(),
+        0
+      );
+    }
+    if (isSlotActive()) {
+      this.callbacks.updateStatusBar("slot");
+    }
+    this.commandJustRan = true;
+    this.slowCommitted += this.slowText.length;
+    this.slowText = "";
+    this.fastText = "";
+    this.insertOffset = editor.posToOffset(
+      editor.getCursor()
+    );
+  }
 };
+_DualDelaySession.REMAINDER_DEBOUNCE_MS = 400;
+var DualDelaySession = _DualDelaySession;
 
 // src/main.ts
 var VoxtralPlugin = class extends import_obsidian7.Plugin {
