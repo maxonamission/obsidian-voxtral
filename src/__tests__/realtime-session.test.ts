@@ -353,9 +353,11 @@ describe("RealtimeSession", () => {
 			// Now send more text — it should NOT be buffered
 			tc.onDelta("Belangrijk woord. ");
 
-			// Text should appear in the editor (not buffered)
+			// Text should appear in the editor (not buffered).
+			// Context-aware insertion lowercases after slot prefix (**)
+			// and strips trailing period (mid-sentence context).
 			const finalText = editor.getValue();
-			expect(finalText).toContain("Belangrijk woord.");
+			expect(finalText).toContain("belangrijk woord");
 		});
 	});
 

@@ -2152,8 +2152,8 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       })
     );
     const isRealtime = !isBatch && !import_obsidian2.Platform.isMobile;
-    new import_obsidian2.Setting(containerEl).setName("Dual-delay mode").setDesc(
-      import_obsidian2.Platform.isMobile ? "Not available on mobile (requires realtime streaming)." : !isRealtime ? "Only available in realtime mode." : "Run two parallel streams: a fast one for immediate text and a slow one for higher accuracy and voice command detection. Overrides the streaming delay setting."
+    new import_obsidian2.Setting(containerEl).setName("Dual-delay mode (experimental)").setDesc(
+      import_obsidian2.Platform.isMobile ? "Not available on mobile (requires realtime streaming)." : !isRealtime ? "Only available in realtime mode." : "Experimental: run two parallel streams (fast preview + slow accuracy). Uses 2x API bandwidth and may produce unexpected results. Overrides the streaming delay setting."
     ).addToggle((toggle) => {
       toggle.setValue(this.plugin.settings.dualDelay).setDisabled(!isRealtime).onChange(async (value) => {
         this.plugin.settings.dualDelay = value;
@@ -2646,8 +2646,40 @@ function levenshtein(a, b) {
   }
   return dp[m][n];
 }
+function detectInsertionContext(editor) {
+  const cursor = editor.getCursor();
+  if (cursor.ch === 0) return "new-line";
+  const lineBefore = editor.getRange({ line: cursor.line, ch: 0 }, cursor);
+  const trimmed = lineBefore.trimEnd();
+  if (!trimmed) return "new-line";
+  const lastChar = trimmed[trimmed.length - 1];
+  if (lastChar === "." || lastChar === "!" || lastChar === "?") {
+    return "sentence-start";
+  }
+  if (/^(?:[-*]\s|[-*]\s\[.\]\s|>+\s|#{1,6}\s)/.test(lineBefore)) {
+    const afterMarker = lineBefore.replace(
+      /^(?:[-*]\s(?:\[.\]\s)?|>+\s|#{1,6}\s)/,
+      ""
+    );
+    if (!afterMarker.trim()) return "list-or-heading";
+  }
+  return "mid-sentence";
+}
+function lowercaseFirstLetter(text) {
+  const match = text.match(
+    /^(\s*)([A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝŸ])/
+  );
+  if (match) {
+    return match[1] + match[2].toLowerCase() + text.slice(match[1].length + 1);
+  }
+  return text;
+}
+function stripTrailingPunctuation(text) {
+  return text.replace(/[.!?]+\s*$/, "");
+}
 function insertAtCursor(editor, text) {
   const cursor = editor.getCursor();
+  const context = detectInsertionContext(editor);
   if (cursor.ch === 0) {
     text = text.replace(/^ +/, "");
   }
@@ -2659,6 +2691,18 @@ function insertAtCursor(editor, text) {
     if (charBefore && /\S/.test(charBefore)) {
       text = " " + text;
     }
+  }
+  switch (context) {
+    case "mid-sentence":
+      text = lowercaseFirstLetter(text);
+      text = stripTrailingPunctuation(text);
+      break;
+    case "list-or-heading":
+      text = stripTrailingPunctuation(text);
+      break;
+    case "sentence-start":
+    case "new-line":
+      break;
   }
   editor.replaceRange(text, cursor);
   const lines = text.split("\n");

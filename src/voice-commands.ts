@@ -165,8 +165,78 @@ function levenshtein(a: string, b: string): number {
 	return dp[m][n];
 }
 
+/**
+ * Determine the insertion context by inspecting text before the cursor.
+ * Returns a classification that drives casing and punctuation behaviour.
+ */
+export type InsertionContext =
+	| "sentence-start"  // after .!? or empty document → uppercase, keep trailing period
+	| "new-line"        // start of a line (col 0) or after \n → uppercase, keep trailing period
+	| "list-or-heading" // after - / * / # / > markdown markers → uppercase, strip trailing period
+	| "mid-sentence";   // everything else → lowercase, strip trailing period
+
+export function detectInsertionContext(editor: Editor): InsertionContext {
+	const cursor = editor.getCursor();
+
+	// Column 0 on any line is always a new-line context
+	if (cursor.ch === 0) return "new-line";
+
+	// Read text on the current line up to the cursor
+	const lineBefore = editor.getRange({ line: cursor.line, ch: 0 }, cursor);
+	const trimmed = lineBefore.trimEnd();
+
+	// Empty line (only whitespace before cursor)
+	if (!trimmed) return "new-line";
+
+	const lastChar = trimmed[trimmed.length - 1];
+
+	// After sentence-ending punctuation
+	if (lastChar === "." || lastChar === "!" || lastChar === "?") {
+		return "sentence-start";
+	}
+
+	// Markdown list / heading / blockquote markers at the start of the line
+	// Matches: "- ", "* ", "- [ ] ", "> ", ">> ", "# ", "## ", etc.
+	// Use lineBefore (not trimmed) since markers include trailing whitespace.
+	if (/^(?:[-*]\s|[-*]\s\[.\]\s|>+\s|#{1,6}\s)/.test(lineBefore)) {
+		// Only if cursor is right after the marker (no other content text yet)
+		const afterMarker = lineBefore.replace(
+			/^(?:[-*]\s(?:\[.\]\s)?|>+\s|#{1,6}\s)/,
+			""
+		);
+		if (!afterMarker.trim()) return "list-or-heading";
+	}
+
+	return "mid-sentence";
+}
+
+/**
+ * Lowercase the first letter of text (handling leading whitespace and
+ * accented characters), matching the webapp's lowercaseFirstLetter().
+ */
+export function lowercaseFirstLetter(text: string): string {
+	const match = text.match(
+		/^(\s*)([A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝŸ])/
+	);
+	if (match) {
+		return (
+			match[1] + match[2].toLowerCase() + text.slice(match[1].length + 1)
+		);
+	}
+	return text;
+}
+
+/**
+ * Strip trailing sentence-ending punctuation added by the API when the
+ * context doesn't call for it (mid-sentence, list items, headings).
+ */
+function stripTrailingPunctuation(text: string): string {
+	return text.replace(/[.!?]+\s*$/, "");
+}
+
 function insertAtCursor(editor: Editor, text: string): void {
 	const cursor = editor.getCursor();
+	const context = detectInsertionContext(editor);
 
 	// Never start a line with spaces from auto-transcription
 	// (preserve newlines — those are intentional formatting)
@@ -185,6 +255,22 @@ function insertAtCursor(editor: Editor, text: string): void {
 		if (charBefore && /\S/.test(charBefore)) {
 			text = " " + text;
 		}
+	}
+
+	// Context-aware casing and punctuation
+	switch (context) {
+		case "mid-sentence":
+			text = lowercaseFirstLetter(text);
+			text = stripTrailingPunctuation(text);
+			break;
+		case "list-or-heading":
+			// Keep uppercase, but strip trailing period (list items / headings)
+			text = stripTrailingPunctuation(text);
+			break;
+		case "sentence-start":
+		case "new-line":
+			// Keep uppercase and trailing punctuation as-is
+			break;
 	}
 
 	editor.replaceRange(text, cursor);

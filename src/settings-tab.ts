@@ -241,14 +241,15 @@ export class VoxtralSettingTab extends PluginSettingTab {
 		const isRealtime = !isBatch && !Platform.isMobile;
 
 		new Setting(containerEl)
-			.setName("Dual-delay mode")
+			.setName("Dual-delay mode (experimental)")
 			.setDesc(
 				Platform.isMobile
 					? "Not available on mobile (requires realtime streaming)."
 					: !isRealtime
 					? "Only available in realtime mode."
-					: "Run two parallel streams: a fast one for immediate text and a slow one " +
-					  "for higher accuracy and voice command detection. Overrides the streaming delay setting."
+					: "Experimental: run two parallel streams (fast preview + slow accuracy). " +
+					  "Uses 2x API bandwidth and may produce unexpected results. " +
+					  "Overrides the streaming delay setting."
 			)
 			.addToggle((toggle) => {
 				toggle
