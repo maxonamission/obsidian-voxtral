@@ -222,11 +222,39 @@ export async function transcribeBatch(
 
 // ── Text correction ──
 
+/**
+ * Build a suffix for the correction prompt that tells the LLM to
+ * preserve text patterns produced by the user's custom commands.
+ */
+export function buildCustomCommandGuard(settings: VoxtralSettings): string {
+	const markers: string[] = [];
+
+	for (const cmd of settings.customCommands ?? []) {
+		if (cmd.insertText) markers.push(cmd.insertText.trim());
+		if (cmd.slotPrefix) markers.push(cmd.slotPrefix.trim());
+		if (cmd.slotSuffix) markers.push(cmd.slotSuffix.trim());
+	}
+
+	// Deduplicate and filter empty
+	const unique = [...new Set(markers)].filter(Boolean);
+	if (unique.length === 0) return "";
+
+	const escaped = unique.map((m) => `"${m}"`).join(", ");
+	return (
+		"\n\nCUSTOM COMMAND OUTPUT — DO NOT REMOVE:\n" +
+		"The user has voice commands that insert specific text markers. " +
+		"These markers MUST be preserved exactly as-is: " +
+		escaped +
+		"\nNever strip, rewrite, or 'correct' these markers."
+	);
+}
+
 export async function correctText(
 	text: string,
 	settings: VoxtralSettings
 ): Promise<string> {
-	const systemPrompt = settings.systemPrompt || DEFAULT_CORRECT_PROMPT;
+	const basePrompt = settings.systemPrompt || DEFAULT_CORRECT_PROMPT;
+	const systemPrompt = basePrompt + buildCustomCommandGuard(settings);
 
 	const body = {
 		model: settings.correctModel,

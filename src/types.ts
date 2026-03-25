@@ -198,7 +198,9 @@ export const DEFAULT_CORRECT_PROMPT =
 	"DO NOT CHANGE:\n" +
 	"- Sentence structure or word order\n" +
 	"- Style or tone\n" +
-	"- Markdown formatting (# headings, - lists, - [ ] to-do items)\n\n" +
+	"- Markdown formatting (# headings, - lists, - [ ] to-do items)\n" +
+	"- Special prefix markers at the start of lines (e.g. >>, >, > [!note], etc.)\n" +
+	"- Text inserted by custom commands — these are intentional formatting elements\n\n" +
 	"INLINE CORRECTION INSTRUCTIONS:\n" +
 	"The text was dictated via speech recognition. The speaker sometimes gives " +
 	"inline instructions meant for you. Recognize these patterns:\n" +

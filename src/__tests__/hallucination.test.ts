@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { isLikelyHallucination } from "../mistral-api";
+
+vi.mock("obsidian", () => ({
+	requestUrl: vi.fn(),
+}));
 
 describe("isLikelyHallucination", () => {
 	// ── Normal transcriptions (should NOT be flagged) ──
