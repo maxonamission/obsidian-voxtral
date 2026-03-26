@@ -1,29 +1,29 @@
 # Voxtral Transcribe — Obsidian Plugin
 
-Spraak-naar-tekst dictatie voor Obsidian met Mistral Voxtral.
-Ondersteunt realtime streaming (desktop), batch transcriptie (desktop + mobiel),
-stemcommando's, en automatische tekstcorrectie.
+Speech-to-text dictation for Obsidian using Mistral Voxtral.
+Supports real-time streaming (desktop), batch transcription (desktop + mobile),
+voice commands, and automatic text correction.
 
 <a href="https://buymeacoffee.com/maxonamission" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
 
 ---
 
-## Vereisten
+## Requirements
 
-- **Obsidian** v1.0.0 of nieuwer
-- **Mistral API key** — gratis aan te maken op [platform.mistral.ai](https://console.mistral.ai/)
-- **Desktop**: Windows, macOS of Linux (voor realtime streaming)
-- **Mobiel**: Android of iOS (alleen batch modus + tap-to-send)
+- **Obsidian** v1.0.0 or newer
+- **Mistral API key** — free to create at [platform.mistral.ai](https://console.mistral.ai/)
+- **Desktop**: Windows, macOS or Linux (for real-time streaming)
+- **Mobile**: Android or iOS (batch mode + tap-to-send only)
 
 ---
 
-## Installatie (handmatig testen)
+## Installation (manual testing)
 
-> **Let op:** De onderstaande terminal-commando's werken in **PowerShell**, **bash** en **zsh**.
-> Ze werken **niet** in de Windows Command Prompt (`cmd.exe`).
-> Open PowerShell via Start → "PowerShell", of gebruik Windows Terminal.
+> **Note:** The terminal commands below work in **PowerShell**, **bash** and **zsh**.
+> They do **not** work in Windows Command Prompt (`cmd.exe`).
+> Open PowerShell via Start → "PowerShell", or use Windows Terminal.
 
-### Stap 1: Plugin bouwen
+### Step 1: Build the plugin
 
 ```bash
 cd obsidian-plugin
@@ -31,151 +31,151 @@ npm install
 npm run build
 ```
 
-Dit genereert `main.js` in de `obsidian-plugin/` directory.
+This generates `main.js` in the `obsidian-plugin/` directory.
 
-### Stap 2: Kopieer naar je vault
+### Step 2: Copy to your vault
 
-Maak een plugin-directory aan in je Obsidian vault:
+Create a plugin directory in your Obsidian vault:
 
 ```bash
-# Pas het pad aan naar jouw vault
-VAULT="$HOME/Documents/MijnVault"
+# Adjust the path to your vault
+VAULT="$HOME/Documents/MyVault"
 
 mkdir -p "$VAULT/.obsidian/plugins/voxtral-transcribe"
 cp main.js manifest.json styles.css "$VAULT/.obsidian/plugins/voxtral-transcribe/"
 ```
 
-**Op mobiel (Android):**
-De vault staat meestal in `Documents/MijnVault` of in de Obsidian sandbox.
-Kopieer de drie bestanden via een bestandsbeheerder of sync-tool (Syncthing, iCloud, Google Drive).
+**On mobile (Android):**
+The vault is usually in `Documents/MyVault` or in the Obsidian sandbox.
+Copy the three files using a file manager or sync tool (Syncthing, iCloud, Google Drive).
 
-**Op mobiel (iOS):**
-De vault staat in `On My iPhone > Obsidian > MijnVault` of in iCloud Drive.
+**On mobile (iOS):**
+The vault is in `On My iPhone > Obsidian > MyVault` or in iCloud Drive.
 
-### Stap 3: Plugin activeren
+### Step 3: Enable the plugin
 
 1. Open Obsidian
-2. Ga naar **Instellingen** → **Community plugins**
-3. Schakel **Restricted mode** uit (als dat nog aan staat)
-4. Je ziet nu **Voxtral Transcribe** in de lijst → schakel het **aan**
-5. Ga naar **Instellingen** → **Voxtral Transcribe**
-6. Vul je **Mistral API key** in
+2. Go to **Settings** → **Community plugins**
+3. Disable **Restricted mode** (if still enabled)
+4. You should now see **Voxtral Transcribe** in the list → toggle it **on**
+5. Go to **Settings** → **Voxtral Transcribe**
+6. Enter your **Mistral API key**
 
 ---
 
-## Testen op Desktop
+## Testing on Desktop
 
-### Realtime modus (standaard)
+### Real-time mode (default)
 
-1. Open een notitie
-2. Klik op het **microfoon-icoon** (🎙) in de ribbon (linkerbalk), of gebruik **Ctrl+Spatie**
-3. Begin te praten — tekst verschijnt live in je notitie
-4. Probeer stemcommando's:
-   - Zeg "nieuwe alinea" → nieuwe paragraaf
-   - Zeg "kop twee" → ## heading
-   - Zeg "nieuw punt" → bullet point
-   - Zeg "nieuw to-do item" → checkbox
-5. Klik nogmaals op 🎙 of zeg "beëindig opname" om te stoppen
-6. Als autocorrectie aan staat, wordt de tekst automatisch gecorrigeerd
+1. Open a note
+2. Click the **microphone icon** (🎙) in the ribbon (left sidebar), or use **Ctrl+Space**
+3. Start speaking — text appears live in your note
+4. Try voice commands:
+   - Say "new paragraph" → new paragraph
+   - Say "heading two" → ## heading
+   - Say "new bullet" → bullet point
+   - Say "new to-do" → checkbox
+5. Click 🎙 again or say "stop recording" to stop
+6. If auto-correction is enabled, the text is automatically corrected
 
-### Batch modus
+### Batch mode
 
-1. Ga naar **Instellingen** → **Voxtral Transcribe** → zet modus op **Batch**
-2. Klik op 🎙 om op te nemen
-3. Druk op **Enter** wanneer de mic actief is (niet aan het typen) om een chunk te verzenden — of gebruik het verzend-icoon
-4. Tijdens het typen gedraagt Enter zich gewoon als een newline
-5. Klik nogmaals op 🎙 om te stoppen → tekst wordt getranscribeerd en ingevoegd
+1. Go to **Settings** → **Voxtral Transcribe** → set mode to **Batch**
+2. Click 🎙 to start recording
+3. Press **Enter** while the mic is active (not while typing) to send a chunk — or use the send icon
+4. While typing, Enter behaves normally as a newline
+5. Click 🎙 again to stop → text is transcribed and inserted
 
-> **Tip:** De Enter-als-tap-to-send functie en de typing cooldown (standaard 800 ms)
-> zijn configureerbaar via **Instellingen** → **Voxtral Transcribe**.
+> **Tip:** The Enter-as-tap-to-send feature and the typing cooldown (default 800 ms)
+> are configurable via **Settings** → **Voxtral Transcribe**.
 
-### Tekstcorrectie los gebruiken
+### Text correction standalone
 
-- **Selectie corrigeren**: Selecteer tekst → Command palette (Ctrl+P) → "Voxtral: Corrigeer geselecteerde tekst"
-- **Hele notitie corrigeren**: Command palette → "Voxtral: Corrigeer hele notitie"
+- **Correct selection**: Select text → Command palette (Ctrl+P) → "Voxtral: Correct selected text"
+- **Correct entire note**: Command palette → "Voxtral: Correct entire note"
 
-### Stemcommando's cheat sheet
+### Voice commands cheat sheet
 
-- Command palette → "Voxtral: Toon stemcommando's (zijpaneel)"
-- Opent een panel rechts met alle beschikbare commando's
+- Command palette → "Voxtral: Show voice commands (side panel)"
+- Opens a panel on the right with all available commands
 
 ---
 
-## Testen op Mobiel (Android / iOS)
+## Testing on Mobile (Android / iOS)
 
-### Hoe het werkt
+### How it works
 
-Op mobiel is alleen **batch modus** beschikbaar (realtime streaming vereist Node.js
-dat niet beschikbaar is op mobiel). Maar met **tap-to-send** kun je tussendoor
-chunks verzenden zonder het dicteren te stoppen.
+On mobile, only **batch mode** is available (real-time streaming requires Node.js
+which is not available on mobile). However, with **tap-to-send** you can send
+chunks in between without stopping the dictation.
 
 ### Workflow
 
-1. Open een notitie
-2. Tik op het **microfoon-icoon** in de ribbon → opname start
-3. Begin te praten
-4. Tik op het **verzend-icoon** (📤) in de **view header** (bovenin het scherm, naast de notitie-titel) → huidige audio wordt getranscribeerd terwijl de opname doorloopt!
-5. Blijf praten, tik opnieuw op 📤 voor de volgende chunk
-6. Tik op 🎙 om definitief te stoppen → laatste stuk wordt verwerkt
+1. Open a note
+2. Tap the **microphone icon** in the ribbon → recording starts
+3. Start speaking
+4. Tap the **send icon** (📤) in the **view header** (top of the screen, next to the note title) → current audio is transcribed while recording continues!
+5. Keep speaking, tap 📤 again for the next chunk
+6. Tap 🎙 to stop completely → the last segment is processed
 
-### Tips voor mobiel
+### Tips for mobile
 
-- Chunks van 10-30 seconden werken het best
-- Stemcommando's ("nieuwe alinea", "kop twee", etc.) werken ook in batch modus
-- Op desktop: druk op **Enter** (als de mic actief is) om een chunk te versturen — tijdens het typen is Enter gewoon een newline
-- Je kunt ook via Command palette → "Voxtral: Verzend audio chunk" de chunk versturen
-- Het stemcommando-zijpaneel opent **niet** automatisch op mobiel (om je scherm niet te blokkeren). Open het handmatig via Command palette → "Voxtral: Toon stemcommando's (zijpaneel)"
+- Chunks of 10-30 seconds work best
+- Voice commands ("new paragraph", "heading two", etc.) also work in batch mode
+- On desktop: press **Enter** (while the mic is active) to send a chunk — while typing, Enter behaves normally as a newline
+- You can also send a chunk via Command palette → "Voxtral: Send audio chunk"
+- The voice command side panel does **not** open automatically on mobile (to avoid blocking your screen). Open it manually via Command palette → "Voxtral: Show voice commands (side panel)"
 
 ---
 
-## Problemen oplossen
+## Troubleshooting
 
 ### "WebSocket connection failed"
-- Controleer of je API key geldig is
-- Controleer je internetverbinding
-- Op mobiel: realtime modus is niet beschikbaar, gebruik batch
+- Check that your API key is valid
+- Check your internet connection
+- On mobile: real-time mode is not available, use batch
 
-### Geen audio opgenomen
-- Geef Obsidian toestemming voor microfoontoegang
-- Op mobiel: controleer app-permissies in systeeminstellingen
+### No audio recorded
+- Grant Obsidian permission to access the microphone
+- On mobile: check app permissions in system settings
 
-### Transcriptie is leeg of onjuist
-- Controleer of de juiste taal is ingesteld (standaard: nl)
-- Spreek duidelijk en niet te ver van de microfoon
+### Transcription is empty or incorrect
+- Check that the correct language is set (default: nl)
+- Speak clearly and not too far from the microphone
 
-### Plugin verschijnt niet in de lijst
-- Controleer of alle drie bestanden (`main.js`, `manifest.json`, `styles.css`)
-  in `.obsidian/plugins/voxtral-transcribe/` staan
-- Herstart Obsidian volledig
+### Plugin does not appear in the list
+- Check that all three files (`main.js`, `manifest.json`, `styles.css`)
+  are in `.obsidian/plugins/voxtral-transcribe/`
+- Restart Obsidian completely
 
 ---
 
-## Beschikbaar maken als Community Plugin
+## Publishing as a Community Plugin
 
-Wanneer de plugin klaar is voor publieke release, volg deze stappen:
+When the plugin is ready for public release, follow these steps:
 
-### 1. Eigen GitHub repository
+### 1. Separate GitHub repository
 
-Maak een aparte repository aan (bijv. `voxtral-obsidian-plugin`) met deze structuur:
+Create a separate repository (e.g. `voxtral-obsidian-plugin`) with this structure:
 
 ```
 voxtral-obsidian-plugin/
-├── src/                  # TypeScript bronbestanden
+├── src/                  # TypeScript source files
 ├── manifest.json
 ├── package.json
 ├── tsconfig.json
 ├── esbuild.config.mjs
 ├── styles.css
-├── README.md             # Beschrijving voor gebruikers (verplicht)
-├── LICENSE               # MIT of andere licentie (verplicht)
+├── README.md             # Description for users (required)
+├── LICENSE               # GPL-3.0 or other license (required)
 └── .github/
     └── workflows/
-        └── release.yml   # Automatische release bij tag
+        └── release.yml   # Automatic release on tag
 ```
 
-### 2. GitHub Actions voor releases
+### 2. GitHub Actions for releases
 
-Maak `.github/workflows/release.yml`:
+Create `.github/workflows/release.yml`:
 
 ```yaml
 name: Release Obsidian Plugin
@@ -203,49 +203,49 @@ jobs:
             styles.css
 ```
 
-### 3. Eerste release maken
+### 3. Create the first release
 
 ```bash
-# Zorg dat versie in manifest.json klopt (bijv. "1.0.0")
+# Make sure the version in manifest.json is correct (e.g. "1.0.0")
 git tag 1.0.0
 git push origin 1.0.0
-# GitHub Actions maakt automatisch een release aan
+# GitHub Actions automatically creates a release
 ```
 
-### 4. Community plugin lijst
+### 4. Community plugin list
 
 1. Fork [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases)
-2. Voeg een entry toe aan `community-plugins.json`:
+2. Add an entry to `community-plugins.json`:
 
 ```json
 {
     "id": "voxtral-transcribe",
     "name": "Voxtral Transcribe",
     "author": "Voxtral Transcribe",
-    "description": "Speech-to-text dictation using Mistral Voxtral with real-time streaming, voice commands, and auto-correction.",
-    "repo": "jouw-username/voxtral-obsidian-plugin"
+    "description": "Speech-to-text dictation using Mistral Voxtral. Supports real-time streaming, voice commands (headings, lists, to-dos), and automatic text correction.",
+    "repo": "your-username/voxtral-obsidian-plugin"
 }
 ```
 
-3. Open een **Pull Request** met de plugin submission template
-4. Vul de checklist in het PR-template volledig in
-5. Wacht op review door het Obsidian team (meestal 1-4 weken)
+3. Open a **Pull Request** using the plugin submission template
+4. Complete the checklist in the PR template
+5. Wait for review by the Obsidian team (usually 1-4 weeks)
 
-### 5. Vereisten voor goedkeuring
+### 5. Requirements for approval
 
-- `README.md` met duidelijke beschrijving en gebruiksinstructies
-- `LICENSE` bestand (MIT aanbevolen)
-- Geen obfuscated code
-- Geen tracking of analytics zonder toestemming
-- Geen externe netwerk-calls zonder duidelijke uitleg
-- Plugin ID moet uniek zijn in de community lijst
+- `README.md` with clear description and usage instructions
+- `LICENSE` file (required)
+- No obfuscated code
+- No tracking or analytics without consent
+- No external network calls without clear explanation
+- Plugin ID must be unique in the community list
 
-Zie de volledige vereisten:
+See the full requirements:
 https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plugins
 
 ---
 
-## Ontwikkeling
+## Development
 
 ### Dev mode (hot reload)
 
@@ -254,19 +254,19 @@ cd obsidian-plugin
 npm run dev
 ```
 
-Dit start esbuild in watch mode. Combineer met de
-[Hot Reload plugin](https://github.com/pjeby/hot-reload) voor Obsidian
-om wijzigingen direct te zien.
+This starts esbuild in watch mode. Combine with the
+[Hot Reload plugin](https://github.com/pjeby/hot-reload) for Obsidian
+to see changes immediately.
 
-### Bestanden
+### Files
 
-| Bestand | Functie |
+| File | Purpose |
 |---|---|
 | `src/main.ts` | Plugin entry, recording, commands |
-| `src/mistral-api.ts` | Batch transcriptie, correctie, realtime WebSocket |
-| `src/audio-recorder.ts` | Microfoon capture, PCM encoding, level metering |
-| `src/voice-commands.ts` | Stemcommando herkenning en uitvoering |
-| `src/help-view.ts` | Zijpaneel met commandolijst |
-| `src/settings-tab.ts` | Instellingen UI |
-| `src/types.ts` | Interfaces en constanten |
+| `src/mistral-api.ts` | Batch transcription, correction, real-time WebSocket |
+| `src/audio-recorder.ts` | Microphone capture, PCM encoding, level metering |
+| `src/voice-commands.ts` | Voice command recognition and execution |
+| `src/help-view.ts` | Side panel with command list |
+| `src/settings-tab.ts` | Settings UI |
+| `src/types.ts` | Interfaces and constants |
 | `styles.css` | Styling |

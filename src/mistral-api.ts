@@ -1,7 +1,53 @@
-import { Platform, requestUrl } from "obsidian";
+// Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
+// Licensed under GPL-3.0 — see LICENSE for details
+// https://github.com/maxonamission/voxtral-transcribe
+import { requestUrl } from "obsidian";
 import { VoxtralSettings, DEFAULT_CORRECT_PROMPT } from "./types";
+import {
+	createAuthenticatedWebSocket,
+	WS_OPEN,
+	type AuthenticatedWsConnection,
+} from "./authenticated-websocket";
 
 const BASE_URL = "https://api.mistral.ai";
+
+/**
+ * Extract a user-friendly error message from an API response.
+ * Avoids leaking raw response bodies (which may contain internal
+ * details, stack traces, or echoed credentials) to the UI.
+ */
+function sanitizeApiError(status: number, rawBody: string): string {
+	// Try to extract a clean "message" field from JSON error responses
+	try {
+		const parsed = JSON.parse(rawBody);
+		const msg = parsed?.message || parsed?.error?.message;
+		if (typeof msg === "string" && msg.length < 200) {
+			return `HTTP ${status}: ${msg}`;
+		}
+	} catch {
+		// Not JSON — fall through
+	}
+
+	// Common status codes with human-readable descriptions
+	switch (status) {
+		case 401:
+			return "HTTP 401: Invalid or expired API key";
+		case 403:
+			return "HTTP 403: Access denied";
+		case 404:
+			return "HTTP 404: API endpoint not found (check model name)";
+		case 413:
+			return "HTTP 413: Audio file too large";
+		case 429:
+			return "HTTP 429: Rate limit exceeded — try again later";
+		case 500:
+		case 502:
+		case 503:
+			return `HTTP ${status}: Mistral API server error — try again later`;
+		default:
+			return `HTTP ${status}: Request failed`;
+	}
+}
 
 // ── Model listing ──
 
@@ -126,94 +172,89 @@ export async function transcribeBatch(
 			: "webm";
 	const mimeType = audioBlob.type || `audio/${ext}`;
 
-	// On mobile, use Obsidian's requestUrl (bypasses CORS / platform
-	// restrictions) with a manually built multipart body, since
-	// requestUrl does not support FormData.
-	if (Platform.isMobile) {
-		const boundary = `----VoxtralBoundary${Date.now()}`;
-		const arrayBuf = await audioBlob.arrayBuffer();
-		const fileBytes = new Uint8Array(arrayBuf);
+	// Use Obsidian's requestUrl with a manually built multipart body,
+	// since requestUrl does not support FormData.
+	const boundary = `----VoxtralBoundary${Date.now()}`;
+	const arrayBuf = await audioBlob.arrayBuffer();
+	const fileBytes = new Uint8Array(arrayBuf);
 
-		// Build multipart parts as text
-		let textParts = "";
-		textParts += `--${boundary}\r\n`;
-		textParts += `Content-Disposition: form-data; name="file"; filename="recording.${ext}"\r\n`;
-		textParts += `Content-Type: ${mimeType}\r\n\r\n`;
+	let textParts = "";
+	textParts += `--${boundary}\r\n`;
+	textParts += `Content-Disposition: form-data; name="file"; filename="recording.${ext}"\r\n`;
+	textParts += `Content-Type: ${mimeType}\r\n\r\n`;
 
-		// We'll append the binary after the text header
-		const afterFile = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${settings.batchModel}\r\n`;
+	const afterFile = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${settings.batchModel}\r\n`;
 
-		let extraFields = "";
-		if (settings.language) {
-			extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${settings.language}\r\n`;
-		}
-		if (diarize) {
-			extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="diarize"\r\n\r\ntrue\r\n`;
-		}
-		extraFields += `--${boundary}--\r\n`;
-
-		// Combine text + binary + text into a single ArrayBuffer
-		const enc = new TextEncoder();
-		const headerBuf = enc.encode(textParts);
-		const tailBuf = enc.encode(afterFile + extraFields);
-		const body = new Uint8Array(headerBuf.length + fileBytes.length + tailBuf.length);
-		body.set(headerBuf, 0);
-		body.set(fileBytes, headerBuf.length);
-		body.set(tailBuf, headerBuf.length + fileBytes.length);
-
-		const response = await requestUrl({
-			url: `${BASE_URL}/v1/audio/transcriptions`,
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${settings.apiKey}`,
-				"Content-Type": `multipart/form-data; boundary=${boundary}`,
-			},
-			body: body.buffer,
-		});
-
-		if (response.status !== 200) {
-			throw new Error(
-				`Transcription failed (${response.status}): ${response.text}`
-			);
-		}
-		return response.json?.text || "";
-	}
-
-	// Desktop: use standard fetch + FormData
-	const formData = new FormData();
-	formData.append("file", audioBlob, `recording.${ext}`);
-	formData.append("model", settings.batchModel);
+	let extraFields = "";
 	if (settings.language) {
-		formData.append("language", settings.language);
+		extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${settings.language}\r\n`;
 	}
 	if (diarize) {
-		formData.append("diarize", "true");
+		extraFields += `--${boundary}\r\nContent-Disposition: form-data; name="diarize"\r\n\r\ntrue\r\n`;
 	}
+	extraFields += `--${boundary}--\r\n`;
 
-	const response = await fetch(`${BASE_URL}/v1/audio/transcriptions`, {
+	const enc = new TextEncoder();
+	const headerBuf = enc.encode(textParts);
+	const tailBuf = enc.encode(afterFile + extraFields);
+	const body = new Uint8Array(headerBuf.length + fileBytes.length + tailBuf.length);
+	body.set(headerBuf, 0);
+	body.set(fileBytes, headerBuf.length);
+	body.set(tailBuf, headerBuf.length + fileBytes.length);
+
+	const response = await requestUrl({
+		url: `${BASE_URL}/v1/audio/transcriptions`,
 		method: "POST",
 		headers: {
 			Authorization: `Bearer ${settings.apiKey}`,
+			"Content-Type": `multipart/form-data; boundary=${boundary}`,
 		},
-		body: formData,
+		body: body.buffer,
 	});
 
-	if (!response.ok) {
-		const err = await response.text();
-		throw new Error(`Transcription failed (${response.status}): ${err}`);
+	if (response.status !== 200) {
+		throw new Error(
+			`Transcription failed: ${sanitizeApiError(response.status, response.text)}`
+		);
 	}
-
-	const data = await response.json();
-	return data.text || "";
+	return response.json?.text || "";
 }
 
 // ── Text correction ──
+
+/**
+ * Build a suffix for the correction prompt that tells the LLM to
+ * preserve text patterns produced by the user's custom commands.
+ */
+export function buildCustomCommandGuard(settings: VoxtralSettings): string {
+	const markers: string[] = [];
+
+	for (const cmd of settings.customCommands ?? []) {
+		if (cmd.insertText) markers.push(cmd.insertText.trim());
+		if (cmd.slotPrefix) markers.push(cmd.slotPrefix.trim());
+		if (cmd.slotSuffix) markers.push(cmd.slotSuffix.trim());
+	}
+
+	// Deduplicate and filter empty
+	const unique = [...new Set(markers)].filter(Boolean);
+	if (unique.length === 0) return "";
+
+	const escaped = unique.map((m) => `"${m}"`).join(", ");
+	return (
+		"\n\nCUSTOM COMMAND OUTPUT — DO NOT REMOVE:\n" +
+		"The user has voice commands that insert specific text markers. " +
+		"These markers MUST be preserved exactly as-is: " +
+		escaped +
+		"\nNever strip, rewrite, or 'correct' these markers."
+	);
+}
 
 export async function correctText(
 	text: string,
 	settings: VoxtralSettings
 ): Promise<string> {
-	const systemPrompt = settings.systemPrompt || DEFAULT_CORRECT_PROMPT;
+	const basePrompt = settings.systemPrompt || DEFAULT_CORRECT_PROMPT;
+	const systemPrompt = basePrompt + buildCustomCommandGuard(settings);
 
 	const body = {
 		model: settings.correctModel,
@@ -236,7 +277,7 @@ export async function correctText(
 
 	if (response.status !== 200) {
 		throw new Error(
-			`Correction failed (${response.status}): ${response.text}`
+			`Correction failed: ${sanitizeApiError(response.status, response.text)}`
 		);
 	}
 
@@ -295,246 +336,17 @@ export interface RealtimeCallbacks {
 	onDisconnect: () => void;
 }
 
-interface WsConnection {
-	send: (data: string) => void;
-	close: () => void;
-	readyState: number;
-}
-
-const WS_OPEN = 1;
-
-function createNodeWebSocket(
-	url: string,
-	headers: Record<string, string>,
-	callbacks: {
-		onOpen: () => void;
-		onMessage: (data: string) => void;
-		onError: (err: Error) => void;
-		onClose: () => void;
-	}
-): WsConnection {
-	// eslint-disable-next-line @typescript-eslint/no-var-requires
-	const https = require("https") as typeof import("https");
-	// eslint-disable-next-line @typescript-eslint/no-var-requires
-	const crypto = require("crypto") as typeof import("crypto");
-
-	const parsed = new URL(url);
-	const wsKey = crypto.randomBytes(16).toString("base64");
-
-	const conn: WsConnection = {
-		readyState: 0,
-		send: () => {},
-		close: () => {},
-	};
-
-	const req = https.request(
-		{
-			hostname: parsed.hostname,
-			port: parsed.port || 443,
-			path: parsed.pathname + parsed.search,
-			method: "GET",
-			headers: {
-				...headers,
-				Connection: "Upgrade",
-				Upgrade: "websocket",
-				"Sec-WebSocket-Version": "13",
-				"Sec-WebSocket-Key": wsKey,
-			},
-		},
-		(res) => {
-			callbacks.onError(
-				new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
-			);
-		}
-	);
-
-	req.on("upgrade", (res, socket) => {
-		conn.readyState = WS_OPEN;
-
-		conn.send = (data: string) => {
-			const payload = Buffer.from(data, "utf-8");
-			const mask = crypto.randomBytes(4);
-			let header: Buffer;
-
-			if (payload.length < 126) {
-				header = Buffer.alloc(6);
-				header[0] = 0x81;
-				header[1] = 0x80 | payload.length;
-				mask.copy(header, 2);
-			} else if (payload.length < 65536) {
-				header = Buffer.alloc(8);
-				header[0] = 0x81;
-				header[1] = 0x80 | 126;
-				header.writeUInt16BE(payload.length, 2);
-				mask.copy(header, 4);
-			} else {
-				header = Buffer.alloc(14);
-				header[0] = 0x81;
-				header[1] = 0x80 | 127;
-				header.writeBigUInt64BE(BigInt(payload.length), 2);
-				mask.copy(header, 10);
-			}
-
-			const masked = Buffer.alloc(payload.length);
-			for (let i = 0; i < payload.length; i++) {
-				masked[i] = payload[i] ^ mask[i % 4];
-			}
-
-			socket.write(Buffer.concat([header, masked]));
-		};
-
-		conn.close = () => {
-			conn.readyState = 3;
-			const closeFrame = Buffer.alloc(6);
-			closeFrame[0] = 0x88;
-			closeFrame[1] = 0x80;
-			const mask = crypto.randomBytes(4);
-			mask.copy(closeFrame, 2);
-			try {
-				socket.write(closeFrame);
-			} catch {
-				// Socket may already be closed
-			}
-			socket.end();
-		};
-
-		// Client-side ping every 15s to keep the connection alive
-		const pingInterval = setInterval(() => {
-			if (conn.readyState !== WS_OPEN) {
-				clearInterval(pingInterval);
-				return;
-			}
-			try {
-				const pingFrame = Buffer.alloc(6);
-				pingFrame[0] = 0x89; // FIN + ping opcode
-				pingFrame[1] = 0x80; // MASK + 0 length
-				const pingMask = crypto.randomBytes(4);
-				pingMask.copy(pingFrame, 2);
-				socket.write(pingFrame);
-			} catch {
-				// Socket may be dead
-			}
-		}, 15000);
-
-		callbacks.onOpen();
-
-		let buffer = Buffer.alloc(0);
-
-		socket.on("data", (chunk: Buffer) => {
-			buffer = Buffer.concat([buffer, chunk]);
-
-			while (buffer.length >= 2) {
-				const firstByte = buffer[0];
-				const secondByte = buffer[1];
-				const opcode = firstByte & 0x0f;
-				const isMasked = (secondByte & 0x80) !== 0;
-				let payloadLength = secondByte & 0x7f;
-				let offset = 2;
-
-				if (payloadLength === 126) {
-					if (buffer.length < 4) return;
-					payloadLength = buffer.readUInt16BE(2);
-					offset = 4;
-				} else if (payloadLength === 127) {
-					if (buffer.length < 10) return;
-					payloadLength = Number(buffer.readBigUInt64BE(2));
-					offset = 10;
-				}
-
-				if (isMasked) offset += 4;
-
-				if (buffer.length < offset + payloadLength) return;
-
-				let payload = buffer.subarray(offset, offset + payloadLength);
-
-				if (isMasked) {
-					const maskKey = buffer.subarray(offset - 4, offset);
-					payload = Buffer.from(payload);
-					for (let i = 0; i < payload.length; i++) {
-						payload[i] ^= maskKey[i % 4];
-					}
-				}
-
-				buffer = buffer.subarray(offset + payloadLength);
-
-				if (opcode === 0x01) {
-					callbacks.onMessage(payload.toString("utf-8"));
-				} else if (opcode === 0x08) {
-					// Close frame — extract close code and reason
-					let closeCode = 0;
-					let closeReason = "";
-					if (payload.length >= 2) {
-						closeCode = payload.readUInt16BE(0);
-						if (payload.length > 2) {
-							closeReason = payload
-								.subarray(2)
-								.toString("utf-8");
-						}
-					}
-					console.log(
-						`Voxtral: WebSocket close frame received — code=${closeCode} reason="${closeReason}"`
-					);
-					conn.readyState = 3;
-					clearInterval(pingInterval);
-					socket.end();
-					callbacks.onClose();
-					return;
-				} else if (opcode === 0x09) {
-					// Ping — send pong echoing the payload (RFC 6455 §5.5.3)
-					const pongMask = crypto.randomBytes(4);
-					const pongLen = payload.length;
-					let pongHeader: Buffer;
-					if (pongLen < 126) {
-						pongHeader = Buffer.alloc(6);
-						pongHeader[0] = 0x8a; // FIN + pong
-						pongHeader[1] = 0x80 | pongLen;
-						pongMask.copy(pongHeader, 2);
-					} else {
-						pongHeader = Buffer.alloc(8);
-						pongHeader[0] = 0x8a;
-						pongHeader[1] = 0x80 | 126;
-						pongHeader.writeUInt16BE(pongLen, 2);
-						pongMask.copy(pongHeader, 4);
-					}
-					const maskedPong = Buffer.from(payload);
-					for (let i = 0; i < maskedPong.length; i++) {
-						maskedPong[i] ^= pongMask[i % 4];
-					}
-					socket.write(Buffer.concat([pongHeader, maskedPong]));
-				}
-			}
-		});
-
-		socket.on("close", () => {
-			conn.readyState = 3;
-			clearInterval(pingInterval);
-			callbacks.onClose();
-		});
-
-		socket.on("error", (err: Error) => {
-			clearInterval(pingInterval);
-			callbacks.onError(err);
-		});
-	});
-
-	req.on("error", (err) => {
-		callbacks.onError(err);
-	});
-
-	req.end();
-
-	return conn;
-}
-
 export class RealtimeTranscriber {
-	private ws: WsConnection | null = null;
+	private ws: AuthenticatedWsConnection | null = null;
 	private settings: VoxtralSettings;
 	private callbacks: RealtimeCallbacks;
 	private intentionallyClosed = false;
+	private delayOverrideMs: number | null = null;
 
-	constructor(settings: VoxtralSettings, callbacks: RealtimeCallbacks) {
+	constructor(settings: VoxtralSettings, callbacks: RealtimeCallbacks, delayOverrideMs?: number) {
 		this.settings = settings;
 		this.callbacks = callbacks;
+		this.delayOverrideMs = delayOverrideMs ?? null;
 	}
 
 	async connect(): Promise<void> {
@@ -544,7 +356,7 @@ export class RealtimeTranscriber {
 			model: this.settings.realtimeModel,
 		});
 
-		const url = `https://api.mistral.ai/v1/audio/transcriptions/realtime?${params}`;
+		const url = `wss://api.mistral.ai/v1/audio/transcriptions/realtime?${params}`;
 
 		return new Promise((resolve, reject) => {
 			const timeout = setTimeout(() => {
@@ -552,11 +364,9 @@ export class RealtimeTranscriber {
 				reject(new Error("WebSocket connection timeout"));
 			}, 10000);
 
-			this.ws = createNodeWebSocket(
+			this.ws = createAuthenticatedWebSocket(
 				url,
-				{
-					Authorization: `Bearer ${this.settings.apiKey}`,
-				},
+				{ Authorization: `Bearer ${this.settings.apiKey}` },
 				{
 					onOpen: () => {
 						// Wait for session.created
@@ -564,7 +374,7 @@ export class RealtimeTranscriber {
 					onMessage: (data: string) => {
 						try {
 							const msg = JSON.parse(data);
-							console.log(
+							console.debug(
 								`Voxtral WS ← ${msg.type}`,
 								msg.type === "transcription.text.delta"
 									? msg.text?.slice(0, 50)
@@ -578,7 +388,7 @@ export class RealtimeTranscriber {
 									resolve();
 									break;
 								case "session.updated":
-									console.log(
+									console.debug(
 										"Voxtral WS: session updated",
 										JSON.stringify(msg.session || {})
 									);
@@ -587,7 +397,7 @@ export class RealtimeTranscriber {
 									this.callbacks.onDelta(msg.text || "");
 									break;
 								case "transcription.done":
-									console.log(
+									console.debug(
 										"Voxtral WS: transcription.done — full text:",
 										msg.text?.slice(0, 200)
 									);
@@ -603,7 +413,7 @@ export class RealtimeTranscriber {
 									);
 									break;
 								default:
-									console.log(
+									console.debug(
 										"Voxtral WS: unknown message type:",
 										msg.type,
 										data.slice(0, 300)
@@ -628,7 +438,7 @@ export class RealtimeTranscriber {
 						);
 					},
 					onClose: () => {
-						console.log(
+						console.debug(
 							`Voxtral WS: connection closed (intentional=${this.intentionallyClosed})`
 						);
 						this.ws = null;
@@ -643,6 +453,7 @@ export class RealtimeTranscriber {
 
 	private sendSessionUpdate(): void {
 		if (!this.ws) return;
+		const delayMs = this.delayOverrideMs ?? this.settings.streamingDelayMs;
 		const msg = {
 			type: "session.update",
 			session: {
@@ -650,7 +461,7 @@ export class RealtimeTranscriber {
 					encoding: "pcm_s16le",
 					sample_rate: 16000,
 				},
-				target_streaming_delay_ms: this.settings.streamingDelayMs,
+				target_streaming_delay_ms: delayMs,
 			},
 		};
 		this.ws.send(JSON.stringify(msg));

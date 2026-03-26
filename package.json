@@ -1,20 +1,28 @@
 {
 	"name": "obsidian-voxtral-transcribe",
-	"version": "0.1.0",
-	"description": "Speech-to-text dictation for Obsidian using Mistral Voxtral",
+	"version": "0.8.8",
+	"description": "Speech-to-text dictation using Mistral Voxtral. Supports real-time streaming, voice commands (headings, lists, to-dos), and automatic text correction.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"version:bump": "node scripts/bump-version.mjs"
 	},
 	"keywords": [],
-	"license": "MIT",
+	"license": "GPL-3.0",
 	"devDependencies": {
 		"@types/node": "^22.0.0",
+		"@typescript-eslint/parser": "^8.57.1",
 		"builtin-modules": "^4.0.0",
 		"esbuild": "^0.24.0",
-		"obsidian": "latest",
+		"eslint": "^9.39.4",
+		"eslint-plugin-obsidianmd": "^0.1.9",
+		"obsidian": "~1.12.3",
 		"tslib": "2.8.1",
-		"typescript": "5.7.2"
+		"typescript": "5.7.2",
+		"typescript-eslint": "^8.57.1",
+		"vitest": "^4.1.0"
 	}
 }

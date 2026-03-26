@@ -1,3 +1,6 @@
+// Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
+// Licensed under GPL-3.0 — see LICENSE for details
+// https://github.com/maxonamission/voxtral-transcribe
 import {
 	Editor,
 	MarkdownView,
@@ -5,7 +8,8 @@ import {
 	Platform,
 	Plugin,
 } from "obsidian";
-import { VoxtralSettings, DEFAULT_SETTINGS } from "./types";
+import { VoxtralSettings, getDefaultBuiltInCommands } from "./types";
+import { migrateSettings } from "./settings-migration";
 import { VoxtralSettingTab } from "./settings-tab";
 import {
 	VoxtralHelpView,
@@ -13,60 +17,38 @@ import {
 } from "./help-view";
 import { AudioRecorder } from "./audio-recorder";
 import {
-	RealtimeTranscriber,
 	transcribeBatch,
 	correctText,
 	isLikelyHallucination,
 } from "./mistral-api";
 import {
-	normalizeCommand,
 	processText,
 	matchCommand,
 	setLanguage,
+	setPreMatchHook,
+	isSlotActive,
+	getActiveSlot,
+	closeSlot,
+	cancelSlot,
+	loadCustomCommands,
+	loadCustomCommandTriggers,
 } from "./voice-commands";
-
-// ── In-memory log buffer (ring buffer, last 500 entries) ──
-
-const LOG_BUFFER_SIZE = 500;
-const logBuffer: string[] = [];
-
-function pushLog(level: string, args: unknown[]): void {
-	const ts = new Date().toISOString();
-	const msg = args
-		.map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
-		.join(" ");
-	logBuffer.push(`[${ts}] [${level}] ${msg}`);
-	if (logBuffer.length > LOG_BUFFER_SIZE) {
-		logBuffer.shift();
-	}
-}
-
-// Intercept console.log/warn/error for Voxtral messages
-for (const level of ["log", "warn", "error"] as const) {
-	const original = console[level].bind(console);
-	console[level] = (...args: unknown[]) => {
-		const first = args[0];
-		if (typeof first === "string" && first.startsWith("Voxtral:")) {
-			pushLog(level.toUpperCase(), args);
-		}
-		original(...args);
-	};
-}
-
-/** Check if Node.js APIs are available (desktop Electron only) */
-function hasNodeJs(): boolean {
-	try {
-		require("https");
-		return true;
-	} catch {
-		return false;
-	}
-}
+import {
+	scanTemplates,
+	matchTemplate,
+	insertTemplate,
+} from "./templates";
+import { vlog, getLogText, getLogCount } from "./plugin-logger";
+import { DictationTracker } from "./dictation-tracker";
+import { RealtimeSession, type SessionCallbacks } from "./realtime-session";
+import { DualDelaySession } from "./dual-delay-session";
 
 export default class VoxtralPlugin extends Plugin {
 	settings: VoxtralSettings;
 	private recorder: AudioRecorder;
-	private realtimeTranscriber: RealtimeTranscriber | null = null;
+	private realtimeSession: RealtimeSession | null = null;
+	private dualDelaySession: DualDelaySession | null = null;
+	private tracker = new DictationTracker();
 	private isRecording = false;
 	private isPaused = false;
 	private isTypingMuted = false;
@@ -75,7 +57,6 @@ export default class VoxtralPlugin extends Plugin {
 	private statusBarEl: HTMLElement | null = null;
 	private sendRibbonEl: HTMLElement | null = null;
 	private mobileActionEl: HTMLElement | null = null;
-	private pendingText = "";
 	private chunkIndex = 0;
 	private consecutiveFailures = 0;
 	private maxConsecutiveFailures = 5;
@@ -84,7 +65,7 @@ export default class VoxtralPlugin extends Plugin {
 
 	/** Whether realtime mode is available on this platform */
 	get canRealtime(): boolean {
-		return !Platform.isMobile && hasNodeJs();
+		return !Platform.isMobile;
 	}
 
 	/** Effective mode: fall back to batch on mobile */
@@ -95,6 +76,19 @@ export default class VoxtralPlugin extends Plugin {
 		return "batch";
 	}
 
+	/** Callbacks shared by realtime and dual-delay sessions. */
+	private get sessionCallbacks(): SessionCallbacks {
+		return {
+			updateStatusBar: (state) => this.updateStatusBar(state),
+			stopRecording: () => { void this.stopRecording(); },
+			isRecording: () => this.isRecording,
+			getEditor: () =>
+				this.currentEditor ||
+				this.app.workspace.getActiveViewOfType(MarkdownView)?.editor ||
+				null,
+		};
+	}
+
 	async onload(): Promise<void> {
 		await this.loadSettings();
 
@@ -103,12 +97,12 @@ export default class VoxtralPlugin extends Plugin {
 		// Register the help side panel view
 		this.registerView(
 			VIEW_TYPE_VOXTRAL_HELP,
-			(leaf) => new VoxtralHelpView(leaf)
+			(leaf) => new VoxtralHelpView(leaf),
 		);
 
 		// Ribbon icon: toggle recording
-		this.addRibbonIcon("mic", "Voxtral: Start/stop recording", () => {
-			this.toggleRecording();
+		this.addRibbonIcon("mic", "Voxtral: start/stop recording", () => {
+			void this.toggleRecording();
 		});
 
 		// Status bar (desktop only)
@@ -122,43 +116,42 @@ export default class VoxtralPlugin extends Plugin {
 			id: "toggle-recording",
 			name: "Start/stop recording",
 			icon: "mic",
-			callback: () => this.toggleRecording(),
-			hotkeys: [{ modifiers: ["Ctrl"], key: " " }],
+			callback: () => { void this.toggleRecording(); },
 		});
 
 		this.addCommand({
 			id: "send-chunk",
 			name: "Send audio chunk (tap-to-send)",
 			icon: "send",
-			callback: () => this.sendChunk(),
+			callback: () => { void this.sendChunk(); },
 		});
 
 		this.addCommand({
 			id: "open-help-panel",
-			name: "Show voice commands (side panel)",
+			name: "Show voice help panel",
 			icon: "help-circle",
-			callback: () => this.openHelpPanel(),
+			callback: () => { void this.openHelpPanel(); },
 		});
 
 		this.addCommand({
 			id: "export-logs",
 			name: "Export logs to clipboard",
 			icon: "clipboard-copy",
-			callback: () => this.exportLogs(),
+			callback: () => { void this.exportLogs(); },
 		});
 
 		this.addCommand({
 			id: "correct-selection",
 			name: "Correct selected text",
 			icon: "spell-check",
-			editorCallback: (editor: Editor) => this.correctSelection(editor),
+			editorCallback: (editor: Editor) => { void this.correctSelection(editor); },
 		});
 
 		this.addCommand({
 			id: "correct-all",
-			name: "Correct entire note",
+			name: "Correct dictated text",
 			icon: "file-check",
-			editorCallback: (editor: Editor) => this.correctAll(editor),
+			editorCallback: (editor: Editor) => { void this.correctAll(editor); },
 		});
 
 		// Settings tab
@@ -175,12 +168,11 @@ export default class VoxtralPlugin extends Plugin {
 		// (tap-to-send, if enabled) before the editor inserts a newline.
 		this.keydownHandler = (e: KeyboardEvent) => this.handleTypingMute(e);
 		document.addEventListener("keydown", this.keydownHandler, true);
-
 	}
 
 	onunload(): void {
 		if (this.isRecording) {
-			this.stopRecording();
+			void this.stopRecording();
 		}
 		this.removeSendButton();
 		if (this.keydownHandler) {
@@ -189,18 +181,77 @@ export default class VoxtralPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			await this.loadData()
-		);
+		this.settings = migrateSettings(await this.loadData());
+		// Ensure built-in custom commands are present and up to date
+		// (new properties like `labels` are merged from defaults)
+		const defaults = getDefaultBuiltInCommands();
+		const defaultMap = new Map(defaults.map((d) => [d.id, d]));
+		const existingIds = new Set(this.settings.customCommands.map((c) => c.id));
+
+		// Update existing built-ins with latest defaults (labels, triggers, etc.)
+		for (const cmd of this.settings.customCommands) {
+			if (cmd.builtIn && defaultMap.has(cmd.id)) {
+				const def = defaultMap.get(cmd.id)!;
+				cmd.labels = def.labels;
+				cmd.triggers = def.triggers;
+				cmd.insertText = def.insertText;
+				cmd.slotPrefix = def.slotPrefix;
+				cmd.slotSuffix = def.slotSuffix;
+			}
+		}
+		// Add any new built-ins that don't exist yet
+		const newBuiltIns = defaults.filter((d) => !existingIds.has(d.id));
+		if (newBuiltIns.length > 0) {
+			this.settings.customCommands = [
+				...newBuiltIns,
+				...this.settings.customCommands,
+			];
+		}
 		setLanguage(this.settings.language);
+		loadCustomCommands(this.settings.customCommands);
+		loadCustomCommandTriggers(this.settings.customCommands);
+		this.setupTemplates();
 	}
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 		setLanguage(this.settings.language);
+		loadCustomCommands(this.settings.customCommands);
+		loadCustomCommandTriggers(this.settings.customCommands);
+		this.setupTemplates();
 		this.refreshHelpView();
+	}
+
+	// ── Templates ──
+
+	/** Scan templates folder and register the pre-match hook */
+	private setupTemplates(): void {
+		scanTemplates(this.app, this.settings.templatesFolder);
+
+		// Pre-match hook handles user templates from the templates folder.
+		// Built-in quick-templates (table, callout, etc.) are now regular
+		// custom commands and go through the normal matchCommand() pipeline.
+		setPreMatchHook((editor, normalizedText, rawText) => {
+			const lang = this.settings.language;
+
+			const tmplMatch = matchTemplate(normalizedText, lang);
+			if (tmplMatch) {
+				if (tmplMatch.textBefore) {
+					const cmdWords = normalizedText.length - tmplMatch.textBefore.length;
+					const before = rawText.substring(0, rawText.length - cmdWords).trimEnd();
+					if (before) {
+						const cursor = editor.getCursor();
+						editor.replaceRange(before, cursor);
+						const newCh = cursor.ch + before.length;
+						editor.setCursor({ line: cursor.line, ch: newCh });
+					}
+				}
+				void insertTemplate(this.app, editor, tmplMatch.template);
+				return true;
+			}
+
+			return false;
+		});
 	}
 
 	/** Re-render the help panel with the current language. */
@@ -221,8 +272,8 @@ export default class VoxtralPlugin extends Plugin {
 		// Ribbon icon (desktop)
 		this.sendRibbonEl = this.addRibbonIcon(
 			"send",
-			"Voxtral: Send chunk",
-			() => this.sendChunk()
+			"Send chunk",
+			() => { void this.sendChunk(); },
 		);
 		this.sendRibbonEl.addClass("voxtral-send-button");
 
@@ -234,8 +285,8 @@ export default class VoxtralPlugin extends Plugin {
 			if (view) {
 				this.mobileActionEl = view.addAction(
 					"send",
-					"Voxtral: Send chunk",
-					() => this.sendChunk()
+					"Send chunk",
+					() => { void this.sendChunk(); },
 				);
 				this.mobileActionEl.addClass("voxtral-mobile-send");
 			}
@@ -266,11 +317,11 @@ export default class VoxtralPlugin extends Plugin {
 
 			if (behavior === "keep-recording") {
 				// Do nothing — keep recording in background
-				console.log("Voxtral: App backgrounded, recording continues");
+				vlog.debug("Voxtral: App backgrounded, recording continues");
 			} else if (behavior === "pause-after-delay") {
 				const delaySec = this.settings.focusPauseDelaySec;
-				console.log(
-					`Voxtral: App backgrounded, pausing in ${delaySec}s`
+				console.debug(
+					`Voxtral: App backgrounded, pausing in ${delaySec}s`,
 				);
 				this.focusPauseTimer = setTimeout(() => {
 					if (this.isRecording && document.hidden) {
@@ -294,15 +345,15 @@ export default class VoxtralPlugin extends Plugin {
 		this.isPaused = true;
 		this.recorder.pause();
 		this.updateStatusBar("paused");
-		console.log("Voxtral: Recording paused (app backgrounded)");
+		vlog.debug("Voxtral: Recording paused (app backgrounded)");
 	}
 
 	private resumeRecording(): void {
 		this.isPaused = false;
 		this.recorder.resume();
 		this.updateStatusBar("recording");
-		new Notice("Voxtral: Recording resumed");
-		console.log("Voxtral: Recording resumed (app foregrounded)");
+		new Notice("Recording resumed");
+		vlog.debug("Voxtral: Recording resumed (app foregrounded)");
 	}
 
 	private clearFocusPauseTimer(): void {
@@ -315,6 +366,41 @@ export default class VoxtralPlugin extends Plugin {
 	// ── Typing mute (prevent keyboard noise from being transcribed) ──
 
 	private handleTypingMute(e: KeyboardEvent): void {
+		// ── Slot handling: Escape cancels; voice-exit slots let all keys through ──
+		if (isSlotActive()) {
+			const slot = getActiveSlot();
+			if (e.key === "Escape") {
+				e.preventDefault();
+				cancelSlot();
+				this.updateStatusBar("recording");
+				return;
+			}
+			// Voice-exit slots: all keys (including Enter) pass through normally
+			if (slot?.def.exitTrigger === "voice") {
+				return;
+			}
+			// Legacy keyboard-exit slots (custom commands may still use these)
+			const isEnterExit = slot?.def.exitTrigger === "enter" || slot?.def.exitTrigger === "enter-or-space";
+			const isSpaceExit = slot?.def.exitTrigger === "space" || slot?.def.exitTrigger === "enter-or-space";
+			if ((e.key === "Enter" && isEnterExit) || (e.key === " " && isSpaceExit)) {
+				e.preventDefault();
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (view) {
+					closeSlot(view.editor);
+					if (this.realtimeSession) {
+						this.realtimeSession.flushAfterSlot(view.editor);
+					}
+					if (this.dualDelaySession) {
+						this.dualDelaySession.flushAfterSlot(view.editor);
+					}
+				}
+				this.updateStatusBar("recording");
+				return;
+			}
+			// All other keys: let the user type normally into the slot
+			return;
+		}
+
 		if (!this.isRecording || this.isPaused) return;
 
 		// Ignore modifier-only keys and shortcuts
@@ -340,7 +426,7 @@ export default class VoxtralPlugin extends Plugin {
 			!this.typingResumeTimer
 		) {
 			e.preventDefault();
-			this.sendChunk();
+			void this.sendChunk();
 			return;
 		}
 
@@ -410,15 +496,13 @@ export default class VoxtralPlugin extends Plugin {
 
 	private async startRecording(): Promise<void> {
 		if (!this.settings.apiKey) {
-			new Notice(
-				"Voxtral: Please set your Mistral API key in the plugin settings."
-			);
+			new Notice("Please set your API key in the plugin settings.");
 			return;
 		}
 
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) {
-			new Notice("Voxtral: Open a note first to start dictating.");
+			new Notice("Open a note first to start dictating.");
 			return;
 		}
 
@@ -436,11 +520,8 @@ export default class VoxtralPlugin extends Plugin {
 			this.chunkIndex = 0;
 			this.consecutiveFailures = 0;
 			this.updateStatusBar("recording");
-			// Auto-open help panel on desktop only — on mobile it
-			// takes over the whole screen which is annoying.
-			if (!Platform.isMobile) {
-				this.openHelpPanel();
-			}
+			// Auto-open help panel (right sidebar — swipeable on mobile)
+			void this.openHelpPanel();
 
 			// Show which microphone is active
 			const micName = this.recorder.activeMicLabel;
@@ -463,28 +544,27 @@ export default class VoxtralPlugin extends Plugin {
 					const dismiss = frag.createEl("a", {
 						text: "Don\u2019t show again",
 						href: "#",
+						cls: "voxtral-dismiss-link",
 					});
-					dismiss.style.opacity = "0.7";
-					dismiss.style.fontSize = "0.85em";
 					dismiss.addEventListener("click", (e) => {
 						e.preventDefault();
 						this.settings.dismissMobileBatchNotice = true;
-						this.saveSettings();
+						void this.saveSettings();
 					});
 					new Notice(frag, 8000);
 				} else {
 					new Notice(
 						`Voxtral: Recording started (${micName})\n` +
 							enterHint.trim(),
-						6000
+						6000,
 					);
 				}
 			} else {
-				new Notice(`Voxtral: Recording started (${micName})`);
+				new Notice(`Recording started (${micName})`);
 			}
 		} catch (e) {
-			console.error("Voxtral: Failed to start recording", e);
-			new Notice(`Voxtral: Could not start recording: ${e}`);
+			vlog.error("Voxtral: Failed to start recording", e);
+			new Notice(`Could not start recording: ${e}`);
 			this.updateStatusBar("idle");
 		}
 	}
@@ -508,13 +588,19 @@ export default class VoxtralPlugin extends Plugin {
 				await this.stopBatchRecording();
 			}
 		} catch (e) {
-			console.error("Voxtral: Failed to stop recording", e);
-			new Notice(`Voxtral: Error stopping recording: ${e}`);
+			vlog.error("Voxtral: Failed to stop recording", e);
+			new Notice(`Error stopping recording: ${e}`);
 		}
 
 		this.currentEditor = null;
+		// Only reset tracked ranges if auto-correct already ran.
+		// When auto-correct is off, the user may want to manually
+		// trigger "Correct dictated text" after stopping.
+		if (this.settings.autoCorrect) {
+			this.tracker.reset();
+		}
 		this.updateStatusBar("idle");
-		new Notice("Voxtral: Recording stopped");
+		new Notice("Recording stopped");
 	}
 
 	// ── Tap-to-send: flush current audio chunk without stopping ──
@@ -545,10 +631,10 @@ export default class VoxtralPlugin extends Plugin {
 				text &&
 				isLikelyHallucination(
 					text,
-					this.recorder.lastChunkDurationSec
+					this.recorder.lastChunkDurationSec,
 				)
 			) {
-				console.warn("Voxtral: Discarding hallucinated chunk");
+				vlog.warn("Voxtral: Discarding hallucinated chunk");
 				this.updateStatusBar("recording");
 				return;
 			}
@@ -564,165 +650,78 @@ export default class VoxtralPlugin extends Plugin {
 
 			this.updateStatusBar("recording");
 			if (text) {
-				processText(editor, text);
+				// Use tracker to record the inserted range for manual
+				// "Correct dictated text" (when autoCorrect is off).
+				const offsetBefore = editor.posToOffset(editor.getCursor());
+				const stopRequested = processText(editor, text);
+				const offsetAfter = editor.posToOffset(editor.getCursor());
+				if (offsetAfter > offsetBefore) {
+					this.tracker.addRange(offsetBefore, offsetAfter);
+				}
+				if (stopRequested) {
+					await this.stopRecording();
+					return;
+				}
 			}
 		} catch (e) {
-			console.error("Voxtral: Chunk transcription failed", e);
+			vlog.error("Voxtral: Chunk transcription failed", e);
 			this.updateStatusBar("recording");
-			new Notice(`Voxtral: Chunk failed: ${e}`);
+			new Notice(`Chunk failed: ${e}`);
 		}
 	}
 
-	// ── Realtime recording ──
+	// ── Realtime recording (delegates to session classes) ──
 
 	private async startRealtimeRecording(editor: Editor): Promise<void> {
-		this.pendingText = "";
+		this.tracker.reset();
 
-		await this.connectRealtimeWebSocket(editor);
+		if (this.settings.dualDelay) {
+			this.dualDelaySession = new DualDelaySession(
+				this.settings,
+				this.tracker,
+				this.sessionCallbacks,
+			);
+			await this.dualDelaySession.start(editor);
+		} else {
+			this.realtimeSession = new RealtimeSession(
+				this.settings,
+				this.tracker,
+				this.sessionCallbacks,
+			);
+			await this.realtimeSession.start(editor);
+		}
 
 		const deviceId = this.settings.microphoneDeviceId || undefined;
 		await this.recorder.start(deviceId, (pcmData) => {
-			this.realtimeTranscriber?.sendAudio(pcmData);
-		});
-	}
-
-	private async connectRealtimeWebSocket(editor: Editor): Promise<void> {
-		this.realtimeTranscriber = new RealtimeTranscriber(this.settings, {
-			onSessionCreated: () => {
-				console.log("Voxtral: Realtime session created");
-			},
-			onDelta: (text) => {
-				this.handleRealtimeDelta(editor, text);
-			},
-			onDone: (text) => {
-				this.handleRealtimeDone(editor, text);
-			},
-			onError: (message) => {
-				console.error("Voxtral: Realtime error:", message);
-				new Notice(`Voxtral: Streaming error: ${message}`);
-			},
-			onDisconnect: () => {
-				this.handleRealtimeDisconnect();
-			},
-		});
-
-		await this.realtimeTranscriber.connect();
-	}
-
-	/**
-	 * Handle WebSocket closure during recording.
-	 *
-	 * The Mistral realtime API closes the connection after each
-	 * transcription.done event (end of utterance / silence detected).
-	 * This is NORMAL — not an error. We silently reconnect so the
-	 * user can keep talking without interruption.
-	 *
-	 * Only shows a warning if reconnection fails repeatedly.
-	 */
-	private async handleRealtimeDisconnect(): Promise<void> {
-		if (!this.isRecording) return;
-
-		const editor =
-			this.currentEditor ||
-			this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
-		if (!editor) {
-			this.stopRecording();
-			return;
-		}
-
-		// Silent, immediate reconnect — this is expected API behavior
-		console.log("Voxtral: Session ended, reconnecting silently...");
-
-		try {
-			await this.connectRealtimeWebSocket(editor);
-			this.consecutiveFailures = 0;
-			console.log("Voxtral: Session reconnected");
-		} catch (e) {
-			this.consecutiveFailures++;
-			console.error(
-				`Voxtral: Reconnect failed (${this.consecutiveFailures}/${this.maxConsecutiveFailures})`,
-				e
-			);
-
-			if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
-				new Notice(
-					"Voxtral: Cannot connect to the API. Recording stopped.",
-					6000
-				);
-				this.stopRecording();
-				return;
+			if (this.dualDelaySession) {
+				this.dualDelaySession.sendAudio(pcmData);
+			} else if (this.realtimeSession) {
+				this.realtimeSession.sendAudio(pcmData);
 			}
-
-			// Brief delay before retry, only on actual failures
-			const delay = Math.min(
-				500 * this.consecutiveFailures,
-				3000
-			);
-			await new Promise((resolve) => setTimeout(resolve, delay));
-
-			if (this.isRecording) {
-				this.handleRealtimeDisconnect();
-			}
-		}
-	}
-
-	private handleRealtimeDelta(editor: Editor, text: string): void {
-		this.pendingText += text;
-
-		// Flush on sentence-ending punctuation OR after accumulating enough text
-		const sentenceEnd = /[.!?]\s*$/;
-		const longEnough = this.pendingText.length > 120;
-
-		if (sentenceEnd.test(this.pendingText) || longEnough) {
-			const sentence = this.pendingText.trim();
-			this.pendingText = "";
-
-			const normalized = normalizeCommand(sentence);
-			const stopPatterns = [
-				"beeindig opname",
-				"beeindig de opname",
-				"beeindigt opname",
-				"beeindigt de opname",
-				"beeindigde opname",
-				"beeindigde de opname",
-				"stop opname",
-				"stopopname",
-				"stop de opname",
-				"stop recording",
-			];
-			if (stopPatterns.some((p) => normalized.includes(p))) {
-				this.stopRecording();
-				return;
-			}
-
-			processText(editor, sentence + " ");
-		}
-	}
-
-	private handleRealtimeDone(editor: Editor, _text: string): void {
-		if (this.pendingText.trim()) {
-			processText(editor, this.pendingText.trim() + " ");
-			this.pendingText = "";
+		}, this.settings.noiseSuppression);
+		if (this.recorder.fallbackUsed) {
+			new Notice("Selected mic unavailable — using default");
 		}
 	}
 
 	private async stopRealtimeRecording(): Promise<void> {
-		this.realtimeTranscriber?.endAudio();
-
-		await new Promise((resolve) => setTimeout(resolve, 1000));
-
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (view && this.pendingText.trim()) {
-			processText(view.editor, this.pendingText.trim());
-			this.pendingText = "";
+
+		if (this.dualDelaySession) {
+			await this.dualDelaySession.stop();
+			this.dualDelaySession = null;
+		} else if (this.realtimeSession) {
+			const editor = view?.editor;
+			if (editor) {
+				await this.realtimeSession.stop(editor);
+			}
+			this.realtimeSession = null;
 		}
 
-		this.realtimeTranscriber?.close();
-		this.realtimeTranscriber = null;
 		await this.recorder.stop();
 
 		if (this.settings.autoCorrect && view) {
-			await this.autoCorrectAfterStop(view.editor);
+			await this.tracker.autoCorrectAfterStop(view.editor, this.settings);
 		}
 	}
 
@@ -730,20 +729,23 @@ export default class VoxtralPlugin extends Plugin {
 
 	private async startBatchRecording(): Promise<void> {
 		const deviceId = this.settings.microphoneDeviceId || undefined;
-		await this.recorder.start(deviceId);
+		await this.recorder.start(deviceId, undefined, this.settings.noiseSuppression);
+		if (this.recorder.fallbackUsed) {
+			new Notice("Selected mic unavailable — using default");
+		}
 	}
 
 	private async stopBatchRecording(): Promise<void> {
 		const blob = await this.recorder.stop();
 
 		if (blob.size === 0) {
-			new Notice("Voxtral: No audio recorded");
+			new Notice("No audio recorded");
 			return;
 		}
 
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) {
-			new Notice("Voxtral: No active note found");
+			new Notice("No active note found");
 			return;
 		}
 
@@ -756,10 +758,10 @@ export default class VoxtralPlugin extends Plugin {
 				text &&
 				isLikelyHallucination(
 					text,
-					this.recorder.lastChunkDurationSec
+					this.recorder.lastChunkDurationSec,
 				)
 			) {
-				console.warn("Voxtral: Discarding hallucinated batch");
+				vlog.warn("Voxtral: Discarding hallucinated batch");
 				return;
 			}
 
@@ -773,95 +775,78 @@ export default class VoxtralPlugin extends Plugin {
 				processText(editor, text);
 			}
 		} catch (e) {
-			console.error("Voxtral: Batch transcription failed", e);
-			new Notice(`Voxtral: Transcription failed: ${e}`);
+			vlog.error("Voxtral: Batch transcription failed", e);
+			new Notice(`Transcription failed: ${e}`);
 		}
 	}
 
 	// ── Text correction ──
 
-	private async autoCorrectAfterStop(editor: Editor): Promise<void> {
-		const text = editor.getValue();
-		if (!text.trim()) return;
-
-		try {
-			const corrected = await correctText(text, this.settings);
-			if (corrected && corrected !== text) {
-				editor.setValue(corrected);
-			}
-		} catch (e) {
-			console.error("Voxtral: Auto-correct failed", e);
-		}
-	}
-
-	private async exportLogs(): Promise<void> {
-		if (logBuffer.length === 0) {
-			new Notice("Voxtral: No logs to export");
-			return;
-		}
-		const text = logBuffer.join("\n");
-		await navigator.clipboard.writeText(text);
-		new Notice(`Voxtral: ${logBuffer.length} log entries copied to clipboard`);
-	}
-
 	private async correctSelection(editor: Editor): Promise<void> {
 		const selection = editor.getSelection();
 		if (!selection) {
-			new Notice("Voxtral: Select text first to correct it");
+			new Notice("Select text first to correct it");
 			return;
 		}
 
 		if (!this.settings.apiKey) {
-			new Notice("Voxtral: Please set your API key first");
+			new Notice("Please set your API key first");
 			return;
 		}
 
 		try {
-			new Notice("Voxtral: Correcting...");
+			new Notice("Correcting...");
 			const corrected = await correctText(selection, this.settings);
 			if (corrected) {
 				editor.replaceSelection(corrected);
-				new Notice("Voxtral: Selection corrected");
+				new Notice("Selection corrected");
 			}
 		} catch (e) {
-			new Notice(`Voxtral: Correction failed: ${e}`);
+			new Notice(`Correction failed: ${e}`);
 		}
 	}
 
 	private async correctAll(editor: Editor): Promise<void> {
-		const text = editor.getValue();
-		if (!text.trim()) {
-			new Notice("Voxtral: Note is empty");
+		if (!this.tracker.hasRanges()) {
+			new Notice("No dictated text to correct");
 			return;
 		}
 
 		if (!this.settings.apiKey) {
-			new Notice("Voxtral: Please set your API key first");
+			new Notice("Please set your API key first");
 			return;
 		}
 
 		try {
-			new Notice("Voxtral: Correcting...");
-			const corrected = await correctText(text, this.settings);
-			if (corrected && corrected !== text) {
-				editor.setValue(corrected);
-				new Notice("Voxtral: Note corrected");
-			} else {
-				new Notice("Voxtral: No corrections needed");
-			}
+			new Notice("Correcting...");
+			await this.tracker.autoCorrectAfterStop(editor, this.settings);
+			this.tracker.reset();
+			new Notice("Dictated text corrected");
 		} catch (e) {
-			new Notice(`Voxtral: Correction failed: ${e}`);
+			new Notice(`Correction failed: ${e}`);
 		}
+	}
+
+	// ── Logs ──
+
+	private async exportLogs(): Promise<void> {
+		if (getLogCount() === 0) {
+			new Notice("No logs to export");
+			return;
+		}
+		await navigator.clipboard.writeText(getLogText());
+		new Notice(`${getLogCount()} log entries copied to clipboard`);
 	}
 
 	// ── Help panel ──
 
 	private async openHelpPanel(): Promise<void> {
+		// On mobile, use a modal instead of a sidebar leaf
 		const existing = this.app.workspace.getLeavesOfType(
-			VIEW_TYPE_VOXTRAL_HELP
+			VIEW_TYPE_VOXTRAL_HELP,
 		);
 		if (existing.length > 0) {
-			this.app.workspace.revealLeaf(existing[0]);
+			void this.app.workspace.revealLeaf(existing[0]);
 			return;
 		}
 
@@ -871,14 +856,19 @@ export default class VoxtralPlugin extends Plugin {
 				type: VIEW_TYPE_VOXTRAL_HELP,
 				active: true,
 			});
-			this.app.workspace.revealLeaf(leaf);
+			// On desktop, bring into view immediately.
+			// On mobile, just register it in the right sidebar —
+			// the user can swipe from the right to reveal it.
+			if (!Platform.isMobile) {
+				void this.app.workspace.revealLeaf(leaf);
+			}
 		}
 	}
 
 	// ── Status bar ──
 
 	private updateStatusBar(
-		state: "idle" | "recording" | "processing" | "paused"
+		state: "idle" | "recording" | "processing" | "paused" | "slot",
 	): void {
 		if (!this.statusBarEl) return;
 		switch (state) {
@@ -887,10 +877,19 @@ export default class VoxtralPlugin extends Plugin {
 				this.statusBarEl.removeClass(
 					"voxtral-recording",
 					"voxtral-processing",
-					"voxtral-paused"
+					"voxtral-paused",
 				);
 				break;
 			case "recording": {
+				// If a slot is active, show slot status instead
+				if (isSlotActive()) {
+					const slot = getActiveSlot();
+					const label = slot?.commandId ?? "slot";
+					this.statusBarEl.setText(`● ${label} — type, then Enter`);
+					this.statusBarEl.addClass("voxtral-recording");
+					this.statusBarEl.removeClass("voxtral-processing", "voxtral-paused");
+					break;
+				}
 				const mic = this.recorder.activeMicLabel;
 				const short =
 					mic.length > 25 ? mic.slice(0, 22) + "..." : mic;
@@ -899,13 +898,21 @@ export default class VoxtralPlugin extends Plugin {
 				this.statusBarEl.removeClass("voxtral-processing", "voxtral-paused");
 				break;
 			}
+			case "slot": {
+				const slot = getActiveSlot();
+				const label = slot?.commandId ?? "slot";
+				this.statusBarEl.setText(`● ${label} — type, then Enter`);
+				this.statusBarEl.addClass("voxtral-recording");
+				this.statusBarEl.removeClass("voxtral-processing", "voxtral-paused");
+				break;
+			}
 			case "paused":
-				this.statusBarEl.setText("⏸ Paused");
+				this.statusBarEl.setText("⏸ paused");
 				this.statusBarEl.addClass("voxtral-paused");
 				this.statusBarEl.removeClass("voxtral-recording", "voxtral-processing");
 				break;
 			case "processing":
-				this.statusBarEl.setText("⏳ Processing...");
+				this.statusBarEl.setText("⏳ processing...");
 				this.statusBarEl.addClass("voxtral-processing");
 				this.statusBarEl.removeClass("voxtral-recording", "voxtral-paused");
 				break;

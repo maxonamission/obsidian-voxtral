@@ -75,3 +75,87 @@
 .voxtral-mobile-send {
 	color: var(--text-accent) !important;
 }
+
+/* ── Notice dismiss link ── */
+
+.voxtral-dismiss-link {
+	opacity: 0.7;
+	font-size: 0.85em;
+}
+
+/* ── Settings textarea ── */
+
+.voxtral-textarea-full {
+	width: 100%;
+}
+
+/* ── Custom command editor modal ── */
+
+.voxtral-cmd-modal-bg {
+	opacity: 0.85;
+}
+
+.voxtral-cmd-modal {
+	max-width: 500px;
+	padding: 20px;
+}
+
+.voxtral-cmd-modal h3 {
+	margin-top: 0;
+}
+
+.voxtral-cmd-field-label {
+	display: block;
+	margin-bottom: 4px;
+	font-weight: var(--font-semibold);
+}
+
+.voxtral-cmd-field-desc {
+	display: block;
+	margin-bottom: 4px;
+	color: var(--text-muted);
+}
+
+.voxtral-cmd-input {
+	width: 100%;
+	margin-bottom: 12px;
+}
+
+.voxtral-cmd-select {
+	width: 100%;
+	margin-bottom: 12px;
+}
+
+.voxtral-cmd-btn-row {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+.voxtral-cmd-error {
+	border-color: var(--text-error);
+}
+
+/* ── Custom command editor modal (mobile scroll fix) ── */
+
+.voxtral-cmd-editor-overlay {
+	align-items: safe center;
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+.voxtral-cmd-editor-modal {
+	max-height: calc(100dvh - 2rem);
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+.is-mobile .voxtral-cmd-editor-overlay {
+	align-items: flex-start;
+	padding-top: 1rem;
+}
+
+.is-mobile .voxtral-cmd-editor-modal {
+	max-height: calc(100dvh - 2rem);
+}

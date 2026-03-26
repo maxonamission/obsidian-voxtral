@@ -1,3 +1,6 @@
+// Voxtral Transcribe — Copyright (c) 2026 Max Kloosterman
+// Licensed under GPL-3.0 — see LICENSE for details
+// https://github.com/maxonamission/voxtral-transcribe
 import { Editor } from "obsidian";
 import {
 	CommandId,
@@ -5,6 +8,13 @@ import {
 	getLabel,
 	getMishearings,
 } from "./lang";
+import {
+	phoneticNormalize,
+	stripArticles,
+	stripTrailingFillers,
+	trySplitCompound,
+} from "./phonetics";
+import type { CustomCommand } from "./types";
 
 /**
  * Voice command processing — recognizes voice commands at the end of
@@ -25,6 +35,99 @@ interface CommandDef {
 	action: (editor: Editor) => void;
 	/** If true, trailing punctuation is stripped from preceding text before inserting */
 	punctuation?: boolean;
+	/** If set, this command opens a slot (voice pauses, user types, exit closes) */
+	slot?: SlotDef;
+}
+
+/** Slot definition: prefix/suffix inserted around user-typed content */
+export interface SlotDef {
+	prefix: string;
+	suffix: string;
+	/** What closes the slot: "voice" = only via voice command, or keyboard triggers */
+	exitTrigger: "voice" | "enter" | "space" | "enter-or-space";
+}
+
+/** Currently active slot, or null */
+export interface ActiveSlot {
+	def: SlotDef;
+	commandId: CommandId;
+	/** Cursor position right after the opening prefix was inserted */
+	startPos?: { line: number; ch: number };
+}
+
+let activeSlot: ActiveSlot | null = null;
+
+/** Check if a slot is currently active */
+export function isSlotActive(): boolean {
+	return activeSlot !== null;
+}
+
+/** Get the active slot info */
+export function getActiveSlot(): ActiveSlot | null {
+	return activeSlot;
+}
+
+/**
+ * Close the active slot: insert the suffix at the cursor.
+ * Returns true if a slot was closed, false if none was active.
+ */
+export function closeSlot(editor: Editor): boolean {
+	if (!activeSlot) return false;
+	let pos = editor.getCursor();
+	const suffix = activeSlot.def.suffix;
+
+	// If the suffix already appears between the slot start and the cursor,
+	// Obsidian's autocomplete (e.g. wikilink suggester) already closed it.
+	// Just clear the slot — don't insert a duplicate suffix.
+	if (suffix && activeSlot.startPos) {
+		const textSinceOpen = editor.getRange(activeSlot.startPos, pos);
+		if (textSinceOpen.includes(suffix)) {
+			activeSlot = null;
+			return true;
+		}
+	}
+
+	// Trim trailing whitespace before inserting suffix so that
+	// markdown formatting is not broken (e.g. "**text **" won't
+	// render as bold — we want "**text**").
+	if (suffix) {
+		const line = editor.getLine(pos.line);
+		const before = line.substring(0, pos.ch);
+		const trimmed = before.replace(/\s+$/, "");
+		if (trimmed.length < before.length) {
+			const trimFrom = { line: pos.line, ch: trimmed.length };
+			editor.replaceRange("", trimFrom, pos);
+			pos = { line: pos.line, ch: trimmed.length };
+		}
+	}
+
+	// Check if the suffix is already present at the cursor position
+	// (e.g. Obsidian's autocomplete or auto-pair may have inserted it).
+	const line = editor.getLine(pos.line);
+	const afterCursor = line.substring(pos.ch, pos.ch + suffix.length);
+	if (afterCursor === suffix) {
+		// Suffix already present — just move past it
+		editor.setCursor({ line: pos.line, ch: pos.ch + suffix.length });
+	} else {
+		editor.replaceRange(suffix, pos);
+		editor.setCursor({ line: pos.line, ch: pos.ch + suffix.length });
+	}
+	activeSlot = null;
+	return true;
+}
+
+/**
+ * Cancel the active slot without inserting the suffix.
+ */
+export function cancelSlot(): void {
+	activeSlot = null;
+}
+
+/**
+ * Programmatically open a slot (for quick-templates like code blocks).
+ */
+export function openSlot(commandId: string, def: SlotDef, startPos?: { line: number; ch: number }): void {
+	activeSlot = { def, commandId: commandId as CommandId, startPos };
 }
 
 // Normalize text for command matching: remove diacritics, hyphens, punctuation
@@ -46,11 +149,105 @@ function fixMishearings(text: string): string {
 	return text;
 }
 
-function insertAtCursor(editor: Editor, text: string): void {
+// Levenshtein edit distance between two strings
+function levenshtein(a: string, b: string): number {
+	const m = a.length, n = b.length;
+	const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1));
+	for (let i = 0; i <= m; i++) dp[i][0] = i;
+	for (let j = 0; j <= n; j++) dp[0][j] = j;
+	for (let i = 1; i <= m; i++) {
+		for (let j = 1; j <= n; j++) {
+			dp[i][j] = a[i - 1] === b[j - 1]
+				? dp[i - 1][j - 1]
+				: 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+		}
+	}
+	return dp[m][n];
+}
+
+/**
+ * Determine the insertion context by inspecting text before the cursor.
+ * Returns a classification that drives casing and punctuation behaviour.
+ */
+export type InsertionContext =
+	| "sentence-start"  // after .!? or empty document → uppercase, keep trailing period
+	| "new-line"        // start of a line (col 0) or after \n → uppercase, keep trailing period
+	| "list-or-heading" // after - / * / # / > markdown markers → uppercase, strip trailing period
+	| "mid-sentence";   // everything else → lowercase, strip trailing period
+
+export function detectInsertionContext(editor: Editor): InsertionContext {
 	const cursor = editor.getCursor();
 
+	// Column 0 on any line is always a new-line context
+	if (cursor.ch === 0) return "new-line";
+
+	// Read text on the current line up to the cursor
+	const lineBefore = editor.getRange({ line: cursor.line, ch: 0 }, cursor);
+	const trimmed = lineBefore.trimEnd();
+
+	// Empty line (only whitespace before cursor)
+	if (!trimmed) return "new-line";
+
+	const lastChar = trimmed[trimmed.length - 1];
+
+	// After sentence-ending punctuation
+	if (lastChar === "." || lastChar === "!" || lastChar === "?") {
+		return "sentence-start";
+	}
+
+	// Markdown list / heading / blockquote markers at the start of the line
+	// Matches: "- ", "* ", "- [ ] ", "> ", ">> ", "# ", "## ", etc.
+	// Use lineBefore (not trimmed) since markers include trailing whitespace.
+	if (/^(?:[-*]\s|[-*]\s\[.\]\s|>+\s|#{1,6}\s)/.test(lineBefore)) {
+		// Only if cursor is right after the marker (no other content text yet)
+		const afterMarker = lineBefore.replace(
+			/^(?:[-*]\s(?:\[.\]\s)?|>+\s|#{1,6}\s)/,
+			""
+		);
+		if (!afterMarker.trim()) return "list-or-heading";
+	}
+
+	return "mid-sentence";
+}
+
+/**
+ * Lowercase the first letter of text (handling leading whitespace and
+ * accented characters), matching the webapp's lowercaseFirstLetter().
+ */
+export function lowercaseFirstLetter(text: string): string {
+	const match = text.match(
+		/^(\s*)([A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝŸ])/
+	);
+	if (match) {
+		return (
+			match[1] + match[2].toLowerCase() + text.slice(match[1].length + 1)
+		);
+	}
+	return text;
+}
+
+/**
+ * Strip trailing sentence-ending punctuation added by the API when the
+ * context doesn't call for it (mid-sentence, list items, headings).
+ */
+function stripTrailingPunctuation(text: string): string {
+	return text.replace(/[.!?]+\s*$/, "");
+}
+
+function insertAtCursor(editor: Editor, text: string): void {
+	const cursor = editor.getCursor();
+	const context = detectInsertionContext(editor);
+
+	// Never start a line with spaces from auto-transcription
+	// (preserve newlines — those are intentional formatting)
+	if (cursor.ch === 0) {
+		text = text.replace(/^ +/, "");
+	}
+
 	// Ensure a space between existing text and new text when needed.
-	if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text)) {
+	// Skip when a slot is active — text is inserted right after a
+	// formatting prefix (e.g. "**") and a space would break markdown.
+	if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !isSlotActive()) {
 		const charBefore = editor.getRange(
 			{ line: cursor.line, ch: cursor.ch - 1 },
 			cursor
@@ -58,6 +255,22 @@ function insertAtCursor(editor: Editor, text: string): void {
 		if (charBefore && /\S/.test(charBefore)) {
 			text = " " + text;
 		}
+	}
+
+	// Context-aware casing and punctuation
+	switch (context) {
+		case "mid-sentence":
+			text = lowercaseFirstLetter(text);
+			text = stripTrailingPunctuation(text);
+			break;
+		case "list-or-heading":
+			// Keep uppercase, but strip trailing period (list items / headings)
+			text = stripTrailingPunctuation(text);
+			break;
+		case "sentence-start":
+		case "new-line":
+			// Keep uppercase and trailing punctuation as-is
+			break;
 	}
 
 	editor.replaceRange(text, cursor);
@@ -128,6 +341,24 @@ function colonAction(editor: Editor): void {
 }
 
 /**
+ * Close the active slot (if it matches the expected open command) and add
+ * a trailing space so the user can continue dictating after the marker.
+ */
+function closeSlotAndSpace(editor: Editor, expectedOpenId: CommandId): void {
+	if (activeSlot?.commandId === expectedOpenId) {
+		closeSlot(editor);
+	} else {
+		// No matching open slot — insert suffix directly as a fallback
+		// (e.g. user says "vet sluiten" without "vet openen")
+		return;
+	}
+	// Add a space after the closing marker
+	const pos = editor.getCursor();
+	editor.replaceRange(" ", pos);
+	editor.setCursor({ line: pos.line, ch: pos.ch + 1 });
+}
+
+/**
  * Command definitions — the action logic is language-independent.
  * Patterns are resolved at runtime from lang.ts.
  */
@@ -137,7 +368,25 @@ const COMMAND_DEFS: CommandDef[] = [
 	{ id: "heading1", action: (editor) => insertAtCursor(editor, "\n\n# ") },
 	{ id: "heading2", action: (editor) => insertAtCursor(editor, "\n\n## ") },
 	{ id: "heading3", action: (editor) => insertAtCursor(editor, "\n\n### ") },
-	{ id: "bulletPoint", action: (editor) => insertAtCursor(editor, "\n- ") },
+	{
+		id: "bulletPoint",
+		action: (editor) => {
+			// Context-aware: continue the current list type
+			const cursor = editor.getCursor();
+			const lineText = editor.getLine(cursor.line);
+			if (/^(\d+)\.\s/.test(lineText)) {
+				// Current line is a numbered list — continue numbering
+				const num = parseInt(lineText.match(/^(\d+)/)?.[1] ?? "0", 10);
+				insertAtCursor(editor, `\n${num + 1}. `);
+			} else if (/^\s*- \[[ x]\]\s/.test(lineText)) {
+				// Current line is a todo item — continue with unchecked todo
+				insertAtCursor(editor, "\n- [ ] ");
+			} else {
+				// Default: unordered bullet
+				insertAtCursor(editor, "\n- ");
+			}
+		},
+	},
 	{ id: "todoItem", action: (editor) => insertAtCursor(editor, "\n- [ ] ") },
 	{
 		id: "numberedItem",
@@ -153,14 +402,246 @@ const COMMAND_DEFS: CommandDef[] = [
 	{ id: "deleteLastLine", action: (editor) => deleteLastSentence(editor) },
 	{
 		id: "undo",
-		action: (editor) => { (editor as any).undo(); },
+		action: (editor) => { editor.undo(); },
 	},
 	{
 		id: "stopRecording",
 		action: () => { /* handled by caller */ },
 	},
 	{ id: "colon", punctuation: true, action: colonAction },
+	// ── Wikilink: just insert [[, Obsidian handles ]] via autocomplete ──
+	{
+		id: "wikilink",
+		action: (editor) => {
+			const cursor = editor.getCursor();
+			const line = editor.getLine(cursor.line);
+			const before = line.substring(0, cursor.ch);
+			const needsSpace = before.length > 0 && !/\s$/.test(before);
+			const insert = needsSpace ? " [[" : "[[";
+			editor.replaceRange(insert, cursor);
+			editor.setCursor({ line: cursor.line, ch: cursor.ch + insert.length });
+		},
+	},
+	// ── Open/close commands: voice command opens, voice command closes ──
+	{
+		id: "boldOpen",
+		slot: { prefix: "**", suffix: "**", exitTrigger: "voice" },
+		action: (editor) => {
+			const cursor = editor.getCursor();
+			const line = editor.getLine(cursor.line);
+			const before = line.substring(0, cursor.ch);
+			const needsSpace = before.length > 0 && !/\s$/.test(before);
+			const insert = needsSpace ? " **" : "**";
+			editor.replaceRange(insert, cursor);
+			const endCh = cursor.ch + insert.length;
+			editor.setCursor({ line: cursor.line, ch: endCh });
+			activeSlot = {
+				def: { prefix: "**", suffix: "**", exitTrigger: "voice" },
+				commandId: "boldOpen",
+				startPos: { line: cursor.line, ch: endCh },
+			};
+		},
+	},
+	{
+		id: "boldClose",
+		action: (editor) => {
+			closeSlotAndSpace(editor, "boldOpen");
+		},
+	},
+	{
+		id: "italicOpen",
+		slot: { prefix: "*", suffix: "*", exitTrigger: "voice" },
+		action: (editor) => {
+			const cursor = editor.getCursor();
+			const line = editor.getLine(cursor.line);
+			const before = line.substring(0, cursor.ch);
+			const needsSpace = before.length > 0 && !/\s$/.test(before);
+			const insert = needsSpace ? " *" : "*";
+			editor.replaceRange(insert, cursor);
+			const endCh = cursor.ch + insert.length;
+			editor.setCursor({ line: cursor.line, ch: endCh });
+			activeSlot = {
+				def: { prefix: "*", suffix: "*", exitTrigger: "voice" },
+				commandId: "italicOpen",
+				startPos: { line: cursor.line, ch: endCh },
+			};
+		},
+	},
+	{
+		id: "italicClose",
+		action: (editor) => {
+			closeSlotAndSpace(editor, "italicOpen");
+		},
+	},
+	{
+		id: "inlineCodeOpen",
+		slot: { prefix: "`", suffix: "`", exitTrigger: "voice" },
+		action: (editor) => {
+			const cursor = editor.getCursor();
+			const line = editor.getLine(cursor.line);
+			const before = line.substring(0, cursor.ch);
+			const needsSpace = before.length > 0 && !/\s$/.test(before);
+			const insert = needsSpace ? " `" : "`";
+			editor.replaceRange(insert, cursor);
+			const endCh = cursor.ch + insert.length;
+			editor.setCursor({ line: cursor.line, ch: endCh });
+			activeSlot = {
+				def: { prefix: "`", suffix: "`", exitTrigger: "voice" },
+				commandId: "inlineCodeOpen",
+				startPos: { line: cursor.line, ch: endCh },
+			};
+		},
+	},
+	{
+		id: "inlineCodeClose",
+		action: (editor) => {
+			closeSlotAndSpace(editor, "inlineCodeOpen");
+		},
+	},
+	{
+		id: "tagOpen",
+		slot: { prefix: "#", suffix: "", exitTrigger: "voice" },
+		action: (editor) => {
+			const cursor = editor.getCursor();
+			let prefix = "#";
+			if (cursor.ch > 0) {
+				const charBefore = editor.getRange(
+					{ line: cursor.line, ch: cursor.ch - 1 },
+					cursor
+				);
+				if (charBefore && /\S/.test(charBefore)) {
+					prefix = " #";
+				}
+			}
+			editor.replaceRange(prefix, cursor);
+			const endCh = cursor.ch + prefix.length;
+			editor.setCursor({ line: cursor.line, ch: endCh });
+			activeSlot = {
+				def: { prefix: "#", suffix: "", exitTrigger: "voice" },
+				commandId: "tagOpen",
+				startPos: { line: cursor.line, ch: endCh },
+			};
+		},
+	},
+	{
+		id: "tagClose",
+		action: (editor) => {
+			closeSlotAndSpace(editor, "tagOpen");
+		},
+	},
+	{
+		id: "codeBlockOpen",
+		slot: { prefix: "```", suffix: "\n```", exitTrigger: "voice" },
+		action: (editor) => {
+			const cursor = editor.getCursor();
+			editor.replaceRange("\n```\n", cursor);
+			const endLine = cursor.line + 2;
+			editor.setCursor({ line: endLine, ch: 0 });
+			activeSlot = {
+				def: { prefix: "```", suffix: "\n```", exitTrigger: "voice" },
+				commandId: "codeBlockOpen",
+				startPos: { line: endLine, ch: 0 },
+			};
+		},
+	},
+	{
+		id: "codeBlockClose",
+		action: (editor) => {
+			closeSlotAndSpace(editor, "codeBlockOpen");
+		},
+	},
 ];
+
+/** Custom commands loaded from user settings */
+let customCommandDefs: CommandDef[] = [];
+
+/**
+ * Load user-defined custom commands into the matching pipeline.
+ * Call this whenever settings change.
+ */
+export function loadCustomCommands(commands: CustomCommand[]): void {
+	customCommandLabels.clear();
+	customCommandDefs = commands.map((cmd) => {
+		if (cmd.type === "slot" && cmd.slotPrefix !== undefined) {
+			const prefix = cmd.slotPrefix;
+			const suffix = cmd.slotSuffix ?? "";
+			const exit = cmd.slotExit ?? "enter";
+			const slotLabel = cmd.labels?.[activeLang] ?? cmd.labels?.en ?? `${prefix}…${suffix}`;
+			customCommandLabels.set(cmd.id, slotLabel);
+			return {
+				id: cmd.id as CommandId,
+				slot: { prefix, suffix, exitTrigger: exit },
+				action: (editor: Editor) => {
+					const cursor = editor.getCursor();
+					editor.replaceRange(prefix, cursor);
+					editor.setCursor({ line: cursor.line, ch: cursor.ch + prefix.length });
+					activeSlot = {
+						def: { prefix, suffix, exitTrigger: exit },
+						commandId: cmd.id as CommandId,
+						startPos: { line: cursor.line, ch: cursor.ch + prefix.length },
+					};
+				},
+			};
+		}
+		// Insert command
+		const text = cmd.insertText ?? "";
+		const fallbackLabel = text.replace(/\n/g, "↵").slice(0, 30);
+		const insertLabel = cmd.labels?.[activeLang] ?? cmd.labels?.en ?? (fallbackLabel || cmd.id);
+		customCommandLabels.set(cmd.id, insertLabel);
+		return {
+			id: cmd.id as CommandId,
+			action: (editor: Editor) => insertAtCursor(editor, text),
+		};
+	});
+}
+
+/**
+ * Get all commands (built-in + custom) for matching.
+ */
+function getAllCommands(): CommandDef[] {
+	return [...COMMAND_DEFS, ...customCommandDefs];
+}
+
+/**
+ * Get patterns for a custom command in the active language.
+ */
+function getCustomPatterns(cmdId: string, lang: string): string[] {
+	// Find the original CustomCommand data — we need the triggers
+	// This works because loadCustomCommands is always called before matching
+	return customCommandTriggers.get(cmdId)?.get(lang) ??
+		customCommandTriggers.get(cmdId)?.get("en") ?? [];
+}
+
+/** Map of custom command id → Map of lang → trigger phrases */
+const customCommandTriggers = new Map<string, Map<string, string[]>>();
+
+/** Map of custom command id → descriptive label for the help panel */
+const customCommandLabels = new Map<string, string>();
+
+/**
+ * Reload custom command triggers (call alongside loadCustomCommands).
+ */
+export function loadCustomCommandTriggers(commands: CustomCommand[]): void {
+	customCommandTriggers.clear();
+	for (const cmd of commands) {
+		const langMap = new Map<string, string[]>();
+		for (const [lang, phrases] of Object.entries(cmd.triggers)) {
+			langMap.set(lang, phrases);
+		}
+		customCommandTriggers.set(cmd.id, langMap);
+	}
+}
+
+/**
+ * Get patterns for a command, handling both built-in and custom.
+ */
+function getPatternsForAnyCommand(cmdId: string, lang: string): string[] {
+	// Try built-in patterns first
+	const builtinPatterns = getPatternsForCommand(cmdId as CommandId, lang);
+	if (builtinPatterns.length > 0) return builtinPatterns;
+	// Fall back to custom command patterns
+	return getCustomPatterns(cmdId, lang);
+}
 
 export interface CommandMatch {
 	command: CommandDef;
@@ -169,16 +650,48 @@ export interface CommandMatch {
 }
 
 /**
+ * Build a cache of all known command phrases (normalized) for compound splitting.
+ */
+function getAllCommandPhrases(): string[] {
+	const phrases: string[] = [];
+	for (const cmd of getAllCommands()) {
+		for (const pattern of getPatternsForAnyCommand(cmd.id, activeLang)) {
+			phrases.push(normalizeCommand(pattern));
+		}
+	}
+	return phrases;
+}
+
+/**
+ * Extract the trailing N words from text.
+ */
+function trailingWords(text: string, n: number): string {
+	const words = text.trimEnd().split(/\s+/);
+	return words.slice(-n).join(" ");
+}
+
+/**
  * Check if the given text ends with a voice command.
  * Returns the match (command + preceding text) or null.
+ *
+ * Matching pipeline (in order):
+ * 1. Exact match (current text ends with a known pattern)
+ * 2. Match after stripping trailing filler words ("alsjeblieft", "please")
+ * 3. Phonetic match (phonetically normalized text matches phonetically normalized pattern)
+ * 4. Compound-word match (concatenated words like "nieuwealinea")
+ * 5. Fuzzy match (Levenshtein ≤ 2, standalone sentences only)
  */
 export function matchCommand(rawText: string): CommandMatch | null {
 	const normalized = fixMishearings(normalizeCommand(rawText));
 
-	for (const cmd of COMMAND_DEFS) {
-		const patterns = getPatternsForCommand(cmd.id, activeLang);
+	const allCmds = getAllCommands();
+
+	// Pass 1: exact match (full or suffix)
+	for (const cmd of allCmds) {
+		const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
 		for (const pattern of patterns) {
-			if (normalized.endsWith(pattern)) {
+			const normPattern = normalizeCommand(pattern);
+			if (normalized.endsWith(normPattern)) {
 				const patternWordCount = pattern.split(/\s+/).length;
 				const rawWords = rawText.trimEnd().split(/\s+/);
 				const textBefore = rawWords
@@ -189,33 +702,170 @@ export function matchCommand(rawText: string): CommandMatch | null {
 			}
 		}
 	}
-	return null;
+
+	// Pass 2: match after stripping articles + trailing fillers
+	const strippedFillers = stripTrailingFillers(normalized, activeLang);
+	if (strippedFillers !== normalized) {
+		for (const cmd of allCmds) {
+			const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
+			for (const pattern of patterns) {
+				const normPattern = normalizeCommand(pattern);
+				if (strippedFillers.endsWith(normPattern)) {
+					const patternWordCount = pattern.split(/\s+/).length;
+					const rawWords = rawText.trimEnd().split(/\s+/);
+					// Account for the filler words that were stripped
+					const fillerWordCount = normalized.split(/\s+/).length - strippedFillers.split(/\s+/).length;
+					const textBefore = rawWords
+						.slice(0, -(patternWordCount + fillerWordCount))
+						.join(" ")
+						.trimEnd();
+					return { command: cmd, textBefore };
+				}
+			}
+		}
+	}
+
+	// Pass 2b: strip leading articles from the trailing portion
+	for (const cmd of allCmds) {
+		const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
+		for (const pattern of patterns) {
+			const normPattern = normalizeCommand(pattern);
+			const patternWordCount = normPattern.split(/\s+/).length;
+			// Take one extra word to check for article
+			const tail = trailingWords(normalized, patternWordCount + 1);
+			const stripped = stripArticles(tail, activeLang);
+			if (stripped === normPattern) {
+				const tailWordCount = tail.split(/\s+/).length;
+				const rawWords = rawText.trimEnd().split(/\s+/);
+				const textBefore = rawWords
+					.slice(0, -tailWordCount)
+					.join(" ")
+					.trimEnd();
+				return { command: cmd, textBefore };
+			}
+		}
+	}
+
+	// Pass 3: phonetic match — apply phonetic normalization to both sides
+	const phoneticText = phoneticNormalize(normalized, activeLang);
+	for (const cmd of allCmds) {
+		const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
+		for (const pattern of patterns) {
+			const phoneticPattern = phoneticNormalize(normalizeCommand(pattern), activeLang);
+			if (phoneticPattern !== normalizeCommand(pattern) || phoneticText !== normalized) {
+				// Only use phonetic matching if it actually changes something
+				if (phoneticText.endsWith(phoneticPattern)) {
+					const patternWordCount = pattern.split(/\s+/).length;
+					const rawWords = rawText.trimEnd().split(/\s+/);
+					const textBefore = rawWords
+						.slice(0, -patternWordCount)
+						.join(" ")
+						.trimEnd();
+					return { command: cmd, textBefore };
+				}
+			}
+		}
+	}
+
+	// Pass 4: compound-word splitting ("nieuwealinea" → "nieuwe alinea")
+	const lastWord = normalized.split(/\s+/).pop() ?? "";
+	if (lastWord.length >= 4 && !lastWord.includes(" ")) {
+		const allPhrases = getAllCommandPhrases();
+		const split = trySplitCompound(lastWord, allPhrases);
+		if (split !== lastWord) {
+			// Re-run exact matching on the split version
+			const words = normalized.split(/\s+/);
+			words[words.length - 1] = split;
+			const resplit = words.join(" ");
+			for (const cmd of allCmds) {
+				const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
+				for (const pattern of patterns) {
+					const normPattern = normalizeCommand(pattern);
+					if (resplit.endsWith(normPattern)) {
+						const rawWords = rawText.trimEnd().split(/\s+/);
+						// The compound word was one raw word
+						const textBefore = rawWords
+							.slice(0, -1)
+							.join(" ")
+							.trimEnd();
+						return { command: cmd, textBefore };
+					}
+				}
+			}
+		}
+	}
+
+	// Pass 5: fuzzy match for standalone sentences only (Levenshtein ≤ 2)
+	// This catches conjugation errors like "beeindigde opname" ≈ "beeindig de opname"
+	// Guard: require both text and pattern to be at least 6 chars, and similar
+	// in length, to avoid false positives on short words (e.g. "dit" ≈ "vet").
+	let bestMatch: CommandMatch | null = null;
+	let bestDist = 3; // threshold: must be strictly less than this
+	for (const cmd of allCmds) {
+		const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
+		for (const pattern of patterns) {
+			const normPattern = normalizeCommand(pattern);
+			if (normalized.length < 6 || normPattern.length < 6) continue;
+			if (Math.abs(normalized.length - normPattern.length) > 3) continue;
+			const dist = levenshtein(normalized, normPattern);
+			if (dist > 0 && dist < bestDist) {
+				bestDist = dist;
+				bestMatch = { command: cmd, textBefore: "" };
+			}
+		}
+	}
+	return bestMatch;
+}
+
+/**
+ * Optional pre-match hook. If set, called before normal command matching.
+ * Returns true if the text was handled (template inserted), false otherwise.
+ * Used by main.ts to integrate template matching (which needs App access).
+ */
+type PreMatchHook = (editor: Editor, normalizedText: string, rawText: string) => boolean;
+let preMatchHook: PreMatchHook | null = null;
+
+/** Register a pre-match hook (called before built-in command matching) */
+export function setPreMatchHook(hook: PreMatchHook | null): void {
+	preMatchHook = hook;
 }
 
 /**
  * Process transcribed text: split into sentences, check each for voice
  * commands, and execute them or insert the text as-is.
  */
-export function processText(editor: Editor, text: string): void {
+export function processText(editor: Editor, text: string): boolean {
+	let stopRequested = false;
 	const segments = text.match(/[^.!?]+[.!?]+\s*/g);
 
 	if (!segments) {
-		processSegment(editor, text);
-		return;
+		stopRequested = processSegment(editor, text);
+		return stopRequested;
 	}
 
 	const joined = segments.join("");
 	const remainder = text.slice(joined.length);
 
 	for (const segment of segments) {
-		processSegment(editor, segment);
+		if (processSegment(editor, segment)) {
+			stopRequested = true;
+		}
 	}
 	if (remainder.trim()) {
-		processSegment(editor, remainder);
+		if (processSegment(editor, remainder)) {
+			stopRequested = true;
+		}
 	}
+	return stopRequested;
 }
 
-function processSegment(editor: Editor, text: string): void {
+function processSegment(editor: Editor, text: string): boolean {
+	// Try pre-match hook (templates) first
+	if (preMatchHook) {
+		const normalized = fixMishearings(normalizeCommand(text));
+		if (preMatchHook(editor, normalized, text)) return false;
+	}
+
 	const match = matchCommand(text);
 	if (match) {
 		if (match.textBefore) {
@@ -226,18 +876,54 @@ function processSegment(editor: Editor, text: string): void {
 			insertAtCursor(editor, before);
 		}
 		match.command.action(editor);
+		return match.command.id === "stopRecording";
 	} else {
 		insertAtCursor(editor, text);
 	}
+	return false;
 }
+
+/** Open/close command pairs to merge into a single help row */
+const OPEN_CLOSE_PAIRS: [CommandId, CommandId][] = [
+	["boldOpen", "boldClose"],
+	["italicOpen", "italicClose"],
+	["inlineCodeOpen", "inlineCodeClose"],
+	["tagOpen", "tagClose"],
+	["codeBlockOpen", "codeBlockClose"],
+];
 
 /**
  * Get all commands for the help panel, with localized labels and
  * patterns for the active language.
+ * Open/close pairs are merged into a single row.
  */
 export function getCommandList(): { label: string; patterns: string[] }[] {
-	return COMMAND_DEFS.map((c) => ({
-		label: getLabel(c.id, activeLang),
-		patterns: getPatternsForCommand(c.id, activeLang),
+	const closeIds = new Set(OPEN_CLOSE_PAIRS.map(([, c]) => c));
+	const openMap = new Map(OPEN_CLOSE_PAIRS);
+
+	const builtIn: { label: string; patterns: string[] }[] = [];
+	for (const c of COMMAND_DEFS) {
+		if (closeIds.has(c.id)) continue; // skip close — merged with open
+		const closeId = openMap.get(c.id);
+		if (closeId) {
+			// Merge open/close into one row
+			const openPatterns = getPatternsForCommand(c.id, activeLang);
+			const closePatterns = getPatternsForCommand(closeId, activeLang);
+			builtIn.push({
+				label: getLabel(c.id, activeLang) + " / " + getLabel(closeId, activeLang),
+				patterns: [...openPatterns.slice(0, 1), ...closePatterns.slice(0, 1)],
+			});
+		} else {
+			builtIn.push({
+				label: getLabel(c.id, activeLang),
+				patterns: getPatternsForCommand(c.id, activeLang),
+			});
+		}
+	}
+
+	const custom = customCommandDefs.map((c) => ({
+		label: customCommandLabels.get(c.id) ?? c.id,
+		patterns: getPatternsForAnyCommand(c.id, activeLang),
 	}));
+	return [...builtIn, ...custom];
 }
