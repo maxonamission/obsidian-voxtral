@@ -95,19 +95,45 @@ describe("detectInsertionContext", () => {
 		expect(detectInsertionContext(editor)).toBe("list-or-heading");
 	});
 
-	it("returns list-or-heading after blockquote '> '", () => {
-		const editor = createMockEditor("> ", 0, 2);
+	it("returns list-or-heading after numbered list '1. '", () => {
+		const editor = createMockEditor("1. ", 0, 3);
 		expect(detectInsertionContext(editor)).toBe("list-or-heading");
 	});
 
-	it("returns list-or-heading after nested blockquote '>> '", () => {
-		const editor = createMockEditor(">> ", 0, 3);
+	it("returns list-or-heading after numbered list '2) '", () => {
+		const editor = createMockEditor("2) ", 0, 3);
 		expect(detectInsertionContext(editor)).toBe("list-or-heading");
 	});
 
 	it("returns mid-sentence after bullet with existing text", () => {
-		// "- Some text" — cursor is after text, not after marker
 		const editor = createMockEditor("- Some text", 0, 11);
+		expect(detectInsertionContext(editor)).toBe("mid-sentence");
+	});
+
+	// -- comment --
+
+	it("returns comment after blockquote '> '", () => {
+		const editor = createMockEditor("> ", 0, 2);
+		expect(detectInsertionContext(editor)).toBe("comment");
+	});
+
+	it("returns comment after nested blockquote '>> '", () => {
+		const editor = createMockEditor(">> ", 0, 3);
+		expect(detectInsertionContext(editor)).toBe("comment");
+	});
+
+	it("returns comment after callout '> [!note] '", () => {
+		const editor = createMockEditor("> [!note] ", 0, 10);
+		expect(detectInsertionContext(editor)).toBe("comment");
+	});
+
+	it("returns comment after callout '> [!warning] '", () => {
+		const editor = createMockEditor("> [!warning] ", 0, 13);
+		expect(detectInsertionContext(editor)).toBe("comment");
+	});
+
+	it("returns mid-sentence after blockquote with existing text", () => {
+		const editor = createMockEditor("> Some text", 0, 11);
 		expect(detectInsertionContext(editor)).toBe("mid-sentence");
 	});
 

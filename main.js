@@ -2652,16 +2652,20 @@ function detectInsertionContext(editor) {
   const lineBefore = editor.getRange({ line: cursor.line, ch: 0 }, cursor);
   const trimmed = lineBefore.trimEnd();
   if (!trimmed) return "new-line";
-  const lastChar = trimmed[trimmed.length - 1];
-  if (lastChar === "." || lastChar === "!" || lastChar === "?") {
-    return "sentence-start";
+  if (/^>+\s/.test(lineBefore)) {
+    const afterMarker = lineBefore.replace(/^>+\s(?:\[!.*?\]\s*)?/, "");
+    if (!afterMarker.trim()) return "comment";
   }
-  if (/^(?:[-*]\s|[-*]\s\[.\]\s|>+\s|#{1,6}\s)/.test(lineBefore)) {
+  if (/^(?:[-*]\s|[-*]\s\[.\]\s|#{1,6}\s|\d+[.)]\s)/.test(lineBefore)) {
     const afterMarker = lineBefore.replace(
-      /^(?:[-*]\s(?:\[.\]\s)?|>+\s|#{1,6}\s)/,
+      /^(?:[-*]\s(?:\[.\]\s)?|#{1,6}\s|\d+[.)]\s)/,
       ""
     );
     if (!afterMarker.trim()) return "list-or-heading";
+  }
+  const lastChar = trimmed[trimmed.length - 1];
+  if (lastChar === "." || lastChar === "!" || lastChar === "?") {
+    return "sentence-start";
   }
   return "mid-sentence";
 }
@@ -2700,6 +2704,7 @@ function insertAtCursor(editor, text) {
     case "list-or-heading":
       text = stripTrailingPunctuation(text);
       break;
+    case "comment":
     case "sentence-start":
     case "new-line":
       break;

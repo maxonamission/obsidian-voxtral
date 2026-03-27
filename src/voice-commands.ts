@@ -172,7 +172,8 @@ function levenshtein(a: string, b: string): number {
 export type InsertionContext =
 	| "sentence-start"  // after .!? or empty document → uppercase, keep trailing period
 	| "new-line"        // start of a line (col 0) or after \n → uppercase, keep trailing period
-	| "list-or-heading" // after - / * / # / > markdown markers → uppercase, strip trailing period
+	| "list-or-heading" // after - / * / # markdown markers → uppercase, strip trailing period
+	| "comment"         // after > / >> / > [!…] blockquote markers → uppercase, keep trailing period
 	| "mid-sentence";   // everything else → lowercase, strip trailing period
 
 export function detectInsertionContext(editor: Editor): InsertionContext {
@@ -188,23 +189,30 @@ export function detectInsertionContext(editor: Editor): InsertionContext {
 	// Empty line (only whitespace before cursor)
 	if (!trimmed) return "new-line";
 
+	// Blockquote / comment markers: "> ", ">> ", "> [!note] ", etc.
+	// Checked early since > is distinct from list/heading markers.
+	// Use lineBefore (not trimmed) since markers include trailing whitespace.
+	if (/^>+\s/.test(lineBefore)) {
+		const afterMarker = lineBefore.replace(/^>+\s(?:\[!.*?\]\s*)?/, "");
+		if (!afterMarker.trim()) return "comment";
+	}
+
+	// Markdown list / heading markers: "- ", "* ", "- [ ] ", "# ", "## ",
+	// "1. ", "2) ", etc.  Checked before sentence-end so that "1. " is not
+	// mistaken for a sentence ending with a period.
+	if (/^(?:[-*]\s|[-*]\s\[.\]\s|#{1,6}\s|\d+[.)]\s)/.test(lineBefore)) {
+		const afterMarker = lineBefore.replace(
+			/^(?:[-*]\s(?:\[.\]\s)?|#{1,6}\s|\d+[.)]\s)/,
+			""
+		);
+		if (!afterMarker.trim()) return "list-or-heading";
+	}
+
 	const lastChar = trimmed[trimmed.length - 1];
 
 	// After sentence-ending punctuation
 	if (lastChar === "." || lastChar === "!" || lastChar === "?") {
 		return "sentence-start";
-	}
-
-	// Markdown list / heading / blockquote markers at the start of the line
-	// Matches: "- ", "* ", "- [ ] ", "> ", ">> ", "# ", "## ", etc.
-	// Use lineBefore (not trimmed) since markers include trailing whitespace.
-	if (/^(?:[-*]\s|[-*]\s\[.\]\s|>+\s|#{1,6}\s)/.test(lineBefore)) {
-		// Only if cursor is right after the marker (no other content text yet)
-		const afterMarker = lineBefore.replace(
-			/^(?:[-*]\s(?:\[.\]\s)?|>+\s|#{1,6}\s)/,
-			""
-		);
-		if (!afterMarker.trim()) return "list-or-heading";
 	}
 
 	return "mid-sentence";
@@ -267,6 +275,7 @@ function insertAtCursor(editor: Editor, text: string): void {
 			// Keep uppercase, but strip trailing period (list items / headings)
 			text = stripTrailingPunctuation(text);
 			break;
+		case "comment":
 		case "sentence-start":
 		case "new-line":
 			// Keep uppercase and trailing punctuation as-is
