@@ -15,6 +15,16 @@ import {
 	trySplitCompound,
 } from "./phonetics";
 import type { CustomCommand } from "./types";
+import {
+	levenshtein,
+	normalizeCommand,
+	type InsertionContext,
+	detectContext,
+	shouldStripTrailingPunctuation,
+	shouldLowercase,
+	lowercaseFirstLetter,
+	stripTrailingPunctuation,
+} from "../../shared/src";
 
 /**
  * Voice command processing — recognizes voice commands at the end of
@@ -130,16 +140,8 @@ export function openSlot(commandId: string, def: SlotDef, startPos?: { line: num
 	activeSlot = { def, commandId: commandId as CommandId, startPos };
 }
 
-// Normalize text for command matching: remove diacritics, hyphens, punctuation
-export function normalizeCommand(text: string): string {
-	return text
-		.normalize("NFD")
-		.replace(/[\u0300-\u036f]/g, "") // strip diacritics
-		.replace(/-/g, " ")
-		.replace(/[.,!?;:'"()[\]{}]/g, "")
-		.toLowerCase()
-		.trim();
-}
+// Re-export shared functions so existing imports from voice-commands keep working
+export { normalizeCommand, lowercaseFirstLetter, type InsertionContext } from "../../shared/src";
 
 // Apply language-specific mishearing corrections
 function fixMishearings(text: string): string {
@@ -149,97 +151,15 @@ function fixMishearings(text: string): string {
 	return text;
 }
 
-// Levenshtein edit distance between two strings
-function levenshtein(a: string, b: string): number {
-	const m = a.length, n = b.length;
-	const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1));
-	for (let i = 0; i <= m; i++) dp[i][0] = i;
-	for (let j = 0; j <= n; j++) dp[0][j] = j;
-	for (let i = 1; i <= m; i++) {
-		for (let j = 1; j <= n; j++) {
-			dp[i][j] = a[i - 1] === b[j - 1]
-				? dp[i - 1][j - 1]
-				: 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
-		}
-	}
-	return dp[m][n];
-}
-
 /**
- * Determine the insertion context by inspecting text before the cursor.
- * Returns a classification that drives casing and punctuation behaviour.
+ * Detect insertion context using the Obsidian Editor API.
+ * Delegates to the shared detectContext() with the line text.
  */
-export type InsertionContext =
-	| "sentence-start"  // after .!? or empty document → uppercase, keep trailing period
-	| "new-line"        // start of a line (col 0) or after \n → uppercase, keep trailing period
-	| "list-or-heading" // after - / * / # markdown markers → uppercase, strip trailing period
-	| "comment"         // after > / >> / > [!…] blockquote markers → uppercase, keep trailing period
-	| "mid-sentence";   // everything else → lowercase, strip trailing period
-
 export function detectInsertionContext(editor: Editor): InsertionContext {
 	const cursor = editor.getCursor();
-
-	// Column 0 on any line is always a new-line context
 	if (cursor.ch === 0) return "new-line";
-
-	// Read text on the current line up to the cursor
 	const lineBefore = editor.getRange({ line: cursor.line, ch: 0 }, cursor);
-	const trimmed = lineBefore.trimEnd();
-
-	// Empty line (only whitespace before cursor)
-	if (!trimmed) return "new-line";
-
-	// Blockquote / comment markers: "> ", ">> ", "> [!note] ", etc.
-	// Checked early since > is distinct from list/heading markers.
-	// Use lineBefore (not trimmed) since markers include trailing whitespace.
-	if (/^>+\s/.test(lineBefore)) {
-		const afterMarker = lineBefore.replace(/^>+\s(?:\[!.*?\]\s*)?/, "");
-		if (!afterMarker.trim()) return "comment";
-	}
-
-	// Markdown list / heading markers: "- ", "* ", "- [ ] ", "# ", "## ",
-	// "1. ", "2) ", etc.  Checked before sentence-end so that "1. " is not
-	// mistaken for a sentence ending with a period.
-	if (/^(?:[-*]\s|[-*]\s\[.\]\s|#{1,6}\s|\d+[.)]\s)/.test(lineBefore)) {
-		const afterMarker = lineBefore.replace(
-			/^(?:[-*]\s(?:\[.\]\s)?|#{1,6}\s|\d+[.)]\s)/,
-			""
-		);
-		if (!afterMarker.trim()) return "list-or-heading";
-	}
-
-	const lastChar = trimmed[trimmed.length - 1];
-
-	// After sentence-ending punctuation
-	if (lastChar === "." || lastChar === "!" || lastChar === "?") {
-		return "sentence-start";
-	}
-
-	return "mid-sentence";
-}
-
-/**
- * Lowercase the first letter of text (handling leading whitespace and
- * accented characters), matching the webapp's lowercaseFirstLetter().
- */
-export function lowercaseFirstLetter(text: string): string {
-	const match = text.match(
-		/^(\s*)([A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝŸ])/
-	);
-	if (match) {
-		return (
-			match[1] + match[2].toLowerCase() + text.slice(match[1].length + 1)
-		);
-	}
-	return text;
-}
-
-/**
- * Strip trailing sentence-ending punctuation added by the API when the
- * context doesn't call for it (mid-sentence, list items, headings).
- */
-function stripTrailingPunctuation(text: string): string {
-	return text.replace(/[.!?]+\s*$/, "");
+	return detectContext(lineBefore);
 }
 
 function insertAtCursor(editor: Editor, text: string): void {
@@ -265,21 +185,12 @@ function insertAtCursor(editor: Editor, text: string): void {
 		}
 	}
 
-	// Context-aware casing and punctuation
-	switch (context) {
-		case "mid-sentence":
-			text = lowercaseFirstLetter(text);
-			text = stripTrailingPunctuation(text);
-			break;
-		case "list-or-heading":
-			// Keep uppercase, but strip trailing period (list items / headings)
-			text = stripTrailingPunctuation(text);
-			break;
-		case "comment":
-		case "sentence-start":
-		case "new-line":
-			// Keep uppercase and trailing punctuation as-is
-			break;
+	// Context-aware casing and punctuation (rules from shared module)
+	if (shouldLowercase(context)) {
+		text = lowercaseFirstLetter(text);
+	}
+	if (shouldStripTrailingPunctuation(context)) {
+		text = stripTrailingPunctuation(text);
 	}
 
 	editor.replaceRange(text, cursor);

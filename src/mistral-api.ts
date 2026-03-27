@@ -2,7 +2,12 @@
 // Licensed under GPL-3.0 — see LICENSE for details
 // https://github.com/maxonamission/voxtral-transcribe
 import { requestUrl } from "obsidian";
-import { VoxtralSettings, DEFAULT_CORRECT_PROMPT } from "./types";
+import type { VoxtralSettings } from "./types";
+import {
+	DEFAULT_CORRECT_PROMPT,
+	buildCustomCommandGuard as buildGuard,
+	stripLlmCommentary,
+} from "../../shared/src";
 import {
 	createAuthenticatedWebSocket,
 	WS_OPEN,
@@ -99,63 +104,8 @@ export async function listModels(
 	}
 }
 
-// ── Hallucination detection ──
-
-/**
- * Detect likely hallucinated transcription output.
- * Whisper-style models hallucinate when given silence or very short audio,
- * producing repetitive or impossibly long text.
- */
-export function isLikelyHallucination(
-	text: string,
-	audioDurationSec: number
-): boolean {
-	if (!text.trim()) return false;
-
-	const words = text.trim().split(/\s+/).length;
-	const wordsPerSec = audioDurationSec > 0 ? words / audioDurationSec : words;
-
-	// Normal speech is ~2-3 words/sec. Allow generous headroom but
-	// flag anything over 5 words/sec as suspicious.
-	if (wordsPerSec > 5 && words > 20) {
-		console.warn(
-			`Voxtral: Hallucination detected — ${words} words in ${audioDurationSec.toFixed(1)}s (${wordsPerSec.toFixed(1)} w/s)`
-		);
-		return true;
-	}
-
-	// Detect repetitive blocks: split on horizontal rules or repeated
-	// sentence patterns.  3+ similar blocks = hallucination.
-	const blocks = text.split(/\n---\n|^---$/m).filter((b) => b.trim());
-	if (blocks.length >= 3) {
-		console.warn(
-			`Voxtral: Hallucination detected — ${blocks.length} repeated blocks separated by ---`
-		);
-		return true;
-	}
-
-	// Detect repeated sentences (3+ identical or near-identical)
-	const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
-	if (sentences.length >= 6) {
-		const normalized = sentences.map((s) =>
-			s.trim().toLowerCase().replace(/\s+/g, " ")
-		);
-		const counts = new Map<string, number>();
-		for (const s of normalized) {
-			counts.set(s, (counts.get(s) || 0) + 1);
-		}
-		for (const [, count] of counts) {
-			if (count >= 3) {
-				console.warn(
-					"Voxtral: Hallucination detected — repeated sentences"
-				);
-				return true;
-			}
-		}
-	}
-
-	return false;
-}
+// Re-export shared functions so existing imports from mistral-api keep working
+export { isLikelyHallucination } from "../../shared/src";
 
 // ── Batch transcription ──
 
@@ -223,30 +173,11 @@ export async function transcribeBatch(
 // ── Text correction ──
 
 /**
- * Build a suffix for the correction prompt that tells the LLM to
- * preserve text patterns produced by the user's custom commands.
+ * Build the custom command guard from plugin settings.
+ * Wraps the shared buildCustomCommandGuard with VoxtralSettings.
  */
 export function buildCustomCommandGuard(settings: VoxtralSettings): string {
-	const markers: string[] = [];
-
-	for (const cmd of settings.customCommands ?? []) {
-		if (cmd.insertText) markers.push(cmd.insertText.trim());
-		if (cmd.slotPrefix) markers.push(cmd.slotPrefix.trim());
-		if (cmd.slotSuffix) markers.push(cmd.slotSuffix.trim());
-	}
-
-	// Deduplicate and filter empty
-	const unique = [...new Set(markers)].filter(Boolean);
-	if (unique.length === 0) return "";
-
-	const escaped = unique.map((m) => `"${m}"`).join(", ");
-	return (
-		"\n\nCUSTOM COMMAND OUTPUT — DO NOT REMOVE:\n" +
-		"The user has voice commands that insert specific text markers. " +
-		"These markers MUST be preserved exactly as-is: " +
-		escaped +
-		"\nNever strip, rewrite, or 'correct' these markers."
-	);
+	return buildGuard(settings.customCommands ?? []);
 }
 
 export async function correctText(
@@ -303,27 +234,6 @@ export async function correctText(
 	}
 
 	return result;
-}
-
-/**
- * Remove parenthesized text blocks that the correction LLM added
- * but were NOT in the original transcription.
- */
-function stripLlmCommentary(corrected: string, original: string): string {
-	// Match parenthesized blocks (including multi-line)
-	const parenPattern = /\s*\([^)]{10,}\)\s*/g;
-	let cleaned = corrected;
-	let match;
-
-	while ((match = parenPattern.exec(corrected)) !== null) {
-		const block = match[0].trim();
-		// If this parenthesized block wasn't in the original, remove it
-		if (!original.includes(block)) {
-			cleaned = cleaned.replace(match[0], " ");
-		}
-	}
-
-	return cleaned.trim();
 }
 
 // ── Realtime streaming transcription via WebSocket ──

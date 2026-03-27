@@ -24,6 +24,123 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian7 = require("obsidian");
 
+// ../shared/src/similarity.ts
+function levenshtein(a, b) {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from(
+    { length: m + 1 },
+    () => Array(n + 1).fill(0)
+  );
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+function normalizeCommand(text) {
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-/g, " ").replace(/[.,!?;:'"()[\]{}]/g, "").toLowerCase().trim();
+}
+
+// ../shared/src/text-context.ts
+function detectContext(lineBefore) {
+  if (!lineBefore) return "new-line";
+  const trimmed = lineBefore.trimEnd();
+  if (!trimmed) return "new-line";
+  if (/^>+\s/.test(lineBefore)) {
+    const afterMarker = lineBefore.replace(/^>+\s(?:\[!.*?\]\s*)?/, "");
+    if (!afterMarker.trim()) return "comment";
+  }
+  if (/^(?:[-*]\s|[-*]\s\[.\]\s|#{1,6}\s|\d+[.)]\s)/.test(lineBefore)) {
+    const afterMarker = lineBefore.replace(
+      /^(?:[-*]\s(?:\[.\]\s)?|#{1,6}\s|\d+[.)]\s)/,
+      ""
+    );
+    if (!afterMarker.trim()) return "list-or-heading";
+  }
+  const lastChar = trimmed[trimmed.length - 1];
+  if (lastChar === "." || lastChar === "!" || lastChar === "?") {
+    return "sentence-start";
+  }
+  return "mid-sentence";
+}
+function shouldStripTrailingPunctuation(context) {
+  return context === "mid-sentence" || context === "list-or-heading";
+}
+function shouldLowercase(context) {
+  return context === "mid-sentence";
+}
+function lowercaseFirstLetter(text) {
+  const match = text.match(
+    /^(\s*)([A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝŸ])/
+  );
+  if (match) {
+    return match[1] + match[2].toLowerCase() + text.slice(match[1].length + 1);
+  }
+  return text;
+}
+function stripTrailingPunctuation(text) {
+  return text.replace(/[.!?]+\s*$/, "");
+}
+
+// ../shared/src/correction.ts
+var DEFAULT_CORRECT_PROMPT = "You are a precise text corrector for dictated text. The input language may vary (commonly Dutch, but follow whatever language the text is in).\n\nCORRECT ONLY:\n- Capitalization (sentence starts, proper nouns)\n- Clearly misspelled or garbled words (from speech recognition)\n- Missing or wrong punctuation\n\nDO NOT CHANGE:\n- Sentence structure or word order\n- Style or tone\n- Markdown formatting (# headings, - lists, - [ ] to-do items)\n- Special prefix markers at the start of lines (e.g. >>, >, > [!note], etc.)\n- Text inserted by custom commands \u2014 these are intentional formatting elements\n\nINLINE CORRECTION INSTRUCTIONS:\nThe text was dictated via speech recognition. The speaker sometimes gives inline instructions meant for you. Recognize these patterns:\n- Explicit markers: 'voor de correctie', 'voor de correctie achteraf', 'for the correction', 'correction note'\n- Spelled-out words: 'V-O-X-T-R-A-L' or 'with an x' \u2192 merge into the intended word\n- Self-corrections: 'no not X but Y', 'nee niet X maar Y', 'I mean Y', 'ik bedoel Y'\n- Meta-commentary: 'that's a Dutch word', 'with a capital letter', 'met een hoofdletter'\n\nWhen you encounter such instructions:\n1. Apply the instruction to the REST of the text\n2. Remove the instruction/meta-commentary itself from the output\n3. Keep all content text \u2014 NEVER remove normal sentences\n\nCRITICAL RULES:\n- Your output must be SHORTER than or equal to the input (after removing meta-instructions)\n- NEVER add your own text, commentary, explanations, or notes\n- NEVER add parenthesized text like '(text missing)' or '(no corrections needed)'\n- NEVER continue, elaborate, or expand on the content\n- NEVER invent or hallucinate text that wasn't in the input\n- If the input is short (even one word), just return it corrected\n- Your output must contain ONLY the corrected version of the input text, NOTHING else";
+function buildCustomCommandGuard(commands) {
+  const markers = [];
+  for (const cmd of commands) {
+    if (cmd.insertText) markers.push(cmd.insertText.trim());
+    if (cmd.slotPrefix) markers.push(cmd.slotPrefix.trim());
+    if (cmd.slotSuffix) markers.push(cmd.slotSuffix.trim());
+  }
+  const unique = [...new Set(markers)].filter(Boolean);
+  if (unique.length === 0) return "";
+  const escaped = unique.map((m) => `"${m}"`).join(", ");
+  return "\n\nCUSTOM COMMAND OUTPUT \u2014 DO NOT REMOVE:\nThe user has voice commands that insert specific text markers. These markers MUST be preserved exactly as-is: " + escaped + "\nNever strip, rewrite, or 'correct' these markers.";
+}
+function stripLlmCommentary(corrected, original) {
+  const parenPattern = /\s*\([^)]{10,}\)\s*/g;
+  let cleaned = corrected;
+  let match;
+  while ((match = parenPattern.exec(corrected)) !== null) {
+    const block = match[0].trim();
+    if (!original.includes(block)) {
+      cleaned = cleaned.replace(match[0], " ");
+    }
+  }
+  return cleaned.trim();
+}
+function isLikelyHallucination(text, audioDurationSec) {
+  if (!text.trim()) return false;
+  const words = text.trim().split(/\s+/).length;
+  const wordsPerSec = audioDurationSec > 0 ? words / audioDurationSec : words;
+  if (wordsPerSec > 5 && words > 20) {
+    return true;
+  }
+  const blocks = text.split(/\n---\n|^---$/m).filter((b) => b.trim());
+  if (blocks.length >= 3) {
+    return true;
+  }
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
+  if (sentences.length >= 6) {
+    const normalized = sentences.map(
+      (s) => s.trim().toLowerCase().replace(/\s+/g, " ")
+    );
+    const counts = /* @__PURE__ */ new Map();
+    for (const s of normalized) {
+      counts.set(s, (counts.get(s) || 0) + 1);
+    }
+    for (const [, count] of counts) {
+      if (count >= 3) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // src/types.ts
 function getDefaultBuiltInCommands() {
   return [
@@ -197,7 +314,6 @@ var DEFAULT_SETTINGS = {
   customCommands: [],
   templatesFolder: ""
 };
-var DEFAULT_CORRECT_PROMPT = "You are a precise text corrector for dictated text. The input language may vary (commonly Dutch, but follow whatever language the text is in).\n\nCORRECT ONLY:\n- Capitalization (sentence starts, proper nouns)\n- Clearly misspelled or garbled words (from speech recognition)\n- Missing or wrong punctuation\n\nDO NOT CHANGE:\n- Sentence structure or word order\n- Style or tone\n- Markdown formatting (# headings, - lists, - [ ] to-do items)\n- Special prefix markers at the start of lines (e.g. >>, >, > [!note], etc.)\n- Text inserted by custom commands \u2014 these are intentional formatting elements\n\nINLINE CORRECTION INSTRUCTIONS:\nThe text was dictated via speech recognition. The speaker sometimes gives inline instructions meant for you. Recognize these patterns:\n- Explicit markers: 'voor de correctie', 'voor de correctie achteraf', 'for the correction', 'correction note'\n- Spelled-out words: 'V-O-X-T-R-A-L' or 'with an x' \u2192 merge into the intended word\n- Self-corrections: 'no not X but Y', 'nee niet X maar Y', 'I mean Y', 'ik bedoel Y'\n- Meta-commentary: 'that's a Dutch word', 'with a capital letter', 'met een hoofdletter'\n\nWhen you encounter such instructions:\n1. Apply the instruction to the REST of the text\n2. Remove the instruction/meta-commentary itself from the output\n3. Keep all content text \u2014 NEVER remove normal sentences\n\nCRITICAL RULES:\n- Your output must be SHORTER than or equal to the input (after removing meta-instructions)\n- NEVER add your own text, commentary, explanations, or notes\n- NEVER add parenthesized text like '(text missing)' or '(no corrections needed)'\n- NEVER continue, elaborate, or expand on the content\n- NEVER invent or hallucinate text that wasn't in the input\n- If the input is short (even one word), just return it corrected\n- Your output must contain ONLY the corrected version of the input text, NOTHING else";
 
 // src/settings-migration.ts
 var CURRENT_VERSION = 1;
@@ -716,43 +832,6 @@ async function listModels(apiKey) {
     return [];
   }
 }
-function isLikelyHallucination(text, audioDurationSec) {
-  if (!text.trim()) return false;
-  const words = text.trim().split(/\s+/).length;
-  const wordsPerSec = audioDurationSec > 0 ? words / audioDurationSec : words;
-  if (wordsPerSec > 5 && words > 20) {
-    console.warn(
-      `Voxtral: Hallucination detected \u2014 ${words} words in ${audioDurationSec.toFixed(1)}s (${wordsPerSec.toFixed(1)} w/s)`
-    );
-    return true;
-  }
-  const blocks = text.split(/\n---\n|^---$/m).filter((b) => b.trim());
-  if (blocks.length >= 3) {
-    console.warn(
-      `Voxtral: Hallucination detected \u2014 ${blocks.length} repeated blocks separated by ---`
-    );
-    return true;
-  }
-  const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
-  if (sentences.length >= 6) {
-    const normalized = sentences.map(
-      (s) => s.trim().toLowerCase().replace(/\s+/g, " ")
-    );
-    const counts = /* @__PURE__ */ new Map();
-    for (const s of normalized) {
-      counts.set(s, (counts.get(s) || 0) + 1);
-    }
-    for (const [, count] of counts) {
-      if (count >= 3) {
-        console.warn(
-          "Voxtral: Hallucination detected \u2014 repeated sentences"
-        );
-        return true;
-      }
-    }
-  }
-  return false;
-}
 async function transcribeBatch(audioBlob, settings, diarize = false) {
   var _a;
   const ext = audioBlob.type.includes("mp4") ? "m4a" : audioBlob.type.includes("ogg") ? "ogg" : "webm";
@@ -814,23 +893,14 @@ true\r
   }
   return ((_a = response.json) == null ? void 0 : _a.text) || "";
 }
-function buildCustomCommandGuard(settings) {
+function buildCustomCommandGuard2(settings) {
   var _a;
-  const markers = [];
-  for (const cmd of (_a = settings.customCommands) != null ? _a : []) {
-    if (cmd.insertText) markers.push(cmd.insertText.trim());
-    if (cmd.slotPrefix) markers.push(cmd.slotPrefix.trim());
-    if (cmd.slotSuffix) markers.push(cmd.slotSuffix.trim());
-  }
-  const unique = [...new Set(markers)].filter(Boolean);
-  if (unique.length === 0) return "";
-  const escaped = unique.map((m) => `"${m}"`).join(", ");
-  return "\n\nCUSTOM COMMAND OUTPUT \u2014 DO NOT REMOVE:\nThe user has voice commands that insert specific text markers. These markers MUST be preserved exactly as-is: " + escaped + "\nNever strip, rewrite, or 'correct' these markers.";
+  return buildCustomCommandGuard((_a = settings.customCommands) != null ? _a : []);
 }
 async function correctText(text, settings) {
   var _a, _b, _c, _d;
   const basePrompt = settings.systemPrompt || DEFAULT_CORRECT_PROMPT;
-  const systemPrompt = basePrompt + buildCustomCommandGuard(settings);
+  const systemPrompt = basePrompt + buildCustomCommandGuard2(settings);
   const body = {
     model: settings.correctModel,
     messages: [
@@ -864,18 +934,6 @@ async function correctText(text, settings) {
     return text;
   }
   return result;
-}
-function stripLlmCommentary(corrected, original) {
-  const parenPattern = /\s*\([^)]{10,}\)\s*/g;
-  let cleaned = corrected;
-  let match;
-  while ((match = parenPattern.exec(corrected)) !== null) {
-    const block = match[0].trim();
-    if (!original.includes(block)) {
-      cleaned = cleaned.replace(match[0], " ");
-    }
-  }
-  return cleaned.trim();
 }
 var RealtimeTranscriber = class {
   constructor(settings, callbacks, delayOverrideMs) {
@@ -2625,61 +2683,17 @@ function closeSlot(editor) {
 function cancelSlot() {
   activeSlot = null;
 }
-function normalizeCommand(text) {
-  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-/g, " ").replace(/[.,!?;:'"()[\]{}]/g, "").toLowerCase().trim();
-}
 function fixMishearings(text) {
   for (const [pattern, replacement] of getMishearings(activeLang)) {
     text = text.replace(pattern, replacement);
   }
   return text;
 }
-function levenshtein(a, b) {
-  const m = a.length, n = b.length;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
-    }
-  }
-  return dp[m][n];
-}
 function detectInsertionContext(editor) {
   const cursor = editor.getCursor();
   if (cursor.ch === 0) return "new-line";
   const lineBefore = editor.getRange({ line: cursor.line, ch: 0 }, cursor);
-  const trimmed = lineBefore.trimEnd();
-  if (!trimmed) return "new-line";
-  if (/^>+\s/.test(lineBefore)) {
-    const afterMarker = lineBefore.replace(/^>+\s(?:\[!.*?\]\s*)?/, "");
-    if (!afterMarker.trim()) return "comment";
-  }
-  if (/^(?:[-*]\s|[-*]\s\[.\]\s|#{1,6}\s|\d+[.)]\s)/.test(lineBefore)) {
-    const afterMarker = lineBefore.replace(
-      /^(?:[-*]\s(?:\[.\]\s)?|#{1,6}\s|\d+[.)]\s)/,
-      ""
-    );
-    if (!afterMarker.trim()) return "list-or-heading";
-  }
-  const lastChar = trimmed[trimmed.length - 1];
-  if (lastChar === "." || lastChar === "!" || lastChar === "?") {
-    return "sentence-start";
-  }
-  return "mid-sentence";
-}
-function lowercaseFirstLetter(text) {
-  const match = text.match(
-    /^(\s*)([A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝŸ])/
-  );
-  if (match) {
-    return match[1] + match[2].toLowerCase() + text.slice(match[1].length + 1);
-  }
-  return text;
-}
-function stripTrailingPunctuation(text) {
-  return text.replace(/[.!?]+\s*$/, "");
+  return detectContext(lineBefore);
 }
 function insertAtCursor(editor, text) {
   const cursor = editor.getCursor();
@@ -2696,18 +2710,11 @@ function insertAtCursor(editor, text) {
       text = " " + text;
     }
   }
-  switch (context) {
-    case "mid-sentence":
-      text = lowercaseFirstLetter(text);
-      text = stripTrailingPunctuation(text);
-      break;
-    case "list-or-heading":
-      text = stripTrailingPunctuation(text);
-      break;
-    case "comment":
-    case "sentence-start":
-    case "new-line":
-      break;
+  if (shouldLowercase(context)) {
+    text = lowercaseFirstLetter(text);
+  }
+  if (shouldStripTrailingPunctuation(context)) {
+    text = stripTrailingPunctuation(text);
   }
   editor.replaceRange(text, cursor);
   const lines = text.split("\n");
