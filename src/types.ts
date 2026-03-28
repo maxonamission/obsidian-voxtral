@@ -189,4 +189,4 @@ export const DEFAULT_SETTINGS: VoxtralSettings = {
 };
 
 // Re-export from shared so existing imports still work
-export { DEFAULT_CORRECT_PROMPT } from "../../shared/src";
+export { DEFAULT_CORRECT_PROMPT } from "./shared";

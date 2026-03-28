@@ -7,7 +7,7 @@ import {
 	DEFAULT_CORRECT_PROMPT,
 	buildCustomCommandGuard as buildGuard,
 	stripLlmCommentary,
-} from "../../shared/src";
+} from "./shared";
 import {
 	createAuthenticatedWebSocket,
 	WS_OPEN,
@@ -105,7 +105,7 @@ export async function listModels(
 }
 
 // Re-export shared functions so existing imports from mistral-api keep working
-export { isLikelyHallucination } from "../../shared/src";
+export { isLikelyHallucination } from "./shared";
 
 // ── Batch transcription ──
 

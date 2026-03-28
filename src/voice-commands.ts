@@ -24,7 +24,7 @@ import {
 	shouldLowercase,
 	lowercaseFirstLetter,
 	stripTrailingPunctuation,
-} from "../../shared/src";
+} from "./shared";
 
 /**
  * Voice command processing — recognizes voice commands at the end of
@@ -141,7 +141,7 @@ export function openSlot(commandId: string, def: SlotDef, startPos?: { line: num
 }
 
 // Re-export shared functions so existing imports from voice-commands keep working
-export { normalizeCommand, lowercaseFirstLetter, type InsertionContext } from "../../shared/src";
+export { normalizeCommand, lowercaseFirstLetter, type InsertionContext } from "./shared";
 
 // Apply language-specific mishearing corrections
 function fixMishearings(text: string): string {
