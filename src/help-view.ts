@@ -2,7 +2,7 @@
 // Licensed under GPL-3.0 — see LICENSE for details
 // https://github.com/maxonamission/voxtral-transcribe
 import { App, ItemView, Modal, WorkspaceLeaf } from "obsidian";
-import { getCommandList } from "./voice-commands";
+import { getCommandList } from "../../shared/src/voice-commands";
 
 export const VIEW_TYPE_VOXTRAL_HELP = "voxtral-help";
 

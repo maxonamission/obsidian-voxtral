@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Editor } from "obsidian";
-import type { SessionCallbacks } from "../realtime-session";
+import type { SessionCallbacks } from "../../../shared/src/realtime-session";
 import { DEFAULT_SETTINGS, VoxtralSettings } from "../types";
-import { DictationTracker } from "../dictation-tracker";
+import { DictationTracker } from "../../../shared/src/dictation-tracker";
 import {
 	setLanguage,
 	loadCustomCommands,
@@ -10,8 +10,8 @@ import {
 	isSlotActive,
 	cancelSlot,
 	setPreMatchHook,
-} from "../voice-commands";
-import { isLikelyHallucination } from "../mistral-api";
+} from "../../../shared/src/voice-commands";
+import { isLikelyHallucination } from "../../../shared/src/mistral-api";
 
 /**
  * Interaction tests — scenarios that span multiple subsystems.
@@ -117,8 +117,8 @@ const transcriberInstances: Array<{
 	close: ReturnType<typeof vi.fn>;
 }> = [];
 
-vi.mock("../mistral-api", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../mistral-api")>();
+vi.mock("../../../shared/src/mistral-api", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../../../shared/src/mistral-api")>();
 	class MockRealtimeTranscriber {
 		callbacks: unknown;
 		connect = vi.fn(() => {
@@ -141,17 +141,13 @@ vi.mock("../mistral-api", async (importOriginal) => {
 	};
 });
 
-vi.mock("../plugin-logger", () => ({
+vi.mock("../../../shared/src/plugin-logger", () => ({
 	vlog: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }));
 
-vi.mock("obsidian", () => ({
-	Notice: vi.fn(),
-}));
-
 // Import AFTER mocks
-const { DualDelaySession } = await import("../dual-delay-session");
-const { RealtimeSession } = await import("../realtime-session");
+const { DualDelaySession } = await import("../../../shared/src/dual-delay-session");
+const { RealtimeSession } = await import("../../../shared/src/realtime-session");
 
 // ── Helpers ──
 
@@ -172,6 +168,7 @@ function createCallbacks(editor: Editor): SessionCallbacks {
 		stopRecording: mockStopRecording,
 		isRecording: mockIsRecording,
 		getEditor: vi.fn(() => editor),
+		notify: vi.fn(),
 	};
 }
 

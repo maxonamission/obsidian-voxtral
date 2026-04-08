@@ -4,11 +4,11 @@
 import { App, Modal, Platform, PluginSettingTab, Setting } from "obsidian";
 import type VoxtralPlugin from "./main";
 import { AudioRecorder } from "./audio-recorder";
-import { listModels } from "./mistral-api";
-import type { MistralModel, } from "./mistral-api";
+import { listModels } from "../../shared/src/mistral-api";
+import type { MistralModel, } from "../../shared/src/mistral-api";
 import { getDefaultBuiltInCommands } from "./types";
 import type { FocusBehavior, CustomCommand } from "./types";
-import { SUPPORTED_LANGUAGES, LANGUAGE_NAMES } from "./lang";
+import { SUPPORTED_LANGUAGES, LANGUAGE_NAMES } from "../../shared/src/lang";
 
 export class VoxtralSettingTab extends PluginSettingTab {
 	plugin: VoxtralPlugin;
@@ -41,6 +41,20 @@ export class VoxtralSettingTab extends PluginSettingTab {
 				const input = setting.controlEl.querySelector("input");
 				if (input) input.type = "password";
 			});
+
+		new Setting(containerEl)
+			.setName("API base URL")
+			.setDesc("Base URL for Mistral-compatible API. Use \u2018http://localhost:8000\u2019 for local vLLM.")
+			.addText((text) =>
+				text
+					.setPlaceholder("https://api.mistral.ai")
+					.setValue(this.plugin.settings.apiBaseUrl)
+					.onChange(async (value) => {
+						this.plugin.settings.apiBaseUrl = value.trim();
+						this.cachedModels = null;
+						await this.plugin.saveSettings();
+					})
+			);
 
 		// Microphone selection
 		const micSetting = new Setting(containerEl)
@@ -746,7 +760,7 @@ export class VoxtralSettingTab extends PluginSettingTab {
 	private async getModels(): Promise<MistralModel[]> {
 		if (this.cachedModels) return this.cachedModels;
 
-		const models = await listModels(this.plugin.settings.apiKey);
+		const models = await listModels(this.plugin.settings.apiKey, this.plugin.httpRequest, this.plugin.settings.apiBaseUrl);
 		if (models.length > 0) {
 			this.cachedModels = models;
 		}

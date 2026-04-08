@@ -7,7 +7,9 @@ import {
 	Notice,
 	Platform,
 	Plugin,
+	requestUrl,
 } from "obsidian";
+import type { HttpRequestFn } from "../../shared/src/http-adapter";
 import { VoxtralSettings, getDefaultBuiltInCommands } from "./types";
 import { migrateSettings } from "./settings-migration";
 import { VoxtralSettingTab } from "./settings-tab";
@@ -20,7 +22,7 @@ import {
 	transcribeBatch,
 	correctText,
 	isLikelyHallucination,
-} from "./mistral-api";
+} from "../../shared/src/mistral-api";
 import {
 	processText,
 	matchCommand,
@@ -32,16 +34,16 @@ import {
 	cancelSlot,
 	loadCustomCommands,
 	loadCustomCommandTriggers,
-} from "./voice-commands";
+} from "../../shared/src/voice-commands";
 import {
 	scanTemplates,
 	matchTemplate,
 	insertTemplate,
 } from "./templates";
-import { vlog, getLogText, getLogCount } from "./plugin-logger";
-import { DictationTracker } from "./dictation-tracker";
-import { RealtimeSession, type SessionCallbacks } from "./realtime-session";
-import { DualDelaySession } from "./dual-delay-session";
+import { vlog, getLogText, getLogCount } from "../../shared/src/plugin-logger";
+import { DictationTracker } from "../../shared/src/dictation-tracker";
+import { RealtimeSession, type SessionCallbacks } from "../../shared/src/realtime-session";
+import { DualDelaySession } from "../../shared/src/dual-delay-session";
 
 export default class VoxtralPlugin extends Plugin {
 	settings: VoxtralSettings;
@@ -62,6 +64,21 @@ export default class VoxtralPlugin extends Plugin {
 	private maxConsecutiveFailures = 5;
 	private currentEditor: Editor | null = null;
 	private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
+
+	/** Platform adapter: wraps Obsidian's requestUrl as HttpRequestFn */
+	readonly httpRequest: HttpRequestFn = async (options) => {
+		const response = await requestUrl({
+			url: options.url,
+			method: options.method,
+			headers: options.headers,
+			body: options.body as string | ArrayBuffer | undefined,
+		});
+		return {
+			status: response.status,
+			json: response.json,
+			text: response.text,
+		};
+	};
 
 	/** Whether realtime mode is available on this platform */
 	get canRealtime(): boolean {
@@ -86,6 +103,7 @@ export default class VoxtralPlugin extends Plugin {
 				this.currentEditor ||
 				this.app.workspace.getActiveViewOfType(MarkdownView)?.editor ||
 				null,
+			notify: (msg, dur) => new Notice(msg, dur),
 		};
 	}
 
@@ -625,7 +643,7 @@ export default class VoxtralPlugin extends Plugin {
 				return;
 			}
 
-			let text = await transcribeBatch(blob, this.settings);
+			let text = await transcribeBatch(blob, this.settings, this.httpRequest);
 
 			if (
 				text &&
@@ -645,7 +663,7 @@ export default class VoxtralPlugin extends Plugin {
 			const hasCommand = text ? matchCommand(text) !== null : false;
 
 			if (this.settings.autoCorrect && text && !hasCommand) {
-				text = await correctText(text, this.settings);
+				text = await correctText(text, this.settings, this.httpRequest);
 			}
 
 			this.updateStatusBar("recording");
@@ -721,7 +739,7 @@ export default class VoxtralPlugin extends Plugin {
 		await this.recorder.stop();
 
 		if (this.settings.autoCorrect && view) {
-			await this.tracker.autoCorrectAfterStop(view.editor, this.settings);
+			await this.tracker.autoCorrectAfterStop(view.editor, this.settings, this.httpRequest);
 		}
 	}
 
@@ -752,7 +770,7 @@ export default class VoxtralPlugin extends Plugin {
 		const editor = view.editor;
 
 		try {
-			let text = await transcribeBatch(blob, this.settings);
+			let text = await transcribeBatch(blob, this.settings, this.httpRequest);
 
 			if (
 				text &&
@@ -768,7 +786,7 @@ export default class VoxtralPlugin extends Plugin {
 			const hasCommand = text ? matchCommand(text) !== null : false;
 
 			if (this.settings.autoCorrect && text && !hasCommand) {
-				text = await correctText(text, this.settings);
+				text = await correctText(text, this.settings, this.httpRequest);
 			}
 
 			if (text) {
@@ -796,7 +814,7 @@ export default class VoxtralPlugin extends Plugin {
 
 		try {
 			new Notice("Correcting...");
-			const corrected = await correctText(selection, this.settings);
+			const corrected = await correctText(selection, this.settings, this.httpRequest);
 			if (corrected) {
 				editor.replaceSelection(corrected);
 				new Notice("Selection corrected");
@@ -819,7 +837,7 @@ export default class VoxtralPlugin extends Plugin {
 
 		try {
 			new Notice("Correcting...");
-			await this.tracker.autoCorrectAfterStop(editor, this.settings);
+			await this.tracker.autoCorrectAfterStop(editor, this.settings, this.httpRequest);
 			this.tracker.reset();
 			new Notice("Dictated text corrected");
 		} catch (e) {

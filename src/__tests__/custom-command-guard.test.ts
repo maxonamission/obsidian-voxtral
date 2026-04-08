@@ -1,10 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { buildCustomCommandGuard } from "../mistral-api";
+import { buildCustomCommandGuard } from "../../../shared/src/mistral-api";
 import { DEFAULT_SETTINGS, type VoxtralSettings } from "../types";
-
-vi.mock("obsidian", () => ({
-	requestUrl: vi.fn(),
-}));
 
 function settingsWithCommands(
 	commands: VoxtralSettings["customCommands"],

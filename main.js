@@ -22,9 +22,35 @@ __export(main_exports, {
   default: () => VoxtralPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian7 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
-// src/shared/similarity.ts
+// ../shared/src/types.ts
+var DEFAULT_SETTINGS = {
+  settingsVersion: 1,
+  apiKey: "",
+  language: "nl",
+  realtimeModel: "voxtral-mini-transcribe-realtime-2602",
+  batchModel: "voxtral-mini-latest",
+  correctModel: "mistral-small-latest",
+  autoCorrect: true,
+  streamingDelayMs: 480,
+  dualDelay: false,
+  dualDelayFastMs: 240,
+  dualDelaySlowMs: 2400,
+  systemPrompt: "",
+  mode: "realtime",
+  microphoneDeviceId: "",
+  focusBehavior: "pause",
+  focusPauseDelaySec: 30,
+  dismissMobileBatchNotice: false,
+  enterToSend: false,
+  typingCooldownMs: 800,
+  noiseSuppression: false,
+  customCommands: [],
+  templatesFolder: ""
+};
+
+// ../shared/src/similarity.ts
 function levenshtein(a, b) {
   const m = a.length;
   const n = b.length;
@@ -45,7 +71,7 @@ function normalizeCommand(text) {
   return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-/g, " ").replace(/[.,!?;:'"()[\]{}]/g, "").toLowerCase().trim();
 }
 
-// src/shared/text-context.ts
+// ../shared/src/text-context.ts
 function detectContext(lineBefore) {
   if (!lineBefore) return "new-line";
   const trimmed = lineBefore.trimEnd();
@@ -86,7 +112,7 @@ function stripTrailingPunctuation(text) {
   return text.replace(/[.!?]+\s*$/, "");
 }
 
-// src/shared/correction.ts
+// ../shared/src/correction.ts
 var DEFAULT_CORRECT_PROMPT = "You are a precise text corrector for dictated text. The input language may vary (commonly Dutch, but follow whatever language the text is in).\n\nCORRECT ONLY:\n- Capitalization (sentence starts, proper nouns)\n- Clearly misspelled or garbled words (from speech recognition)\n- Missing or wrong punctuation\n\nDO NOT CHANGE:\n- Sentence structure or word order\n- Style or tone\n- Markdown formatting (# headings, - lists, - [ ] to-do items)\n- Special prefix markers at the start of lines (e.g. >>, >, > [!note], etc.)\n- Text inserted by custom commands \u2014 these are intentional formatting elements\n\nINLINE CORRECTION INSTRUCTIONS:\nThe text was dictated via speech recognition. The speaker sometimes gives inline instructions meant for you. Recognize these patterns:\n- Explicit markers: 'voor de correctie', 'voor de correctie achteraf', 'for the correction', 'correction note'\n- Spelled-out words: 'V-O-X-T-R-A-L' or 'with an x' \u2192 merge into the intended word\n- Self-corrections: 'no not X but Y', 'nee niet X maar Y', 'I mean Y', 'ik bedoel Y'\n- Meta-commentary: 'that's a Dutch word', 'with a capital letter', 'met een hoofdletter'\n\nWhen you encounter such instructions:\n1. Apply the instruction to the REST of the text\n2. Remove the instruction/meta-commentary itself from the output\n3. Keep all content text \u2014 NEVER remove normal sentences\n\nCRITICAL RULES:\n- Your output must be SHORTER than or equal to the input (after removing meta-instructions)\n- NEVER add your own text, commentary, explanations, or notes\n- NEVER add parenthesized text like '(text missing)' or '(no corrections needed)'\n- NEVER continue, elaborate, or expand on the content\n- NEVER invent or hallucinate text that wasn't in the input\n- If the input is short (even one word), just return it corrected\n- Your output must contain ONLY the corrected version of the input text, NOTHING else";
 function buildCustomCommandGuard(commands) {
   const markers = [];
@@ -141,7 +167,1271 @@ function isLikelyHallucination(text, audioDurationSec) {
   return false;
 }
 
-// src/types.ts
+// ../shared/src/languages/nl.json
+var nl_default = {
+  code: "nl",
+  name: "Nederlands",
+  patterns: {
+    newParagraph: ["nieuwe alinea", "nieuw alinea", "nieuwe paragraaf", "nieuw paragraaf", "nieuwe linie"],
+    newLine: ["nieuwe regel", "nieuwe lijn", "volgende regel"],
+    heading1: ["kop een", "kop 1"],
+    heading2: ["kop twee", "kop 2"],
+    heading3: ["kop drie", "kop 3"],
+    bulletPoint: ["nieuw punt", "nieuw lijstpunt", "nieuw lijstitem", "lijst punt", "nieuw bullet", "nieuw item", "nieuwe item", "volgend item", "volgend punt"],
+    todoItem: ["nieuw to do item", "nieuw todo item", "nieuw todo", "nieuwe to do", "nieuwe todo", "nieuw taak", "nieuwe taak"],
+    numberedItem: ["nieuw genummerd item", "nieuw genummerd punt", "genummerd punt", "genummerd item", "volgend nummer", "nummer punt"],
+    deleteLastParagraph: ["verwijder laatste alinea", "verwijder laatste paragraaf", "wis laatste alinea"],
+    deleteLastLine: ["verwijder laatste regel", "verwijder laatste zin", "wis laatste regel", "wist laatste regel"],
+    undo: ["herstel", "ongedaan maken"],
+    stopRecording: ["beeindig opname", "beeindig de opname", "stop opname", "stop de opname"],
+    colon: ["dubbele punt", "double punt", "dubbelepunt"],
+    wikilink: ["wikilink", "wiki link", "link"],
+    boldOpen: ["vet openen", "dikgedrukt openen", "vet open"],
+    boldClose: ["vet sluiten", "dikgedrukt sluiten", "vet dicht"],
+    italicOpen: ["cursief openen", "schuingedrukt openen", "cursief open"],
+    italicClose: ["cursief sluiten", "schuingedrukt sluiten", "cursief dicht"],
+    inlineCodeOpen: ["code openen", "code open"],
+    inlineCodeClose: ["code sluiten", "code dicht"],
+    tagOpen: ["tag openen", "label openen", "tag open"],
+    tagClose: ["tag sluiten", "label sluiten", "tag dicht"],
+    codeBlockOpen: ["codeblok openen", "code blok openen", "codeblok open"],
+    codeBlockClose: ["codeblok sluiten", "code blok sluiten", "codeblok dicht"]
+  },
+  labels: {
+    newParagraph: "Nieuwe alinea",
+    newLine: "Nieuwe regel",
+    heading1: "Kop 1",
+    heading2: "Kop 2",
+    heading3: "Kop 3",
+    bulletPoint: "Lijstpunt",
+    todoItem: "To-do item",
+    numberedItem: "Genummerd punt",
+    deleteLastParagraph: "Verwijder laatste alinea",
+    deleteLastLine: "Verwijder laatste regel",
+    undo: "Ongedaan maken",
+    stopRecording: "Stop opname",
+    colon: "Dubbele punt",
+    wikilink: "Wikilink [[\u2026]]",
+    boldOpen: "Vet openen **",
+    boldClose: "Vet sluiten **",
+    italicOpen: "Cursief openen *",
+    italicClose: "Cursief sluiten *",
+    inlineCodeOpen: "Code openen `",
+    inlineCodeClose: "Code sluiten `",
+    tagOpen: "Tag openen #",
+    tagClose: "Tag sluiten",
+    codeBlockOpen: "Codeblok openen ```",
+    codeBlockClose: "Codeblok sluiten ```"
+  },
+  mishearings: [
+    { pattern: "\\bniveau\\b", flags: "g", replacement: "nieuwe" },
+    { pattern: "\\bniva\\b", flags: "g", replacement: "nieuwe" },
+    { pattern: "\\bnieuw alinea\\b", flags: "g", replacement: "nieuwe alinea" },
+    { pattern: "\\bnieuw regel\\b", flags: "g", replacement: "nieuwe regel" },
+    { pattern: "\\bnieuw punt\\b", flags: "g", replacement: "nieuw punt" },
+    { pattern: "\\blinea\\b", flags: "g", replacement: "alinea" },
+    { pattern: "\\blinie\\b", flags: "g", replacement: "alinea" },
+    { pattern: "\\bbeeindigde\\b", flags: "g", replacement: "beeindig de" }
+  ],
+  phonetics: [
+    { pattern: "ij", flags: "g", replacement: "ei" },
+    { pattern: "au", flags: "g", replacement: "ou" },
+    { pattern: "dt\\b", flags: "g", replacement: "t" },
+    { pattern: "\\bsch", flags: "g", replacement: "sg" },
+    { pattern: "ck", flags: "g", replacement: "k" },
+    { pattern: "ph", flags: "g", replacement: "f" },
+    { pattern: "th", flags: "g", replacement: "t" },
+    { pattern: "ie", flags: "g", replacement: "i" },
+    { pattern: "oe", flags: "g", replacement: "u" },
+    { pattern: "ee", flags: "g", replacement: "e" },
+    { pattern: "oo", flags: "g", replacement: "o" },
+    { pattern: "uu", flags: "g", replacement: "u" },
+    { pattern: "aa", flags: "g", replacement: "a" }
+  ],
+  articles: ["een", "de", "het", "die", "dat", "deze"],
+  fillers: ["alsjeblieft", "graag", "even", "maar", "eens", "dan", "nu", "hoor"]
+};
+
+// ../shared/src/languages/en.json
+var en_default = {
+  code: "en",
+  name: "English",
+  patterns: {
+    newParagraph: ["new paragraph"],
+    newLine: ["new line", "next line"],
+    heading1: ["heading one", "heading 1"],
+    heading2: ["heading two", "heading 2"],
+    heading3: ["heading three", "heading 3"],
+    bulletPoint: ["new item", "next item", "bullet", "bullet point", "new bullet"],
+    todoItem: ["new todo", "new to do", "todo item", "to do item"],
+    numberedItem: ["numbered item", "new numbered item", "next number"],
+    deleteLastParagraph: ["delete last paragraph"],
+    deleteLastLine: ["delete last line", "delete last sentence"],
+    undo: ["undo"],
+    stopRecording: ["stop recording"],
+    colon: ["colon"],
+    wikilink: ["wiki link", "wikilink", "link"],
+    boldOpen: ["open bold", "bold open", "start bold"],
+    boldClose: ["close bold", "bold close", "end bold"],
+    italicOpen: ["open italic", "italic open", "start italic"],
+    italicClose: ["close italic", "italic close", "end italic"],
+    inlineCodeOpen: ["open code", "code open", "start code"],
+    inlineCodeClose: ["close code", "code close", "end code"],
+    tagOpen: ["open tag", "tag open", "start tag"],
+    tagClose: ["close tag", "tag close", "end tag"],
+    codeBlockOpen: ["open code block", "code block open", "start code block"],
+    codeBlockClose: ["close code block", "code block close", "end code block"]
+  },
+  labels: {
+    newParagraph: "New paragraph",
+    newLine: "New line",
+    heading1: "Heading 1",
+    heading2: "Heading 2",
+    heading3: "Heading 3",
+    bulletPoint: "Bullet point",
+    todoItem: "To-do item",
+    numberedItem: "Numbered item",
+    deleteLastParagraph: "Delete last paragraph",
+    deleteLastLine: "Delete last line",
+    undo: "Undo",
+    stopRecording: "Stop recording",
+    colon: "Colon",
+    wikilink: "Wikilink [[\u2026]]",
+    boldOpen: "Open bold **",
+    boldClose: "Close bold **",
+    italicOpen: "Open italic *",
+    italicClose: "Close italic *",
+    inlineCodeOpen: "Open code `",
+    inlineCodeClose: "Close code `",
+    tagOpen: "Open tag #",
+    tagClose: "Close tag",
+    codeBlockOpen: "Open code block ```",
+    codeBlockClose: "Close code block ```"
+  },
+  mishearings: [],
+  phonetics: [
+    { pattern: "ph", flags: "g", replacement: "f" },
+    { pattern: "th", flags: "g", replacement: "t" },
+    { pattern: "ck", flags: "g", replacement: "k" },
+    { pattern: "ght", flags: "g", replacement: "t" },
+    { pattern: "wh", flags: "g", replacement: "w" },
+    { pattern: "kn", flags: "g", replacement: "n" },
+    { pattern: "wr", flags: "g", replacement: "r" },
+    { pattern: "tion", flags: "g", replacement: "shun" },
+    { pattern: "sion", flags: "g", replacement: "shun" },
+    { pattern: "([aeiou])ll", flags: "g", replacement: "$1l" },
+    { pattern: "([aeiou])dd", flags: "g", replacement: "$1d" },
+    { pattern: "([aeiou])tt", flags: "g", replacement: "$1t" }
+  ],
+  articles: ["a", "an", "the"],
+  fillers: ["please", "now", "then", "thanks"]
+};
+
+// ../shared/src/languages/fr.json
+var fr_default = {
+  code: "fr",
+  name: "Fran\xE7ais",
+  patterns: {
+    newParagraph: ["nouveau paragraphe", "nouvelle section", "nouveau alinea"],
+    newLine: ["nouvelle ligne", "a la ligne", "retour a la ligne"],
+    heading1: ["titre un", "titre 1"],
+    heading2: ["titre deux", "titre 2"],
+    heading3: ["titre trois", "titre 3"],
+    bulletPoint: ["nouveau point", "nouvelle puce", "point suivant", "nouvel element", "nouvel item"],
+    todoItem: ["nouvelle tache", "nouveau todo", "nouveau to do"],
+    numberedItem: ["point numero", "element numero", "nouveau numero"],
+    deleteLastParagraph: ["supprimer dernier paragraphe", "effacer dernier paragraphe"],
+    deleteLastLine: ["supprimer derniere ligne", "effacer derniere ligne", "supprimer derniere phrase"],
+    undo: ["annuler"],
+    stopRecording: ["arreter enregistrement", "arreter l enregistrement", "stop enregistrement"],
+    colon: ["deux points"],
+    wikilink: ["wiki lien", "lien wiki"],
+    boldOpen: ["ouvrir gras", "gras ouvrir"],
+    boldClose: ["fermer gras", "gras fermer"],
+    italicOpen: ["ouvrir italique", "italique ouvrir"],
+    italicClose: ["fermer italique", "italique fermer"],
+    inlineCodeOpen: ["ouvrir code", "code ouvrir"],
+    inlineCodeClose: ["fermer code", "code fermer"],
+    tagOpen: ["ouvrir etiquette", "ouvrir tag"],
+    tagClose: ["fermer etiquette", "fermer tag"],
+    codeBlockOpen: ["ouvrir bloc de code"],
+    codeBlockClose: ["fermer bloc de code"]
+  },
+  labels: {
+    newParagraph: "Nouveau paragraphe",
+    newLine: "Nouvelle ligne",
+    heading1: "Titre 1",
+    heading2: "Titre 2",
+    heading3: "Titre 3",
+    bulletPoint: "Puce",
+    todoItem: "T\xE2che",
+    numberedItem: "Point num\xE9rot\xE9",
+    deleteLastParagraph: "Supprimer dernier paragraphe",
+    deleteLastLine: "Supprimer derni\xE8re ligne",
+    undo: "Annuler",
+    stopRecording: "Arr\xEAter l'enregistrement",
+    colon: "Deux-points",
+    wikilink: "Wikilink [[\u2026]]",
+    boldOpen: "Ouvrir gras **",
+    boldClose: "Fermer gras **",
+    italicOpen: "Ouvrir italique *",
+    italicClose: "Fermer italique *",
+    inlineCodeOpen: "Ouvrir code `",
+    inlineCodeClose: "Fermer code `",
+    tagOpen: "Ouvrir \xE9tiquette #",
+    tagClose: "Fermer \xE9tiquette",
+    codeBlockOpen: "Ouvrir bloc de code ```",
+    codeBlockClose: "Fermer bloc de code ```"
+  },
+  mishearings: [
+    { pattern: "\\bnouveau ligne\\b", flags: "g", replacement: "nouvelle ligne" },
+    { pattern: "\\bnouvelle paragraphe\\b", flags: "g", replacement: "nouveau paragraphe" }
+  ],
+  phonetics: [
+    { pattern: "eau", flags: "g", replacement: "o" },
+    { pattern: "aux", flags: "g", replacement: "o" },
+    { pattern: "ai", flags: "g", replacement: "e" },
+    { pattern: "ei", flags: "g", replacement: "e" },
+    { pattern: "ph", flags: "g", replacement: "f" },
+    { pattern: "qu", flags: "g", replacement: "k" },
+    { pattern: "gn", flags: "g", replacement: "ny" },
+    { pattern: "oi", flags: "g", replacement: "wa" },
+    { pattern: "ou", flags: "g", replacement: "u" },
+    { pattern: "an", flags: "g", replacement: "on" },
+    { pattern: "en", flags: "g", replacement: "on" }
+  ],
+  articles: ["un", "une", "le", "la", "les", "l", "du", "des"],
+  fillers: ["s il vous plait", "s il te plait", "merci"]
+};
+
+// ../shared/src/languages/de.json
+var de_default = {
+  code: "de",
+  name: "Deutsch",
+  patterns: {
+    newParagraph: ["neuer absatz", "neuer paragraph"],
+    newLine: ["neue zeile", "nachste zeile"],
+    heading1: ["uberschrift eins", "uberschrift 1"],
+    heading2: ["uberschrift zwei", "uberschrift 2"],
+    heading3: ["uberschrift drei", "uberschrift 3"],
+    bulletPoint: ["neuer punkt", "neuer aufzahlungspunkt", "nachster punkt", "neues element"],
+    todoItem: ["neue aufgabe", "neues todo", "neues to do"],
+    numberedItem: ["nummerierter punkt", "neuer nummerierter punkt", "nachste nummer"],
+    deleteLastParagraph: ["letzten absatz loschen", "absatz loschen"],
+    deleteLastLine: ["letzte zeile loschen", "letzten satz loschen"],
+    undo: ["ruckgangig", "ruckgangig machen"],
+    stopRecording: ["aufnahme beenden", "aufnahme stoppen"],
+    colon: ["doppelpunkt"],
+    wikilink: ["wikilink", "wiki link"],
+    boldOpen: ["fett offnen", "fett auf"],
+    boldClose: ["fett schliessen", "fett zu"],
+    italicOpen: ["kursiv offnen", "kursiv auf"],
+    italicClose: ["kursiv schliessen", "kursiv zu"],
+    inlineCodeOpen: ["code offnen", "code auf"],
+    inlineCodeClose: ["code schliessen", "code zu"],
+    tagOpen: ["tag offnen", "tag auf"],
+    tagClose: ["tag schliessen", "tag zu"],
+    codeBlockOpen: ["codeblock offnen", "code block offnen"],
+    codeBlockClose: ["codeblock schliessen", "code block schliessen"]
+  },
+  labels: {
+    newParagraph: "Neuer Absatz",
+    newLine: "Neue Zeile",
+    heading1: "\xDCberschrift 1",
+    heading2: "\xDCberschrift 2",
+    heading3: "\xDCberschrift 3",
+    bulletPoint: "Aufz\xE4hlungspunkt",
+    todoItem: "Aufgabe",
+    numberedItem: "Nummerierter Punkt",
+    deleteLastParagraph: "Letzten Absatz l\xF6schen",
+    deleteLastLine: "Letzte Zeile l\xF6schen",
+    undo: "R\xFCckg\xE4ngig",
+    stopRecording: "Aufnahme beenden",
+    colon: "Doppelpunkt",
+    wikilink: "Wikilink [[\u2026]]",
+    boldOpen: "Fett \xF6ffnen **",
+    boldClose: "Fett schlie\xDFen **",
+    italicOpen: "Kursiv \xF6ffnen *",
+    italicClose: "Kursiv schlie\xDFen *",
+    inlineCodeOpen: "Code \xF6ffnen `",
+    inlineCodeClose: "Code schlie\xDFen `",
+    tagOpen: "Tag \xF6ffnen #",
+    tagClose: "Tag schlie\xDFen",
+    codeBlockOpen: "Codeblock \xF6ffnen ```",
+    codeBlockClose: "Codeblock schlie\xDFen ```"
+  },
+  mishearings: [
+    { pattern: "\\bneue absatz\\b", flags: "g", replacement: "neuer absatz" },
+    { pattern: "\\bneues zeile\\b", flags: "g", replacement: "neue zeile" }
+  ],
+  phonetics: [
+    { pattern: "sch", flags: "g", replacement: "sh" },
+    { pattern: "ei", flags: "g", replacement: "ai" },
+    { pattern: "ie", flags: "g", replacement: "i" },
+    { pattern: "ck", flags: "g", replacement: "k" },
+    { pattern: "ph", flags: "g", replacement: "f" },
+    { pattern: "th", flags: "g", replacement: "t" },
+    { pattern: "v", flags: "g", replacement: "f" },
+    { pattern: "tz", flags: "g", replacement: "ts" },
+    { pattern: "dt\\b", flags: "g", replacement: "t" },
+    { pattern: "aa", flags: "g", replacement: "a" },
+    { pattern: "ee", flags: "g", replacement: "e" },
+    { pattern: "oo", flags: "g", replacement: "o" }
+  ],
+  articles: ["ein", "eine", "einen", "einem", "einer", "der", "die", "das", "den", "dem", "des"],
+  fillers: ["bitte", "mal", "jetzt", "dann"]
+};
+
+// ../shared/src/languages/es.json
+var es_default = {
+  code: "es",
+  name: "Espa\xF1ol",
+  patterns: {
+    newParagraph: ["nuevo parrafo", "nueva seccion"],
+    newLine: ["nueva linea", "siguiente linea"],
+    heading1: ["titulo uno", "titulo 1"],
+    heading2: ["titulo dos", "titulo 2"],
+    heading3: ["titulo tres", "titulo 3"],
+    bulletPoint: ["nuevo punto", "nueva vineta", "siguiente punto", "nuevo elemento"],
+    todoItem: ["nueva tarea", "nuevo todo", "nuevo to do"],
+    numberedItem: ["punto numerado", "nuevo numero", "siguiente numero"],
+    deleteLastParagraph: ["borrar ultimo parrafo", "eliminar ultimo parrafo"],
+    deleteLastLine: ["borrar ultima linea", "eliminar ultima linea", "borrar ultima frase"],
+    undo: ["deshacer"],
+    stopRecording: ["parar grabacion", "detener grabacion"],
+    colon: ["dos puntos"],
+    wikilink: ["wikilink", "enlace wiki"],
+    boldOpen: ["abrir negrita", "negrita abrir"],
+    boldClose: ["cerrar negrita", "negrita cerrar"],
+    italicOpen: ["abrir cursiva", "cursiva abrir"],
+    italicClose: ["cerrar cursiva", "cursiva cerrar"],
+    inlineCodeOpen: ["abrir codigo", "codigo abrir"],
+    inlineCodeClose: ["cerrar codigo", "codigo cerrar"],
+    tagOpen: ["abrir etiqueta", "abrir tag"],
+    tagClose: ["cerrar etiqueta", "cerrar tag"],
+    codeBlockOpen: ["abrir bloque de codigo"],
+    codeBlockClose: ["cerrar bloque de codigo"]
+  },
+  labels: {
+    newParagraph: "Nuevo p\xE1rrafo",
+    newLine: "Nueva l\xEDnea",
+    heading1: "T\xEDtulo 1",
+    heading2: "T\xEDtulo 2",
+    heading3: "T\xEDtulo 3",
+    bulletPoint: "Vi\xF1eta",
+    todoItem: "Tarea",
+    numberedItem: "Punto numerado",
+    deleteLastParagraph: "Borrar \xFAltimo p\xE1rrafo",
+    deleteLastLine: "Borrar \xFAltima l\xEDnea",
+    undo: "Deshacer",
+    stopRecording: "Parar grabaci\xF3n",
+    colon: "Dos puntos",
+    wikilink: "Wikilink [[\u2026]]",
+    boldOpen: "Abrir negrita **",
+    boldClose: "Cerrar negrita **",
+    italicOpen: "Abrir cursiva *",
+    italicClose: "Cerrar cursiva *",
+    inlineCodeOpen: "Abrir c\xF3digo `",
+    inlineCodeClose: "Cerrar c\xF3digo `",
+    tagOpen: "Abrir etiqueta #",
+    tagClose: "Cerrar etiqueta",
+    codeBlockOpen: "Abrir bloque de c\xF3digo ```",
+    codeBlockClose: "Cerrar bloque de c\xF3digo ```"
+  },
+  mishearings: [],
+  phonetics: [
+    { pattern: "ll", flags: "g", replacement: "y" },
+    { pattern: "v", flags: "g", replacement: "b" },
+    { pattern: "ce", flags: "g", replacement: "se" },
+    { pattern: "ci", flags: "g", replacement: "si" },
+    { pattern: "qu", flags: "g", replacement: "k" },
+    { pattern: "gu(?=[ei])", flags: "g", replacement: "g" },
+    { pattern: "h", flags: "g", replacement: "" }
+  ],
+  articles: ["un", "una", "el", "la", "los", "las", "unos", "unas"],
+  fillers: ["por favor", "ahora", "gracias"]
+};
+
+// ../shared/src/languages/pt.json
+var pt_default = {
+  code: "pt",
+  name: "Portugu\xEAs",
+  patterns: {
+    newParagraph: ["novo paragrafo", "nova secao"],
+    newLine: ["nova linha", "proxima linha"],
+    heading1: ["titulo um", "titulo 1"],
+    heading2: ["titulo dois", "titulo 2"],
+    heading3: ["titulo tres", "titulo 3"],
+    bulletPoint: ["novo ponto", "novo item", "proximo ponto", "novo elemento"],
+    todoItem: ["nova tarefa", "novo todo", "novo to do"],
+    numberedItem: ["ponto numerado", "novo numero", "proximo numero"],
+    deleteLastParagraph: ["apagar ultimo paragrafo", "excluir ultimo paragrafo"],
+    deleteLastLine: ["apagar ultima linha", "excluir ultima linha", "apagar ultima frase"],
+    undo: ["desfazer"],
+    stopRecording: ["parar gravacao", "encerrar gravacao"],
+    colon: ["dois pontos"],
+    wikilink: ["wikilink", "link wiki"],
+    boldOpen: ["abrir negrito", "negrito abrir"],
+    boldClose: ["fechar negrito", "negrito fechar"],
+    italicOpen: ["abrir italico", "italico abrir"],
+    italicClose: ["fechar italico", "italico fechar"],
+    inlineCodeOpen: ["abrir codigo", "codigo abrir"],
+    inlineCodeClose: ["fechar codigo", "codigo fechar"],
+    tagOpen: ["abrir etiqueta", "abrir tag"],
+    tagClose: ["fechar etiqueta", "fechar tag"],
+    codeBlockOpen: ["abrir bloco de codigo"],
+    codeBlockClose: ["fechar bloco de codigo"]
+  },
+  labels: {
+    newParagraph: "Novo par\xE1grafo",
+    newLine: "Nova linha",
+    heading1: "T\xEDtulo 1",
+    heading2: "T\xEDtulo 2",
+    heading3: "T\xEDtulo 3",
+    bulletPoint: "Ponto",
+    todoItem: "Tarefa",
+    numberedItem: "Ponto numerado",
+    deleteLastParagraph: "Apagar \xFAltimo par\xE1grafo",
+    deleteLastLine: "Apagar \xFAltima linha",
+    undo: "Desfazer",
+    stopRecording: "Parar grava\xE7\xE3o",
+    colon: "Dois pontos",
+    wikilink: "Wikilink [[\u2026]]",
+    boldOpen: "Abrir negrito **",
+    boldClose: "Fechar negrito **",
+    italicOpen: "Abrir it\xE1lico *",
+    italicClose: "Fechar it\xE1lico *",
+    inlineCodeOpen: "Abrir c\xF3digo `",
+    inlineCodeClose: "Fechar c\xF3digo `",
+    tagOpen: "Abrir etiqueta #",
+    tagClose: "Fechar etiqueta",
+    codeBlockOpen: "Abrir bloco de c\xF3digo ```",
+    codeBlockClose: "Fechar bloco de c\xF3digo ```"
+  },
+  mishearings: [],
+  phonetics: [
+    { pattern: "lh", flags: "g", replacement: "ly" },
+    { pattern: "nh", flags: "g", replacement: "ny" },
+    { pattern: "ch", flags: "g", replacement: "sh" },
+    { pattern: "qu", flags: "g", replacement: "k" },
+    { pattern: "\xE7\xE3o", flags: "g", replacement: "saun" },
+    { pattern: "ss", flags: "g", replacement: "s" }
+  ],
+  articles: ["um", "uma", "o", "a", "os", "as", "uns", "umas"],
+  fillers: ["por favor", "agora", "obrigado"]
+};
+
+// ../shared/src/languages/it.json
+var it_default = {
+  code: "it",
+  name: "Italiano",
+  patterns: {
+    newParagraph: ["nuovo paragrafo", "nuova sezione", "nuovo capoverso"],
+    newLine: ["nuova riga", "a capo", "riga successiva"],
+    heading1: ["titolo uno", "titolo 1"],
+    heading2: ["titolo due", "titolo 2"],
+    heading3: ["titolo tre", "titolo 3"],
+    bulletPoint: ["nuovo punto", "nuovo elemento", "punto successivo", "nuovo elenco"],
+    todoItem: ["nuovo compito", "nuova attivita", "nuovo todo", "nuovo to do"],
+    numberedItem: ["punto numerato", "nuovo numero", "numero successivo"],
+    deleteLastParagraph: ["cancella ultimo paragrafo", "elimina ultimo paragrafo"],
+    deleteLastLine: ["cancella ultima riga", "elimina ultima riga", "cancella ultima frase"],
+    undo: ["annulla"],
+    stopRecording: ["ferma registrazione", "interrompi registrazione", "stop registrazione"],
+    colon: ["due punti"],
+    wikilink: ["wikilink", "link wiki"],
+    boldOpen: ["apri grassetto", "grassetto apri"],
+    boldClose: ["chiudi grassetto", "grassetto chiudi"],
+    italicOpen: ["apri corsivo", "corsivo apri"],
+    italicClose: ["chiudi corsivo", "corsivo chiudi"],
+    inlineCodeOpen: ["apri codice", "codice apri"],
+    inlineCodeClose: ["chiudi codice", "codice chiudi"],
+    tagOpen: ["apri tag", "apri etichetta"],
+    tagClose: ["chiudi tag", "chiudi etichetta"],
+    codeBlockOpen: ["apri blocco di codice"],
+    codeBlockClose: ["chiudi blocco di codice"]
+  },
+  labels: {
+    newParagraph: "Nuovo paragrafo",
+    newLine: "Nuova riga",
+    heading1: "Titolo 1",
+    heading2: "Titolo 2",
+    heading3: "Titolo 3",
+    bulletPoint: "Punto elenco",
+    todoItem: "Attivit\xE0",
+    numberedItem: "Punto numerato",
+    deleteLastParagraph: "Cancella ultimo paragrafo",
+    deleteLastLine: "Cancella ultima riga",
+    undo: "Annulla",
+    stopRecording: "Ferma registrazione",
+    colon: "Due punti",
+    wikilink: "Wikilink [[\u2026]]",
+    boldOpen: "Apri grassetto **",
+    boldClose: "Chiudi grassetto **",
+    italicOpen: "Apri corsivo *",
+    italicClose: "Chiudi corsivo *",
+    inlineCodeOpen: "Apri codice `",
+    inlineCodeClose: "Chiudi codice `",
+    tagOpen: "Apri tag #",
+    tagClose: "Chiudi tag",
+    codeBlockOpen: "Apri blocco di codice ```",
+    codeBlockClose: "Chiudi blocco di codice ```"
+  },
+  mishearings: [],
+  phonetics: [
+    { pattern: "gn", flags: "g", replacement: "ny" },
+    { pattern: "gl(?=[i])", flags: "g", replacement: "ly" },
+    { pattern: "ch", flags: "g", replacement: "k" },
+    { pattern: "gh", flags: "g", replacement: "g" },
+    { pattern: "sc(?=[ei])", flags: "g", replacement: "sh" },
+    { pattern: "zz", flags: "g", replacement: "ts" },
+    { pattern: "cc(?=[ei])", flags: "g", replacement: "ch" }
+  ],
+  articles: ["un", "uno", "una", "il", "lo", "la", "i", "gli", "le"],
+  fillers: ["per favore", "ora", "adesso", "grazie"]
+};
+
+// ../shared/src/languages/ru.json
+var ru_default = {
+  code: "ru",
+  name: "\u0420\u0443\u0441\u0441\u043A\u0438\u0439",
+  patterns: {
+    newParagraph: ["\u043D\u043E\u0432\u044B\u0439 \u0430\u0431\u0437\u0430\u0446", "\u043D\u043E\u0432\u044B\u0439 \u043F\u0430\u0440\u0430\u0433\u0440\u0430\u0444"],
+    newLine: ["\u043D\u043E\u0432\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430"],
+    heading1: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u043E\u0434\u0438\u043D", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 1"],
+    heading2: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u0434\u0432\u0430", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 2"],
+    heading3: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u0442\u0440\u0438", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 3"],
+    bulletPoint: ["\u043D\u043E\u0432\u044B\u0439 \u043F\u0443\u043D\u043A\u0442", "\u043D\u043E\u0432\u044B\u0439 \u044D\u043B\u0435\u043C\u0435\u043D\u0442", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u043F\u0443\u043D\u043A\u0442"],
+    todoItem: ["\u043D\u043E\u0432\u0430\u044F \u0437\u0430\u0434\u0430\u0447\u0430", "\u043D\u043E\u0432\u043E\u0435 \u0437\u0430\u0434\u0430\u043D\u0438\u0435"],
+    numberedItem: ["\u043D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u043D\u043E\u043C\u0435\u0440"],
+    deleteLastParagraph: ["\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0430\u0431\u0437\u0430\u0446"],
+    deleteLastLine: ["\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u044E\u044E \u0441\u0442\u0440\u043E\u043A\u0443", "\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0435"],
+    undo: ["\u043E\u0442\u043C\u0435\u043D\u0438\u0442\u044C", "\u043E\u0442\u043C\u0435\u043D\u0430"],
+    stopRecording: ["\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C", "\u0441\u0442\u043E\u043F \u0437\u0430\u043F\u0438\u0441\u044C"],
+    colon: ["\u0434\u0432\u043E\u0435\u0442\u043E\u0447\u0438\u0435"],
+    wikilink: ["\u0432\u0438\u043A\u0438 \u0441\u0441\u044B\u043B\u043A\u0430", "\u0432\u0438\u043A\u0438 \u043B\u0438\u043D\u043A"],
+    boldOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439", "\u0436\u0438\u0440\u043D\u044B\u0439 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
+    boldClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439", "\u0436\u0438\u0440\u043D\u044B\u0439 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
+    italicOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432", "\u043A\u0443\u0440\u0441\u0438\u0432 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
+    italicClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432", "\u043A\u0443\u0440\u0441\u0438\u0432 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
+    inlineCodeOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434", "\u043A\u043E\u0434 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
+    inlineCodeClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434", "\u043A\u043E\u0434 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
+    tagOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433", "\u0442\u0435\u0433 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
+    tagClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433", "\u0442\u0435\u0433 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
+    codeBlockOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430"],
+    codeBlockClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430"]
+  },
+  labels: {
+    newParagraph: "\u041D\u043E\u0432\u044B\u0439 \u0430\u0431\u0437\u0430\u0446",
+    newLine: "\u041D\u043E\u0432\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430",
+    heading1: "\u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 1",
+    heading2: "\u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 2",
+    heading3: "\u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 3",
+    bulletPoint: "\u041D\u043E\u0432\u044B\u0439 \u043F\u0443\u043D\u043A\u0442",
+    todoItem: "\u041D\u043E\u0432\u0430\u044F \u0437\u0430\u0434\u0430\u0447\u0430",
+    numberedItem: "\u041D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442",
+    deleteLastParagraph: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0430\u0431\u0437\u0430\u0446",
+    deleteLastLine: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u044E\u044E \u0441\u0442\u0440\u043E\u043A\u0443",
+    undo: "\u041E\u0442\u043C\u0435\u043D\u0438\u0442\u044C",
+    stopRecording: "\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C",
+    colon: "\u0414\u0432\u043E\u0435\u0442\u043E\u0447\u0438\u0435",
+    wikilink: "\u0412\u0438\u043A\u0438-\u0441\u0441\u044B\u043B\u043A\u0430 [[\u2026]]",
+    boldOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439 **",
+    boldClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439 **",
+    italicOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432 *",
+    italicClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432 *",
+    inlineCodeOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434 `",
+    inlineCodeClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434 `",
+    tagOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433 #",
+    tagClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433",
+    codeBlockOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430 ```",
+    codeBlockClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430 ```"
+  },
+  mishearings: [],
+  phonetics: [],
+  articles: [],
+  fillers: []
+};
+
+// ../shared/src/languages/zh.json
+var zh_default = {
+  code: "zh",
+  name: "\u4E2D\u6587",
+  patterns: {
+    newParagraph: ["\u65B0\u6BB5\u843D", "\u65B0\u7684\u6BB5\u843D"],
+    newLine: ["\u6362\u884C", "\u65B0\u884C", "\u4E0B\u4E00\u884C"],
+    heading1: ["\u6807\u9898\u4E00", "\u6807\u98981", "\u4E00\u7EA7\u6807\u9898"],
+    heading2: ["\u6807\u9898\u4E8C", "\u6807\u98982", "\u4E8C\u7EA7\u6807\u9898"],
+    heading3: ["\u6807\u9898\u4E09", "\u6807\u98983", "\u4E09\u7EA7\u6807\u9898"],
+    bulletPoint: ["\u65B0\u9879\u76EE", "\u5217\u8868\u9879", "\u65B0\u7684\u9879\u76EE"],
+    todoItem: ["\u65B0\u4EFB\u52A1", "\u65B0\u5F85\u529E", "\u5F85\u529E\u4E8B\u9879"],
+    numberedItem: ["\u7F16\u53F7\u9879", "\u65B0\u7F16\u53F7", "\u4E0B\u4E00\u4E2A\u7F16\u53F7"],
+    deleteLastParagraph: ["\u5220\u9664\u4E0A\u4E00\u6BB5", "\u5220\u9664\u6700\u540E\u4E00\u6BB5"],
+    deleteLastLine: ["\u5220\u9664\u4E0A\u4E00\u884C", "\u5220\u9664\u4E0A\u4E00\u53E5"],
+    undo: ["\u64A4\u9500", "\u64A4\u56DE"],
+    stopRecording: ["\u505C\u6B62\u5F55\u97F3", "\u7ED3\u675F\u5F55\u97F3"],
+    colon: ["\u5192\u53F7"],
+    wikilink: ["\u7EF4\u57FA\u94FE\u63A5", "\u94FE\u63A5"],
+    boldOpen: ["\u5F00\u59CB\u52A0\u7C97", "\u52A0\u7C97\u5F00\u59CB", "\u6253\u5F00\u7C97\u4F53"],
+    boldClose: ["\u7ED3\u675F\u52A0\u7C97", "\u52A0\u7C97\u7ED3\u675F", "\u5173\u95ED\u7C97\u4F53"],
+    italicOpen: ["\u5F00\u59CB\u659C\u4F53", "\u659C\u4F53\u5F00\u59CB", "\u6253\u5F00\u659C\u4F53"],
+    italicClose: ["\u7ED3\u675F\u659C\u4F53", "\u659C\u4F53\u7ED3\u675F", "\u5173\u95ED\u659C\u4F53"],
+    inlineCodeOpen: ["\u5F00\u59CB\u4EE3\u7801", "\u4EE3\u7801\u5F00\u59CB", "\u6253\u5F00\u4EE3\u7801"],
+    inlineCodeClose: ["\u7ED3\u675F\u4EE3\u7801", "\u4EE3\u7801\u7ED3\u675F", "\u5173\u95ED\u4EE3\u7801"],
+    tagOpen: ["\u5F00\u59CB\u6807\u7B7E", "\u6253\u5F00\u6807\u7B7E"],
+    tagClose: ["\u7ED3\u675F\u6807\u7B7E", "\u5173\u95ED\u6807\u7B7E"],
+    codeBlockOpen: ["\u5F00\u59CB\u4EE3\u7801\u5757", "\u6253\u5F00\u4EE3\u7801\u5757"],
+    codeBlockClose: ["\u7ED3\u675F\u4EE3\u7801\u5757", "\u5173\u95ED\u4EE3\u7801\u5757"]
+  },
+  labels: {
+    newParagraph: "\u65B0\u6BB5\u843D",
+    newLine: "\u6362\u884C",
+    heading1: "\u6807\u9898 1",
+    heading2: "\u6807\u9898 2",
+    heading3: "\u6807\u9898 3",
+    bulletPoint: "\u5217\u8868\u9879",
+    todoItem: "\u5F85\u529E\u4E8B\u9879",
+    numberedItem: "\u7F16\u53F7\u9879",
+    deleteLastParagraph: "\u5220\u9664\u4E0A\u4E00\u6BB5",
+    deleteLastLine: "\u5220\u9664\u4E0A\u4E00\u884C",
+    undo: "\u64A4\u9500",
+    stopRecording: "\u505C\u6B62\u5F55\u97F3",
+    colon: "\u5192\u53F7",
+    wikilink: "\u7EF4\u57FA\u94FE\u63A5 [[\u2026]]",
+    boldOpen: "\u5F00\u59CB\u52A0\u7C97 **",
+    boldClose: "\u7ED3\u675F\u52A0\u7C97 **",
+    italicOpen: "\u5F00\u59CB\u659C\u4F53 *",
+    italicClose: "\u7ED3\u675F\u659C\u4F53 *",
+    inlineCodeOpen: "\u5F00\u59CB\u4EE3\u7801 `",
+    inlineCodeClose: "\u7ED3\u675F\u4EE3\u7801 `",
+    tagOpen: "\u5F00\u59CB\u6807\u7B7E #",
+    tagClose: "\u7ED3\u675F\u6807\u7B7E",
+    codeBlockOpen: "\u5F00\u59CB\u4EE3\u7801\u5757 ```",
+    codeBlockClose: "\u7ED3\u675F\u4EE3\u7801\u5757 ```"
+  },
+  mishearings: [],
+  phonetics: [],
+  articles: [],
+  fillers: []
+};
+
+// ../shared/src/languages/hi.json
+var hi_default = {
+  code: "hi",
+  name: "\u0939\u093F\u0928\u094D\u0926\u0940",
+  patterns: {
+    newParagraph: ["\u0928\u092F\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B", "\u0928\u092F\u093E \u0905\u0928\u0941\u091A\u094D\u091B\u0947\u0926"],
+    newLine: ["\u0928\u0908 \u0932\u093E\u0907\u0928", "\u0905\u0917\u0932\u0940 \u0932\u093E\u0907\u0928"],
+    heading1: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u090F\u0915", "\u0936\u0940\u0930\u094D\u0937\u0915 1", "\u0939\u0947\u0921\u093F\u0902\u0917 1"],
+    heading2: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u0926\u094B", "\u0936\u0940\u0930\u094D\u0937\u0915 2", "\u0939\u0947\u0921\u093F\u0902\u0917 2"],
+    heading3: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u0924\u0940\u0928", "\u0936\u0940\u0930\u094D\u0937\u0915 3", "\u0939\u0947\u0921\u093F\u0902\u0917 3"],
+    bulletPoint: ["\u0928\u092F\u093E \u092C\u093F\u0902\u0926\u0941", "\u0928\u092F\u093E \u092A\u0949\u0907\u0902\u091F", "\u0905\u0917\u0932\u093E \u092A\u0949\u0907\u0902\u091F"],
+    todoItem: ["\u0928\u092F\u093E \u0915\u093E\u0930\u094D\u092F", "\u0928\u092F\u093E \u091F\u0942\u0921\u0942"],
+    numberedItem: ["\u0915\u094D\u0930\u092E\u093E\u0902\u0915\u093F\u0924 \u092C\u093F\u0902\u0926\u0941", "\u0905\u0917\u0932\u093E \u0928\u0902\u092C\u0930"],
+    deleteLastParagraph: ["\u092A\u093F\u091B\u0932\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B \u0939\u091F\u093E\u0913"],
+    deleteLastLine: ["\u092A\u093F\u091B\u0932\u0940 \u0932\u093E\u0907\u0928 \u0939\u091F\u093E\u0913", "\u0905\u0902\u0924\u093F\u092E \u0932\u093E\u0907\u0928 \u0939\u091F\u093E\u0913"],
+    undo: ["\u092A\u0942\u0930\u094D\u0935\u0935\u0924", "\u0905\u0928\u0921\u0942"],
+    stopRecording: ["\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B", "\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u0930\u094B\u0915\u094B"],
+    colon: ["\u0915\u094B\u0932\u0928"],
+    wikilink: ["\u0935\u093F\u0915\u093F \u0932\u093F\u0902\u0915", "\u0932\u093F\u0902\u0915"],
+    boldOpen: ["\u092C\u094B\u0932\u094D\u0921 \u0916\u094B\u0932\u094B", "\u092E\u094B\u091F\u093E \u0916\u094B\u0932\u094B"],
+    boldClose: ["\u092C\u094B\u0932\u094D\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B", "\u092E\u094B\u091F\u093E \u092C\u0902\u0926 \u0915\u0930\u094B"],
+    italicOpen: ["\u0907\u091F\u0948\u0932\u093F\u0915 \u0916\u094B\u0932\u094B", "\u0924\u093F\u0930\u091B\u093E \u0916\u094B\u0932\u094B"],
+    italicClose: ["\u0907\u091F\u0948\u0932\u093F\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B", "\u0924\u093F\u0930\u091B\u093E \u092C\u0902\u0926 \u0915\u0930\u094B"],
+    inlineCodeOpen: ["\u0915\u094B\u0921 \u0916\u094B\u0932\u094B"],
+    inlineCodeClose: ["\u0915\u094B\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B"],
+    tagOpen: ["\u091F\u0948\u0917 \u0916\u094B\u0932\u094B"],
+    tagClose: ["\u091F\u0948\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B"],
+    codeBlockOpen: ["\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u0916\u094B\u0932\u094B"],
+    codeBlockClose: ["\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B"]
+  },
+  labels: {
+    newParagraph: "\u0928\u092F\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B",
+    newLine: "\u0928\u0908 \u0932\u093E\u0907\u0928",
+    heading1: "\u0936\u0940\u0930\u094D\u0937\u0915 1",
+    heading2: "\u0936\u0940\u0930\u094D\u0937\u0915 2",
+    heading3: "\u0936\u0940\u0930\u094D\u0937\u0915 3",
+    bulletPoint: "\u0928\u092F\u093E \u092C\u093F\u0902\u0926\u0941",
+    todoItem: "\u0928\u092F\u093E \u0915\u093E\u0930\u094D\u092F",
+    numberedItem: "\u0915\u094D\u0930\u092E\u093E\u0902\u0915\u093F\u0924 \u092C\u093F\u0902\u0926\u0941",
+    deleteLastParagraph: "\u092A\u093F\u091B\u0932\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B \u0939\u091F\u093E\u0913",
+    deleteLastLine: "\u092A\u093F\u091B\u0932\u0940 \u0932\u093E\u0907\u0928 \u0939\u091F\u093E\u0913",
+    undo: "\u092A\u0942\u0930\u094D\u0935\u0935\u0924",
+    stopRecording: "\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B",
+    colon: "\u0915\u094B\u0932\u0928",
+    wikilink: "\u0935\u093F\u0915\u093F \u0932\u093F\u0902\u0915 [[\u2026]]",
+    boldOpen: "\u092C\u094B\u0932\u094D\u0921 \u0916\u094B\u0932\u094B **",
+    boldClose: "\u092C\u094B\u0932\u094D\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B **",
+    italicOpen: "\u0907\u091F\u0948\u0932\u093F\u0915 \u0916\u094B\u0932\u094B *",
+    italicClose: "\u0907\u091F\u0948\u0932\u093F\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B *",
+    inlineCodeOpen: "\u0915\u094B\u0921 \u0916\u094B\u0932\u094B `",
+    inlineCodeClose: "\u0915\u094B\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B `",
+    tagOpen: "\u091F\u0948\u0917 \u0916\u094B\u0932\u094B #",
+    tagClose: "\u091F\u0948\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B",
+    codeBlockOpen: "\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u0916\u094B\u0932\u094B ```",
+    codeBlockClose: "\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B ```"
+  },
+  mishearings: [],
+  phonetics: [],
+  articles: [],
+  fillers: []
+};
+
+// ../shared/src/languages/ar.json
+var ar_default = {
+  code: "ar",
+  name: "\u0627\u0644\u0639\u0631\u0628\u064A\u0629",
+  patterns: {
+    newParagraph: ["\u0641\u0642\u0631\u0629 \u062C\u062F\u064A\u062F\u0629"],
+    newLine: ["\u0633\u0637\u0631 \u062C\u062F\u064A\u062F", "\u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u062A\u0627\u0644\u064A"],
+    heading1: ["\u0639\u0646\u0648\u0627\u0646 \u0648\u0627\u062D\u062F", "\u0639\u0646\u0648\u0627\u0646 1"],
+    heading2: ["\u0639\u0646\u0648\u0627\u0646 \u0627\u062B\u0646\u064A\u0646", "\u0639\u0646\u0648\u0627\u0646 2"],
+    heading3: ["\u0639\u0646\u0648\u0627\u0646 \u062B\u0644\u0627\u062B\u0629", "\u0639\u0646\u0648\u0627\u0646 3"],
+    bulletPoint: ["\u0646\u0642\u0637\u0629 \u062C\u062F\u064A\u062F\u0629", "\u0639\u0646\u0635\u0631 \u062C\u062F\u064A\u062F"],
+    todoItem: ["\u0645\u0647\u0645\u0629 \u062C\u062F\u064A\u062F\u0629"],
+    numberedItem: ["\u0639\u0646\u0635\u0631 \u0645\u0631\u0642\u0645", "\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u062A\u0627\u0644\u064A"],
+    deleteLastParagraph: ["\u0627\u062D\u0630\u0641 \u0627\u0644\u0641\u0642\u0631\u0629 \u0627\u0644\u0623\u062E\u064A\u0631\u0629"],
+    deleteLastLine: ["\u0627\u062D\u0630\u0641 \u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u0623\u062E\u064A\u0631", "\u0627\u062D\u0630\u0641 \u0627\u0644\u062C\u0645\u0644\u0629 \u0627\u0644\u0623\u062E\u064A\u0631\u0629"],
+    undo: ["\u062A\u0631\u0627\u062C\u0639"],
+    stopRecording: ["\u0623\u0648\u0642\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644", "\u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644"],
+    colon: ["\u0646\u0642\u0637\u062A\u0627\u0646"],
+    wikilink: ["\u0631\u0627\u0628\u0637 \u0648\u064A\u0643\u064A", "\u0631\u0627\u0628\u0637"],
+    boldOpen: ["\u0627\u0641\u062A\u062D \u063A\u0627\u0645\u0642", "\u063A\u0627\u0645\u0642 \u0627\u0641\u062A\u062D"],
+    boldClose: ["\u0623\u063A\u0644\u0642 \u063A\u0627\u0645\u0642", "\u063A\u0627\u0645\u0642 \u0623\u063A\u0644\u0642"],
+    italicOpen: ["\u0627\u0641\u062A\u062D \u0645\u0627\u0626\u0644", "\u0645\u0627\u0626\u0644 \u0627\u0641\u062A\u062D"],
+    italicClose: ["\u0623\u063A\u0644\u0642 \u0645\u0627\u0626\u0644", "\u0645\u0627\u0626\u0644 \u0623\u063A\u0644\u0642"],
+    inlineCodeOpen: ["\u0627\u0641\u062A\u062D \u0643\u0648\u062F", "\u0643\u0648\u062F \u0627\u0641\u062A\u062D"],
+    inlineCodeClose: ["\u0623\u063A\u0644\u0642 \u0643\u0648\u062F", "\u0643\u0648\u062F \u0623\u063A\u0644\u0642"],
+    tagOpen: ["\u0627\u0641\u062A\u062D \u0648\u0633\u0645", "\u0648\u0633\u0645 \u0627\u0641\u062A\u062D"],
+    tagClose: ["\u0623\u063A\u0644\u0642 \u0648\u0633\u0645", "\u0648\u0633\u0645 \u0623\u063A\u0644\u0642"],
+    codeBlockOpen: ["\u0627\u0641\u062A\u062D \u0643\u062A\u0644\u0629 \u0643\u0648\u062F"],
+    codeBlockClose: ["\u0623\u063A\u0644\u0642 \u0643\u062A\u0644\u0629 \u0643\u0648\u062F"]
+  },
+  labels: {
+    newParagraph: "\u0641\u0642\u0631\u0629 \u062C\u062F\u064A\u062F\u0629",
+    newLine: "\u0633\u0637\u0631 \u062C\u062F\u064A\u062F",
+    heading1: "\u0639\u0646\u0648\u0627\u0646 1",
+    heading2: "\u0639\u0646\u0648\u0627\u0646 2",
+    heading3: "\u0639\u0646\u0648\u0627\u0646 3",
+    bulletPoint: "\u0646\u0642\u0637\u0629 \u062C\u062F\u064A\u062F\u0629",
+    todoItem: "\u0645\u0647\u0645\u0629 \u062C\u062F\u064A\u062F\u0629",
+    numberedItem: "\u0639\u0646\u0635\u0631 \u0645\u0631\u0642\u0645",
+    deleteLastParagraph: "\u0627\u062D\u0630\u0641 \u0627\u0644\u0641\u0642\u0631\u0629 \u0627\u0644\u0623\u062E\u064A\u0631\u0629",
+    deleteLastLine: "\u0627\u062D\u0630\u0641 \u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u0623\u062E\u064A\u0631",
+    undo: "\u062A\u0631\u0627\u062C\u0639",
+    stopRecording: "\u0623\u0648\u0642\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644",
+    colon: "\u0646\u0642\u0637\u062A\u0627\u0646",
+    wikilink: "[[\u2026]] \u0631\u0627\u0628\u0637 \u0648\u064A\u0643\u064A",
+    boldOpen: "** \u0627\u0641\u062A\u062D \u063A\u0627\u0645\u0642",
+    boldClose: "** \u0623\u063A\u0644\u0642 \u063A\u0627\u0645\u0642",
+    italicOpen: "* \u0627\u0641\u062A\u062D \u0645\u0627\u0626\u0644",
+    italicClose: "* \u0623\u063A\u0644\u0642 \u0645\u0627\u0626\u0644",
+    inlineCodeOpen: "` \u0627\u0641\u062A\u062D \u0643\u0648\u062F",
+    inlineCodeClose: "` \u0623\u063A\u0644\u0642 \u0643\u0648\u062F",
+    tagOpen: "# \u0627\u0641\u062A\u062D \u0648\u0633\u0645",
+    tagClose: "\u0623\u063A\u0644\u0642 \u0648\u0633\u0645",
+    codeBlockOpen: "``` \u0627\u0641\u062A\u062D \u0643\u062A\u0644\u0629 \u0643\u0648\u062F",
+    codeBlockClose: "``` \u0623\u063A\u0644\u0642 \u0643\u062A\u0644\u0629 \u0643\u0648\u062F"
+  },
+  mishearings: [],
+  phonetics: [],
+  articles: ["\u0627\u0644"],
+  fillers: []
+};
+
+// ../shared/src/languages/ja.json
+var ja_default = {
+  code: "ja",
+  name: "\u65E5\u672C\u8A9E",
+  patterns: {
+    newParagraph: ["\u65B0\u3057\u3044\u6BB5\u843D", "\u65B0\u6BB5\u843D"],
+    newLine: ["\u6539\u884C", "\u65B0\u3057\u3044\u884C", "\u6B21\u306E\u884C"],
+    heading1: ["\u898B\u51FA\u30571", "\u898B\u51FA\u3057\u3044\u3061"],
+    heading2: ["\u898B\u51FA\u30572", "\u898B\u51FA\u3057\u306B"],
+    heading3: ["\u898B\u51FA\u30573", "\u898B\u51FA\u3057\u3055\u3093"],
+    bulletPoint: ["\u7B87\u6761\u66F8\u304D", "\u65B0\u3057\u3044\u9805\u76EE", "\u6B21\u306E\u9805\u76EE"],
+    todoItem: ["\u65B0\u3057\u3044\u30BF\u30B9\u30AF", "\u30BF\u30B9\u30AF\u8FFD\u52A0"],
+    numberedItem: ["\u756A\u53F7\u4ED8\u304D", "\u6B21\u306E\u756A\u53F7"],
+    deleteLastParagraph: ["\u6700\u5F8C\u306E\u6BB5\u843D\u3092\u524A\u9664"],
+    deleteLastLine: ["\u6700\u5F8C\u306E\u884C\u3092\u524A\u9664", "\u6700\u5F8C\u306E\u6587\u3092\u524A\u9664"],
+    undo: ["\u5143\u306B\u623B\u3059", "\u53D6\u308A\u6D88\u3057"],
+    stopRecording: ["\u9332\u97F3\u505C\u6B62", "\u9332\u97F3\u3092\u6B62\u3081\u3066"],
+    colon: ["\u30B3\u30ED\u30F3"],
+    wikilink: ["\u30A6\u30A3\u30AD\u30EA\u30F3\u30AF", "\u30EA\u30F3\u30AF"],
+    boldOpen: ["\u592A\u5B57\u958B\u59CB", "\u30DC\u30FC\u30EB\u30C9\u958B\u59CB", "\u592A\u5B57\u958B\u304F"],
+    boldClose: ["\u592A\u5B57\u7D42\u4E86", "\u30DC\u30FC\u30EB\u30C9\u7D42\u4E86", "\u592A\u5B57\u9589\u3058\u308B"],
+    italicOpen: ["\u659C\u4F53\u958B\u59CB", "\u30A4\u30BF\u30EA\u30C3\u30AF\u958B\u59CB", "\u659C\u4F53\u958B\u304F"],
+    italicClose: ["\u659C\u4F53\u7D42\u4E86", "\u30A4\u30BF\u30EA\u30C3\u30AF\u7D42\u4E86", "\u659C\u4F53\u9589\u3058\u308B"],
+    inlineCodeOpen: ["\u30B3\u30FC\u30C9\u958B\u59CB", "\u30B3\u30FC\u30C9\u958B\u304F"],
+    inlineCodeClose: ["\u30B3\u30FC\u30C9\u7D42\u4E86", "\u30B3\u30FC\u30C9\u9589\u3058\u308B"],
+    tagOpen: ["\u30BF\u30B0\u958B\u59CB", "\u30BF\u30B0\u958B\u304F"],
+    tagClose: ["\u30BF\u30B0\u7D42\u4E86", "\u30BF\u30B0\u9589\u3058\u308B"],
+    codeBlockOpen: ["\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u958B\u59CB", "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u958B\u304F"],
+    codeBlockClose: ["\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u7D42\u4E86", "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u9589\u3058\u308B"]
+  },
+  labels: {
+    newParagraph: "\u65B0\u3057\u3044\u6BB5\u843D",
+    newLine: "\u6539\u884C",
+    heading1: "\u898B\u51FA\u3057 1",
+    heading2: "\u898B\u51FA\u3057 2",
+    heading3: "\u898B\u51FA\u3057 3",
+    bulletPoint: "\u7B87\u6761\u66F8\u304D",
+    todoItem: "\u65B0\u3057\u3044\u30BF\u30B9\u30AF",
+    numberedItem: "\u756A\u53F7\u4ED8\u304D",
+    deleteLastParagraph: "\u6700\u5F8C\u306E\u6BB5\u843D\u3092\u524A\u9664",
+    deleteLastLine: "\u6700\u5F8C\u306E\u884C\u3092\u524A\u9664",
+    undo: "\u5143\u306B\u623B\u3059",
+    stopRecording: "\u9332\u97F3\u505C\u6B62",
+    colon: "\u30B3\u30ED\u30F3",
+    wikilink: "\u30A6\u30A3\u30AD\u30EA\u30F3\u30AF [[\u2026]]",
+    boldOpen: "\u592A\u5B57\u958B\u59CB **",
+    boldClose: "\u592A\u5B57\u7D42\u4E86 **",
+    italicOpen: "\u659C\u4F53\u958B\u59CB *",
+    italicClose: "\u659C\u4F53\u7D42\u4E86 *",
+    inlineCodeOpen: "\u30B3\u30FC\u30C9\u958B\u59CB `",
+    inlineCodeClose: "\u30B3\u30FC\u30C9\u7D42\u4E86 `",
+    tagOpen: "\u30BF\u30B0\u958B\u59CB #",
+    tagClose: "\u30BF\u30B0\u7D42\u4E86",
+    codeBlockOpen: "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u958B\u59CB ```",
+    codeBlockClose: "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u7D42\u4E86 ```"
+  },
+  mishearings: [],
+  phonetics: [],
+  articles: [],
+  fillers: []
+};
+
+// ../shared/src/languages/ko.json
+var ko_default = {
+  code: "ko",
+  name: "\uD55C\uAD6D\uC5B4",
+  patterns: {
+    newParagraph: ["\uC0C8 \uB2E8\uB77D", "\uC0C8 \uBB38\uB2E8"],
+    newLine: ["\uC0C8 \uC904", "\uB2E4\uC74C \uC904", "\uC904 \uBC14\uAFC8"],
+    heading1: ["\uC81C\uBAA9 1", "\uC81C\uBAA9 \uD558\uB098"],
+    heading2: ["\uC81C\uBAA9 2", "\uC81C\uBAA9 \uB458"],
+    heading3: ["\uC81C\uBAA9 3", "\uC81C\uBAA9 \uC14B"],
+    bulletPoint: ["\uC0C8 \uD56D\uBAA9", "\uB2E4\uC74C \uD56D\uBAA9", "\uAE00\uBA38\uB9AC \uAE30\uD638"],
+    todoItem: ["\uC0C8 \uD560\uC77C", "\uD560\uC77C \uCD94\uAC00"],
+    numberedItem: ["\uBC88\uD638 \uD56D\uBAA9", "\uB2E4\uC74C \uBC88\uD638"],
+    deleteLastParagraph: ["\uB9C8\uC9C0\uB9C9 \uB2E8\uB77D \uC0AD\uC81C"],
+    deleteLastLine: ["\uB9C8\uC9C0\uB9C9 \uC904 \uC0AD\uC81C", "\uB9C8\uC9C0\uB9C9 \uBB38\uC7A5 \uC0AD\uC81C"],
+    undo: ["\uC2E4\uD589 \uCDE8\uC18C", "\uB418\uB3CC\uB9AC\uAE30"],
+    stopRecording: ["\uB179\uC74C \uC911\uC9C0", "\uB179\uC74C \uBA48\uCDB0"],
+    colon: ["\uCF5C\uB860"],
+    wikilink: ["\uC704\uD0A4\uB9C1\uD06C", "\uB9C1\uD06C"],
+    boldOpen: ["\uAD75\uAC8C \uC5F4\uAE30", "\uBCFC\uB4DC \uC5F4\uAE30"],
+    boldClose: ["\uAD75\uAC8C \uB2EB\uAE30", "\uBCFC\uB4DC \uB2EB\uAE30"],
+    italicOpen: ["\uAE30\uC6B8\uC784 \uC5F4\uAE30", "\uC774\uD0E4\uB9AD \uC5F4\uAE30"],
+    italicClose: ["\uAE30\uC6B8\uC784 \uB2EB\uAE30", "\uC774\uD0E4\uB9AD \uB2EB\uAE30"],
+    inlineCodeOpen: ["\uCF54\uB4DC \uC5F4\uAE30"],
+    inlineCodeClose: ["\uCF54\uB4DC \uB2EB\uAE30"],
+    tagOpen: ["\uD0DC\uADF8 \uC5F4\uAE30"],
+    tagClose: ["\uD0DC\uADF8 \uB2EB\uAE30"],
+    codeBlockOpen: ["\uCF54\uB4DC\uBE14\uB85D \uC5F4\uAE30", "\uCF54\uB4DC \uBE14\uB85D \uC5F4\uAE30"],
+    codeBlockClose: ["\uCF54\uB4DC\uBE14\uB85D \uB2EB\uAE30", "\uCF54\uB4DC \uBE14\uB85D \uB2EB\uAE30"]
+  },
+  labels: {
+    newParagraph: "\uC0C8 \uB2E8\uB77D",
+    newLine: "\uC0C8 \uC904",
+    heading1: "\uC81C\uBAA9 1",
+    heading2: "\uC81C\uBAA9 2",
+    heading3: "\uC81C\uBAA9 3",
+    bulletPoint: "\uC0C8 \uD56D\uBAA9",
+    todoItem: "\uC0C8 \uD560\uC77C",
+    numberedItem: "\uBC88\uD638 \uD56D\uBAA9",
+    deleteLastParagraph: "\uB9C8\uC9C0\uB9C9 \uB2E8\uB77D \uC0AD\uC81C",
+    deleteLastLine: "\uB9C8\uC9C0\uB9C9 \uC904 \uC0AD\uC81C",
+    undo: "\uC2E4\uD589 \uCDE8\uC18C",
+    stopRecording: "\uB179\uC74C \uC911\uC9C0",
+    colon: "\uCF5C\uB860",
+    wikilink: "\uC704\uD0A4\uB9C1\uD06C [[\u2026]]",
+    boldOpen: "\uAD75\uAC8C \uC5F4\uAE30 **",
+    boldClose: "\uAD75\uAC8C \uB2EB\uAE30 **",
+    italicOpen: "\uAE30\uC6B8\uC784 \uC5F4\uAE30 *",
+    italicClose: "\uAE30\uC6B8\uC784 \uB2EB\uAE30 *",
+    inlineCodeOpen: "\uCF54\uB4DC \uC5F4\uAE30 `",
+    inlineCodeClose: "\uCF54\uB4DC \uB2EB\uAE30 `",
+    tagOpen: "\uD0DC\uADF8 \uC5F4\uAE30 #",
+    tagClose: "\uD0DC\uADF8 \uB2EB\uAE30",
+    codeBlockOpen: "\uCF54\uB4DC\uBE14\uB85D \uC5F4\uAE30 ```",
+    codeBlockClose: "\uCF54\uB4DC\uBE14\uB85D \uB2EB\uAE30 ```"
+  },
+  mishearings: [],
+  phonetics: [],
+  articles: [],
+  fillers: []
+};
+
+// ../shared/src/lang.ts
+var ALL_LANGS = {
+  nl: nl_default,
+  en: en_default,
+  fr: fr_default,
+  de: de_default,
+  es: es_default,
+  pt: pt_default,
+  it: it_default,
+  ru: ru_default,
+  zh: zh_default,
+  hi: hi_default,
+  ar: ar_default,
+  ja: ja_default,
+  ko: ko_default
+};
+var SUPPORTED_LANGUAGES = [
+  "nl",
+  "en",
+  "fr",
+  "de",
+  "es",
+  "pt",
+  "it",
+  "ru",
+  "zh",
+  "hi",
+  "ar",
+  "ja",
+  "ko"
+];
+var LANGUAGE_NAMES = Object.fromEntries(
+  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].name])
+);
+var PATTERNS = Object.fromEntries(
+  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].patterns])
+);
+var LABELS = Object.fromEntries(
+  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].labels])
+);
+function compileMishearings(data) {
+  return data.map(({ pattern, flags, replacement }) => [
+    new RegExp(pattern, flags),
+    replacement
+  ]);
+}
+var MISHEARINGS = Object.fromEntries(
+  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS[code].mishearings.length > 0).map((code) => [code, compileMishearings(ALL_LANGS[code].mishearings)])
+);
+function getPatternsForCommand(commandId, lang) {
+  var _a, _b, _c, _d;
+  const langPatterns = (_b = (_a = PATTERNS[lang]) == null ? void 0 : _a[commandId]) != null ? _b : [];
+  const enPatterns = lang === "en" ? [] : (_d = (_c = PATTERNS.en) == null ? void 0 : _c[commandId]) != null ? _d : [];
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const p of [...langPatterns, ...enPatterns]) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      result.push(p);
+    }
+  }
+  return result;
+}
+function getLabel(commandId, lang) {
+  var _a, _b, _c, _d;
+  return (_d = (_c = (_a = LABELS[lang]) == null ? void 0 : _a[commandId]) != null ? _c : (_b = LABELS.en) == null ? void 0 : _b[commandId]) != null ? _d : commandId;
+}
+function getMishearings(lang) {
+  var _a;
+  return (_a = MISHEARINGS[lang]) != null ? _a : [];
+}
+
+// ../shared/src/phonetics.ts
+var ALL_LANGS2 = {
+  nl: nl_default,
+  en: en_default,
+  fr: fr_default,
+  de: de_default,
+  es: es_default,
+  pt: pt_default,
+  it: it_default,
+  ru: ru_default,
+  zh: zh_default,
+  hi: hi_default,
+  ar: ar_default,
+  ja: ja_default,
+  ko: ko_default
+};
+function compileRules(data) {
+  return data.map(({ pattern, flags, replacement }) => [
+    new RegExp(pattern, flags),
+    replacement
+  ]);
+}
+var PHONETIC_RULES = Object.fromEntries(
+  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS2[code].phonetics.length > 0).map((code) => [code, compileRules(ALL_LANGS2[code].phonetics)])
+);
+var ARTICLES = Object.fromEntries(
+  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS2[code].articles])
+);
+var TRAILING_FILLERS = Object.fromEntries(
+  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS2[code].fillers.length > 0).map((code) => [code, ALL_LANGS2[code].fillers])
+);
+function phoneticNormalize(text, lang) {
+  const rules = PHONETIC_RULES[lang];
+  if (!rules) return text;
+  let result = text;
+  for (const [pattern, replacement] of rules) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
+function stripArticles(text, lang) {
+  const articles = ARTICLES[lang];
+  if (!articles || articles.length === 0) return text;
+  const words = text.split(/\s+/);
+  let stripped = 0;
+  while (stripped < Math.min(2, words.length - 1)) {
+    if (articles.includes(words[stripped])) {
+      stripped++;
+    } else {
+      break;
+    }
+  }
+  return stripped > 0 ? words.slice(stripped).join(" ") : text;
+}
+function stripTrailingFillers(text, lang) {
+  const fillers = TRAILING_FILLERS[lang];
+  if (!fillers || fillers.length === 0) return text;
+  let result = text;
+  for (const filler of fillers.sort((a, b) => b.length - a.length)) {
+    if (result.endsWith(" " + filler)) {
+      result = result.slice(0, -(filler.length + 1)).trimEnd();
+    }
+  }
+  return result;
+}
+function trySplitCompound(text, knownWords) {
+  if (text.includes(" ") || text.length < 4) return text;
+  for (const phrase of knownWords) {
+    const words = phrase.split(/\s+/);
+    if (words.length < 2) continue;
+    const joined = words.join("");
+    if (text === joined) {
+      return phrase;
+    }
+  }
+  return text;
+}
+
+// ../shared/src/plugin-logger.ts
+var LOG_BUFFER_SIZE = 500;
+var logBuffer = [];
+function pushLog(level, args) {
+  const ts = (/* @__PURE__ */ new Date()).toISOString();
+  const msg = args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
+  logBuffer.push(`[${ts}] [${level}] ${msg}`);
+  if (logBuffer.length > LOG_BUFFER_SIZE) {
+    logBuffer.shift();
+  }
+}
+var vlog = {
+  debug: (...args) => {
+    pushLog("DEBUG", args);
+    console.debug(...args);
+  },
+  warn: (...args) => {
+    pushLog("WARN", args);
+    console.warn(...args);
+  },
+  error: (...args) => {
+    pushLog("ERROR", args);
+    console.error(...args);
+  }
+};
+function redactForExport(line) {
+  let redacted = line.replace(/\b[A-Za-z0-9]{32,}\b/g, "[REDACTED]");
+  redacted = redacted.replace(/"[^"]{20,}"/g, '"[text redacted]"');
+  redacted = redacted.replace(
+    /(full text:|Hallucination detected —|Discarding hallucinated) .+/gi,
+    "$1 [redacted]"
+  );
+  return redacted;
+}
+function getLogText() {
+  return logBuffer.map(redactForExport).join("\n");
+}
+function getLogCount() {
+  return logBuffer.length;
+}
+
+// ../shared/src/authenticated-websocket.ts
+var WS_OPEN = 1;
+function loadNodeModule(name) {
+  const r = globalThis["require"];
+  if (!r) throw new Error(`Node.js require() not available (needed for ${name})`);
+  return r(name);
+}
+function createAuthenticatedWebSocket(url, headers, callbacks) {
+  const https = loadNodeModule("https");
+  const crypto = loadNodeModule("crypto");
+  const parsed = new URL(url);
+  const wsKey = crypto.randomBytes(16).toString("base64");
+  const conn = {
+    readyState: 0,
+    send: () => {
+    },
+    close: () => {
+    }
+  };
+  const req = https.request(
+    {
+      hostname: parsed.hostname,
+      port: parsed.port || 443,
+      path: parsed.pathname + parsed.search,
+      method: "GET",
+      headers: {
+        ...headers,
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": wsKey
+      }
+    },
+    (res) => {
+      callbacks.onError(
+        new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
+      );
+    }
+  );
+  req.on("upgrade", (_res, socket) => {
+    conn.readyState = WS_OPEN;
+    conn.send = (data) => {
+      const payload = Buffer.from(data, "utf-8");
+      const mask = crypto.randomBytes(4);
+      let header;
+      if (payload.length < 126) {
+        header = Buffer.alloc(6);
+        header[0] = 129;
+        header[1] = 128 | payload.length;
+        mask.copy(header, 2);
+      } else if (payload.length < 65536) {
+        header = Buffer.alloc(8);
+        header[0] = 129;
+        header[1] = 128 | 126;
+        header.writeUInt16BE(payload.length, 2);
+        mask.copy(header, 4);
+      } else {
+        header = Buffer.alloc(14);
+        header[0] = 129;
+        header[1] = 128 | 127;
+        header.writeBigUInt64BE(BigInt(payload.length), 2);
+        mask.copy(header, 10);
+      }
+      const masked = Buffer.alloc(payload.length);
+      for (let i = 0; i < payload.length; i++) {
+        masked[i] = payload[i] ^ mask[i % 4];
+      }
+      socket.write(Buffer.concat([header, masked]));
+    };
+    conn.close = () => {
+      conn.readyState = 3;
+      const closeFrame = Buffer.alloc(6);
+      closeFrame[0] = 136;
+      closeFrame[1] = 128;
+      const closeMask = crypto.randomBytes(4);
+      closeMask.copy(closeFrame, 2);
+      try {
+        socket.write(closeFrame);
+      } catch (e) {
+      }
+      socket.end();
+    };
+    const pingInterval = setInterval(() => {
+      if (conn.readyState !== WS_OPEN) {
+        clearInterval(pingInterval);
+        return;
+      }
+      try {
+        const pingFrame = Buffer.alloc(6);
+        pingFrame[0] = 137;
+        pingFrame[1] = 128;
+        const pingMask = crypto.randomBytes(4);
+        pingMask.copy(pingFrame, 2);
+        socket.write(pingFrame);
+      } catch (e) {
+      }
+    }, 15e3);
+    callbacks.onOpen();
+    let buffer = Buffer.alloc(0);
+    socket.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (buffer.length >= 2) {
+        const firstByte = buffer[0];
+        const secondByte = buffer[1];
+        const opcode = firstByte & 15;
+        const isMasked = (secondByte & 128) !== 0;
+        let payloadLength = secondByte & 127;
+        let offset = 2;
+        if (payloadLength === 126) {
+          if (buffer.length < 4) return;
+          payloadLength = buffer.readUInt16BE(2);
+          offset = 4;
+        } else if (payloadLength === 127) {
+          if (buffer.length < 10) return;
+          payloadLength = Number(buffer.readBigUInt64BE(2));
+          offset = 10;
+        }
+        if (isMasked) offset += 4;
+        if (buffer.length < offset + payloadLength) return;
+        let payload = buffer.subarray(offset, offset + payloadLength);
+        if (isMasked) {
+          const maskKey = buffer.subarray(offset - 4, offset);
+          payload = Buffer.from(payload);
+          for (let i = 0; i < payload.length; i++) {
+            payload[i] ^= maskKey[i % 4];
+          }
+        }
+        buffer = buffer.subarray(offset + payloadLength);
+        if (opcode === 1) {
+          callbacks.onMessage(payload.toString("utf-8"));
+        } else if (opcode === 8) {
+          conn.readyState = 3;
+          clearInterval(pingInterval);
+          socket.end();
+          callbacks.onClose();
+          return;
+        } else if (opcode === 9) {
+          const pongMask = crypto.randomBytes(4);
+          const pongLen = payload.length;
+          let pongHeader;
+          if (pongLen < 126) {
+            pongHeader = Buffer.alloc(6);
+            pongHeader[0] = 138;
+            pongHeader[1] = 128 | pongLen;
+            pongMask.copy(pongHeader, 2);
+          } else {
+            pongHeader = Buffer.alloc(8);
+            pongHeader[0] = 138;
+            pongHeader[1] = 128 | 126;
+            pongHeader.writeUInt16BE(pongLen, 2);
+            pongMask.copy(pongHeader, 4);
+          }
+          const maskedPong = Buffer.from(payload);
+          for (let i = 0; i < maskedPong.length; i++) {
+            maskedPong[i] ^= pongMask[i % 4];
+          }
+          socket.write(Buffer.concat([pongHeader, maskedPong]));
+        }
+      }
+    });
+    socket.on("close", () => {
+      conn.readyState = 3;
+      clearInterval(pingInterval);
+      callbacks.onClose();
+    });
+    socket.on("error", (err) => {
+      clearInterval(pingInterval);
+      callbacks.onError(err);
+    });
+  });
+  req.on("error", (err) => {
+    callbacks.onError(err);
+  });
+  req.end();
+  return conn;
+}
+
+// src/default-commands.ts
 function getDefaultBuiltInCommands() {
   return [
     {
@@ -290,30 +1580,6 @@ function getDefaultBuiltInCommands() {
     }
   ];
 }
-var DEFAULT_SETTINGS = {
-  settingsVersion: 1,
-  apiKey: "",
-  language: "nl",
-  realtimeModel: "voxtral-mini-transcribe-realtime-2602",
-  batchModel: "voxtral-mini-latest",
-  correctModel: "mistral-small-latest",
-  autoCorrect: true,
-  streamingDelayMs: 480,
-  dualDelay: false,
-  dualDelayFastMs: 240,
-  dualDelaySlowMs: 2400,
-  systemPrompt: "",
-  mode: "realtime",
-  microphoneDeviceId: "",
-  focusBehavior: "pause",
-  focusPauseDelaySec: 30,
-  dismissMobileBatchNotice: false,
-  enterToSend: false,
-  typingCooldownMs: 800,
-  noiseSuppression: false,
-  customCommands: [],
-  templatesFolder: ""
-};
 
 // src/settings-migration.ts
 var CURRENT_VERSION = 1;
@@ -334,7 +1600,7 @@ function migrateSettings(data) {
 }
 
 // src/settings-tab.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian = require("obsidian");
 
 // src/audio-recorder.ts
 var WORKLET_SOURCE = `
@@ -590,187 +1856,7 @@ var AudioRecorder = class {
   }
 };
 
-// src/mistral-api.ts
-var import_obsidian = require("obsidian");
-
-// src/authenticated-websocket.ts
-var WS_OPEN = 1;
-function loadNodeModule(name) {
-  const r = globalThis["require"];
-  if (!r) throw new Error(`Node.js require() not available (needed for ${name})`);
-  return r(name);
-}
-function createAuthenticatedWebSocket(url, headers, callbacks) {
-  const https = loadNodeModule("https");
-  const crypto = loadNodeModule("crypto");
-  const parsed = new URL(url);
-  const wsKey = crypto.randomBytes(16).toString("base64");
-  const conn = {
-    readyState: 0,
-    send: () => {
-    },
-    close: () => {
-    }
-  };
-  const req = https.request(
-    {
-      hostname: parsed.hostname,
-      port: parsed.port || 443,
-      path: parsed.pathname + parsed.search,
-      method: "GET",
-      headers: {
-        ...headers,
-        Connection: "Upgrade",
-        Upgrade: "websocket",
-        "Sec-WebSocket-Version": "13",
-        "Sec-WebSocket-Key": wsKey
-      }
-    },
-    (res) => {
-      callbacks.onError(
-        new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
-      );
-    }
-  );
-  req.on("upgrade", (_res, socket) => {
-    conn.readyState = WS_OPEN;
-    conn.send = (data) => {
-      const payload = Buffer.from(data, "utf-8");
-      const mask = crypto.randomBytes(4);
-      let header;
-      if (payload.length < 126) {
-        header = Buffer.alloc(6);
-        header[0] = 129;
-        header[1] = 128 | payload.length;
-        mask.copy(header, 2);
-      } else if (payload.length < 65536) {
-        header = Buffer.alloc(8);
-        header[0] = 129;
-        header[1] = 128 | 126;
-        header.writeUInt16BE(payload.length, 2);
-        mask.copy(header, 4);
-      } else {
-        header = Buffer.alloc(14);
-        header[0] = 129;
-        header[1] = 128 | 127;
-        header.writeBigUInt64BE(BigInt(payload.length), 2);
-        mask.copy(header, 10);
-      }
-      const masked = Buffer.alloc(payload.length);
-      for (let i = 0; i < payload.length; i++) {
-        masked[i] = payload[i] ^ mask[i % 4];
-      }
-      socket.write(Buffer.concat([header, masked]));
-    };
-    conn.close = () => {
-      conn.readyState = 3;
-      const closeFrame = Buffer.alloc(6);
-      closeFrame[0] = 136;
-      closeFrame[1] = 128;
-      const closeMask = crypto.randomBytes(4);
-      closeMask.copy(closeFrame, 2);
-      try {
-        socket.write(closeFrame);
-      } catch (e) {
-      }
-      socket.end();
-    };
-    const pingInterval = setInterval(() => {
-      if (conn.readyState !== WS_OPEN) {
-        clearInterval(pingInterval);
-        return;
-      }
-      try {
-        const pingFrame = Buffer.alloc(6);
-        pingFrame[0] = 137;
-        pingFrame[1] = 128;
-        const pingMask = crypto.randomBytes(4);
-        pingMask.copy(pingFrame, 2);
-        socket.write(pingFrame);
-      } catch (e) {
-      }
-    }, 15e3);
-    callbacks.onOpen();
-    let buffer = Buffer.alloc(0);
-    socket.on("data", (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      while (buffer.length >= 2) {
-        const firstByte = buffer[0];
-        const secondByte = buffer[1];
-        const opcode = firstByte & 15;
-        const isMasked = (secondByte & 128) !== 0;
-        let payloadLength = secondByte & 127;
-        let offset = 2;
-        if (payloadLength === 126) {
-          if (buffer.length < 4) return;
-          payloadLength = buffer.readUInt16BE(2);
-          offset = 4;
-        } else if (payloadLength === 127) {
-          if (buffer.length < 10) return;
-          payloadLength = Number(buffer.readBigUInt64BE(2));
-          offset = 10;
-        }
-        if (isMasked) offset += 4;
-        if (buffer.length < offset + payloadLength) return;
-        let payload = buffer.subarray(offset, offset + payloadLength);
-        if (isMasked) {
-          const maskKey = buffer.subarray(offset - 4, offset);
-          payload = Buffer.from(payload);
-          for (let i = 0; i < payload.length; i++) {
-            payload[i] ^= maskKey[i % 4];
-          }
-        }
-        buffer = buffer.subarray(offset + payloadLength);
-        if (opcode === 1) {
-          callbacks.onMessage(payload.toString("utf-8"));
-        } else if (opcode === 8) {
-          conn.readyState = 3;
-          clearInterval(pingInterval);
-          socket.end();
-          callbacks.onClose();
-          return;
-        } else if (opcode === 9) {
-          const pongMask = crypto.randomBytes(4);
-          const pongLen = payload.length;
-          let pongHeader;
-          if (pongLen < 126) {
-            pongHeader = Buffer.alloc(6);
-            pongHeader[0] = 138;
-            pongHeader[1] = 128 | pongLen;
-            pongMask.copy(pongHeader, 2);
-          } else {
-            pongHeader = Buffer.alloc(8);
-            pongHeader[0] = 138;
-            pongHeader[1] = 128 | 126;
-            pongHeader.writeUInt16BE(pongLen, 2);
-            pongMask.copy(pongHeader, 4);
-          }
-          const maskedPong = Buffer.from(payload);
-          for (let i = 0; i < maskedPong.length; i++) {
-            maskedPong[i] ^= pongMask[i % 4];
-          }
-          socket.write(Buffer.concat([pongHeader, maskedPong]));
-        }
-      }
-    });
-    socket.on("close", () => {
-      conn.readyState = 3;
-      clearInterval(pingInterval);
-      callbacks.onClose();
-    });
-    socket.on("error", (err) => {
-      clearInterval(pingInterval);
-      callbacks.onError(err);
-    });
-  });
-  req.on("error", (err) => {
-    callbacks.onError(err);
-  });
-  req.end();
-  return conn;
-}
-
-// src/mistral-api.ts
+// ../shared/src/mistral-api.ts
 var BASE_URL = "https://api.mistral.ai";
 function sanitizeApiError(status, rawBody) {
   var _a;
@@ -801,10 +1887,10 @@ function sanitizeApiError(status, rawBody) {
       return `HTTP ${status}: Request failed`;
   }
 }
-async function listModels(apiKey) {
+async function listModels(apiKey, httpRequest) {
   if (!apiKey) return [];
   try {
-    const response = await (0, import_obsidian.requestUrl)({
+    const response = await httpRequest({
       url: `${BASE_URL}/v1/models`,
       method: "GET",
       headers: {
@@ -832,7 +1918,7 @@ async function listModels(apiKey) {
     return [];
   }
 }
-async function transcribeBatch(audioBlob, settings, diarize = false) {
+async function transcribeBatch(audioBlob, settings, httpRequest, diarize = false) {
   var _a;
   const ext = audioBlob.type.includes("mp4") ? "m4a" : audioBlob.type.includes("ogg") ? "ogg" : "webm";
   const mimeType = audioBlob.type || `audio/${ext}`;
@@ -877,7 +1963,7 @@ true\r
   body.set(headerBuf, 0);
   body.set(fileBytes, headerBuf.length);
   body.set(tailBuf, headerBuf.length + fileBytes.length);
-  const response = await (0, import_obsidian.requestUrl)({
+  const response = await httpRequest({
     url: `${BASE_URL}/v1/audio/transcriptions`,
     method: "POST",
     headers: {
@@ -897,7 +1983,7 @@ function buildCustomCommandGuard2(settings) {
   var _a;
   return buildCustomCommandGuard((_a = settings.customCommands) != null ? _a : []);
 }
-async function correctText(text, settings) {
+async function correctText(text, settings, httpRequest) {
   var _a, _b, _c, _d;
   const basePrompt = settings.systemPrompt || DEFAULT_CORRECT_PROMPT;
   const systemPrompt = basePrompt + buildCustomCommandGuard2(settings);
@@ -909,7 +1995,7 @@ async function correctText(text, settings) {
     ],
     temperature: 0.1
   };
-  const response = await (0, import_obsidian.requestUrl)({
+  const response = await httpRequest({
     url: `${BASE_URL}/v1/chat/completions`,
     method: "POST",
     headers: {
@@ -1094,976 +2180,8 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
-// src/languages/nl.json
-var nl_default = {
-  code: "nl",
-  name: "Nederlands",
-  patterns: {
-    newParagraph: ["nieuwe alinea", "nieuw alinea", "nieuwe paragraaf", "nieuw paragraaf", "nieuwe linie"],
-    newLine: ["nieuwe regel", "nieuwe lijn", "volgende regel"],
-    heading1: ["kop een", "kop 1"],
-    heading2: ["kop twee", "kop 2"],
-    heading3: ["kop drie", "kop 3"],
-    bulletPoint: ["nieuw punt", "nieuw lijstpunt", "nieuw lijstitem", "lijst punt", "nieuw bullet", "nieuw item", "nieuwe item", "volgend item", "volgend punt"],
-    todoItem: ["nieuw to do item", "nieuw todo item", "nieuw todo", "nieuwe to do", "nieuwe todo", "nieuw taak", "nieuwe taak"],
-    numberedItem: ["nieuw genummerd item", "nieuw genummerd punt", "genummerd punt", "genummerd item", "volgend nummer", "nummer punt"],
-    deleteLastParagraph: ["verwijder laatste alinea", "verwijder laatste paragraaf", "wis laatste alinea"],
-    deleteLastLine: ["verwijder laatste regel", "verwijder laatste zin", "wis laatste regel", "wist laatste regel"],
-    undo: ["herstel", "ongedaan maken"],
-    stopRecording: ["beeindig opname", "beeindig de opname", "stop opname", "stop de opname"],
-    colon: ["dubbele punt", "double punt", "dubbelepunt"],
-    wikilink: ["wikilink", "wiki link", "link"],
-    boldOpen: ["vet openen", "dikgedrukt openen", "vet open"],
-    boldClose: ["vet sluiten", "dikgedrukt sluiten", "vet dicht"],
-    italicOpen: ["cursief openen", "schuingedrukt openen", "cursief open"],
-    italicClose: ["cursief sluiten", "schuingedrukt sluiten", "cursief dicht"],
-    inlineCodeOpen: ["code openen", "code open"],
-    inlineCodeClose: ["code sluiten", "code dicht"],
-    tagOpen: ["tag openen", "label openen", "tag open"],
-    tagClose: ["tag sluiten", "label sluiten", "tag dicht"],
-    codeBlockOpen: ["codeblok openen", "code blok openen", "codeblok open"],
-    codeBlockClose: ["codeblok sluiten", "code blok sluiten", "codeblok dicht"]
-  },
-  labels: {
-    newParagraph: "Nieuwe alinea",
-    newLine: "Nieuwe regel",
-    heading1: "Kop 1",
-    heading2: "Kop 2",
-    heading3: "Kop 3",
-    bulletPoint: "Lijstpunt",
-    todoItem: "To-do item",
-    numberedItem: "Genummerd punt",
-    deleteLastParagraph: "Verwijder laatste alinea",
-    deleteLastLine: "Verwijder laatste regel",
-    undo: "Ongedaan maken",
-    stopRecording: "Stop opname",
-    colon: "Dubbele punt",
-    wikilink: "Wikilink [[\u2026]]",
-    boldOpen: "Vet openen **",
-    boldClose: "Vet sluiten **",
-    italicOpen: "Cursief openen *",
-    italicClose: "Cursief sluiten *",
-    inlineCodeOpen: "Code openen `",
-    inlineCodeClose: "Code sluiten `",
-    tagOpen: "Tag openen #",
-    tagClose: "Tag sluiten",
-    codeBlockOpen: "Codeblok openen ```",
-    codeBlockClose: "Codeblok sluiten ```"
-  },
-  mishearings: [
-    { pattern: "\\bniveau\\b", flags: "g", replacement: "nieuwe" },
-    { pattern: "\\bniva\\b", flags: "g", replacement: "nieuwe" },
-    { pattern: "\\bnieuw alinea\\b", flags: "g", replacement: "nieuwe alinea" },
-    { pattern: "\\bnieuw regel\\b", flags: "g", replacement: "nieuwe regel" },
-    { pattern: "\\bnieuw punt\\b", flags: "g", replacement: "nieuw punt" },
-    { pattern: "\\blinea\\b", flags: "g", replacement: "alinea" },
-    { pattern: "\\blinie\\b", flags: "g", replacement: "alinea" },
-    { pattern: "\\bbeeindigde\\b", flags: "g", replacement: "beeindig de" }
-  ],
-  phonetics: [
-    { pattern: "ij", flags: "g", replacement: "ei" },
-    { pattern: "au", flags: "g", replacement: "ou" },
-    { pattern: "dt\\b", flags: "g", replacement: "t" },
-    { pattern: "\\bsch", flags: "g", replacement: "sg" },
-    { pattern: "ck", flags: "g", replacement: "k" },
-    { pattern: "ph", flags: "g", replacement: "f" },
-    { pattern: "th", flags: "g", replacement: "t" },
-    { pattern: "ie", flags: "g", replacement: "i" },
-    { pattern: "oe", flags: "g", replacement: "u" },
-    { pattern: "ee", flags: "g", replacement: "e" },
-    { pattern: "oo", flags: "g", replacement: "o" },
-    { pattern: "uu", flags: "g", replacement: "u" },
-    { pattern: "aa", flags: "g", replacement: "a" }
-  ],
-  articles: ["een", "de", "het", "die", "dat", "deze"],
-  fillers: ["alsjeblieft", "graag", "even", "maar", "eens", "dan", "nu", "hoor"]
-};
-
-// src/languages/en.json
-var en_default = {
-  code: "en",
-  name: "English",
-  patterns: {
-    newParagraph: ["new paragraph"],
-    newLine: ["new line", "next line"],
-    heading1: ["heading one", "heading 1"],
-    heading2: ["heading two", "heading 2"],
-    heading3: ["heading three", "heading 3"],
-    bulletPoint: ["new item", "next item", "bullet", "bullet point", "new bullet"],
-    todoItem: ["new todo", "new to do", "todo item", "to do item"],
-    numberedItem: ["numbered item", "new numbered item", "next number"],
-    deleteLastParagraph: ["delete last paragraph"],
-    deleteLastLine: ["delete last line", "delete last sentence"],
-    undo: ["undo"],
-    stopRecording: ["stop recording"],
-    colon: ["colon"],
-    wikilink: ["wiki link", "wikilink", "link"],
-    boldOpen: ["open bold", "bold open", "start bold"],
-    boldClose: ["close bold", "bold close", "end bold"],
-    italicOpen: ["open italic", "italic open", "start italic"],
-    italicClose: ["close italic", "italic close", "end italic"],
-    inlineCodeOpen: ["open code", "code open", "start code"],
-    inlineCodeClose: ["close code", "code close", "end code"],
-    tagOpen: ["open tag", "tag open", "start tag"],
-    tagClose: ["close tag", "tag close", "end tag"],
-    codeBlockOpen: ["open code block", "code block open", "start code block"],
-    codeBlockClose: ["close code block", "code block close", "end code block"]
-  },
-  labels: {
-    newParagraph: "New paragraph",
-    newLine: "New line",
-    heading1: "Heading 1",
-    heading2: "Heading 2",
-    heading3: "Heading 3",
-    bulletPoint: "Bullet point",
-    todoItem: "To-do item",
-    numberedItem: "Numbered item",
-    deleteLastParagraph: "Delete last paragraph",
-    deleteLastLine: "Delete last line",
-    undo: "Undo",
-    stopRecording: "Stop recording",
-    colon: "Colon",
-    wikilink: "Wikilink [[\u2026]]",
-    boldOpen: "Open bold **",
-    boldClose: "Close bold **",
-    italicOpen: "Open italic *",
-    italicClose: "Close italic *",
-    inlineCodeOpen: "Open code `",
-    inlineCodeClose: "Close code `",
-    tagOpen: "Open tag #",
-    tagClose: "Close tag",
-    codeBlockOpen: "Open code block ```",
-    codeBlockClose: "Close code block ```"
-  },
-  mishearings: [],
-  phonetics: [
-    { pattern: "ph", flags: "g", replacement: "f" },
-    { pattern: "th", flags: "g", replacement: "t" },
-    { pattern: "ck", flags: "g", replacement: "k" },
-    { pattern: "ght", flags: "g", replacement: "t" },
-    { pattern: "wh", flags: "g", replacement: "w" },
-    { pattern: "kn", flags: "g", replacement: "n" },
-    { pattern: "wr", flags: "g", replacement: "r" },
-    { pattern: "tion", flags: "g", replacement: "shun" },
-    { pattern: "sion", flags: "g", replacement: "shun" },
-    { pattern: "([aeiou])ll", flags: "g", replacement: "$1l" },
-    { pattern: "([aeiou])dd", flags: "g", replacement: "$1d" },
-    { pattern: "([aeiou])tt", flags: "g", replacement: "$1t" }
-  ],
-  articles: ["a", "an", "the"],
-  fillers: ["please", "now", "then", "thanks"]
-};
-
-// src/languages/fr.json
-var fr_default = {
-  code: "fr",
-  name: "Fran\xE7ais",
-  patterns: {
-    newParagraph: ["nouveau paragraphe", "nouvelle section", "nouveau alinea"],
-    newLine: ["nouvelle ligne", "a la ligne", "retour a la ligne"],
-    heading1: ["titre un", "titre 1"],
-    heading2: ["titre deux", "titre 2"],
-    heading3: ["titre trois", "titre 3"],
-    bulletPoint: ["nouveau point", "nouvelle puce", "point suivant", "nouvel element", "nouvel item"],
-    todoItem: ["nouvelle tache", "nouveau todo", "nouveau to do"],
-    numberedItem: ["point numero", "element numero", "nouveau numero"],
-    deleteLastParagraph: ["supprimer dernier paragraphe", "effacer dernier paragraphe"],
-    deleteLastLine: ["supprimer derniere ligne", "effacer derniere ligne", "supprimer derniere phrase"],
-    undo: ["annuler"],
-    stopRecording: ["arreter enregistrement", "arreter l enregistrement", "stop enregistrement"],
-    colon: ["deux points"],
-    wikilink: ["wiki lien", "lien wiki"],
-    boldOpen: ["ouvrir gras", "gras ouvrir"],
-    boldClose: ["fermer gras", "gras fermer"],
-    italicOpen: ["ouvrir italique", "italique ouvrir"],
-    italicClose: ["fermer italique", "italique fermer"],
-    inlineCodeOpen: ["ouvrir code", "code ouvrir"],
-    inlineCodeClose: ["fermer code", "code fermer"],
-    tagOpen: ["ouvrir etiquette", "ouvrir tag"],
-    tagClose: ["fermer etiquette", "fermer tag"],
-    codeBlockOpen: ["ouvrir bloc de code"],
-    codeBlockClose: ["fermer bloc de code"]
-  },
-  labels: {
-    newParagraph: "Nouveau paragraphe",
-    newLine: "Nouvelle ligne",
-    heading1: "Titre 1",
-    heading2: "Titre 2",
-    heading3: "Titre 3",
-    bulletPoint: "Puce",
-    todoItem: "T\xE2che",
-    numberedItem: "Point num\xE9rot\xE9",
-    deleteLastParagraph: "Supprimer dernier paragraphe",
-    deleteLastLine: "Supprimer derni\xE8re ligne",
-    undo: "Annuler",
-    stopRecording: "Arr\xEAter l'enregistrement",
-    colon: "Deux-points",
-    wikilink: "Wikilink [[\u2026]]",
-    boldOpen: "Ouvrir gras **",
-    boldClose: "Fermer gras **",
-    italicOpen: "Ouvrir italique *",
-    italicClose: "Fermer italique *",
-    inlineCodeOpen: "Ouvrir code `",
-    inlineCodeClose: "Fermer code `",
-    tagOpen: "Ouvrir \xE9tiquette #",
-    tagClose: "Fermer \xE9tiquette",
-    codeBlockOpen: "Ouvrir bloc de code ```",
-    codeBlockClose: "Fermer bloc de code ```"
-  },
-  mishearings: [
-    { pattern: "\\bnouveau ligne\\b", flags: "g", replacement: "nouvelle ligne" },
-    { pattern: "\\bnouvelle paragraphe\\b", flags: "g", replacement: "nouveau paragraphe" }
-  ],
-  phonetics: [
-    { pattern: "eau", flags: "g", replacement: "o" },
-    { pattern: "aux", flags: "g", replacement: "o" },
-    { pattern: "ai", flags: "g", replacement: "e" },
-    { pattern: "ei", flags: "g", replacement: "e" },
-    { pattern: "ph", flags: "g", replacement: "f" },
-    { pattern: "qu", flags: "g", replacement: "k" },
-    { pattern: "gn", flags: "g", replacement: "ny" },
-    { pattern: "oi", flags: "g", replacement: "wa" },
-    { pattern: "ou", flags: "g", replacement: "u" },
-    { pattern: "an", flags: "g", replacement: "on" },
-    { pattern: "en", flags: "g", replacement: "on" }
-  ],
-  articles: ["un", "une", "le", "la", "les", "l", "du", "des"],
-  fillers: ["s il vous plait", "s il te plait", "merci"]
-};
-
-// src/languages/de.json
-var de_default = {
-  code: "de",
-  name: "Deutsch",
-  patterns: {
-    newParagraph: ["neuer absatz", "neuer paragraph"],
-    newLine: ["neue zeile", "nachste zeile"],
-    heading1: ["uberschrift eins", "uberschrift 1"],
-    heading2: ["uberschrift zwei", "uberschrift 2"],
-    heading3: ["uberschrift drei", "uberschrift 3"],
-    bulletPoint: ["neuer punkt", "neuer aufzahlungspunkt", "nachster punkt", "neues element"],
-    todoItem: ["neue aufgabe", "neues todo", "neues to do"],
-    numberedItem: ["nummerierter punkt", "neuer nummerierter punkt", "nachste nummer"],
-    deleteLastParagraph: ["letzten absatz loschen", "absatz loschen"],
-    deleteLastLine: ["letzte zeile loschen", "letzten satz loschen"],
-    undo: ["ruckgangig", "ruckgangig machen"],
-    stopRecording: ["aufnahme beenden", "aufnahme stoppen"],
-    colon: ["doppelpunkt"],
-    wikilink: ["wikilink", "wiki link"],
-    boldOpen: ["fett offnen", "fett auf"],
-    boldClose: ["fett schliessen", "fett zu"],
-    italicOpen: ["kursiv offnen", "kursiv auf"],
-    italicClose: ["kursiv schliessen", "kursiv zu"],
-    inlineCodeOpen: ["code offnen", "code auf"],
-    inlineCodeClose: ["code schliessen", "code zu"],
-    tagOpen: ["tag offnen", "tag auf"],
-    tagClose: ["tag schliessen", "tag zu"],
-    codeBlockOpen: ["codeblock offnen", "code block offnen"],
-    codeBlockClose: ["codeblock schliessen", "code block schliessen"]
-  },
-  labels: {
-    newParagraph: "Neuer Absatz",
-    newLine: "Neue Zeile",
-    heading1: "\xDCberschrift 1",
-    heading2: "\xDCberschrift 2",
-    heading3: "\xDCberschrift 3",
-    bulletPoint: "Aufz\xE4hlungspunkt",
-    todoItem: "Aufgabe",
-    numberedItem: "Nummerierter Punkt",
-    deleteLastParagraph: "Letzten Absatz l\xF6schen",
-    deleteLastLine: "Letzte Zeile l\xF6schen",
-    undo: "R\xFCckg\xE4ngig",
-    stopRecording: "Aufnahme beenden",
-    colon: "Doppelpunkt",
-    wikilink: "Wikilink [[\u2026]]",
-    boldOpen: "Fett \xF6ffnen **",
-    boldClose: "Fett schlie\xDFen **",
-    italicOpen: "Kursiv \xF6ffnen *",
-    italicClose: "Kursiv schlie\xDFen *",
-    inlineCodeOpen: "Code \xF6ffnen `",
-    inlineCodeClose: "Code schlie\xDFen `",
-    tagOpen: "Tag \xF6ffnen #",
-    tagClose: "Tag schlie\xDFen",
-    codeBlockOpen: "Codeblock \xF6ffnen ```",
-    codeBlockClose: "Codeblock schlie\xDFen ```"
-  },
-  mishearings: [
-    { pattern: "\\bneue absatz\\b", flags: "g", replacement: "neuer absatz" },
-    { pattern: "\\bneues zeile\\b", flags: "g", replacement: "neue zeile" }
-  ],
-  phonetics: [
-    { pattern: "sch", flags: "g", replacement: "sh" },
-    { pattern: "ei", flags: "g", replacement: "ai" },
-    { pattern: "ie", flags: "g", replacement: "i" },
-    { pattern: "ck", flags: "g", replacement: "k" },
-    { pattern: "ph", flags: "g", replacement: "f" },
-    { pattern: "th", flags: "g", replacement: "t" },
-    { pattern: "v", flags: "g", replacement: "f" },
-    { pattern: "tz", flags: "g", replacement: "ts" },
-    { pattern: "dt\\b", flags: "g", replacement: "t" },
-    { pattern: "aa", flags: "g", replacement: "a" },
-    { pattern: "ee", flags: "g", replacement: "e" },
-    { pattern: "oo", flags: "g", replacement: "o" }
-  ],
-  articles: ["ein", "eine", "einen", "einem", "einer", "der", "die", "das", "den", "dem", "des"],
-  fillers: ["bitte", "mal", "jetzt", "dann"]
-};
-
-// src/languages/es.json
-var es_default = {
-  code: "es",
-  name: "Espa\xF1ol",
-  patterns: {
-    newParagraph: ["nuevo parrafo", "nueva seccion"],
-    newLine: ["nueva linea", "siguiente linea"],
-    heading1: ["titulo uno", "titulo 1"],
-    heading2: ["titulo dos", "titulo 2"],
-    heading3: ["titulo tres", "titulo 3"],
-    bulletPoint: ["nuevo punto", "nueva vineta", "siguiente punto", "nuevo elemento"],
-    todoItem: ["nueva tarea", "nuevo todo", "nuevo to do"],
-    numberedItem: ["punto numerado", "nuevo numero", "siguiente numero"],
-    deleteLastParagraph: ["borrar ultimo parrafo", "eliminar ultimo parrafo"],
-    deleteLastLine: ["borrar ultima linea", "eliminar ultima linea", "borrar ultima frase"],
-    undo: ["deshacer"],
-    stopRecording: ["parar grabacion", "detener grabacion"],
-    colon: ["dos puntos"],
-    wikilink: ["wikilink", "enlace wiki"],
-    boldOpen: ["abrir negrita", "negrita abrir"],
-    boldClose: ["cerrar negrita", "negrita cerrar"],
-    italicOpen: ["abrir cursiva", "cursiva abrir"],
-    italicClose: ["cerrar cursiva", "cursiva cerrar"],
-    inlineCodeOpen: ["abrir codigo", "codigo abrir"],
-    inlineCodeClose: ["cerrar codigo", "codigo cerrar"],
-    tagOpen: ["abrir etiqueta", "abrir tag"],
-    tagClose: ["cerrar etiqueta", "cerrar tag"],
-    codeBlockOpen: ["abrir bloque de codigo"],
-    codeBlockClose: ["cerrar bloque de codigo"]
-  },
-  labels: {
-    newParagraph: "Nuevo p\xE1rrafo",
-    newLine: "Nueva l\xEDnea",
-    heading1: "T\xEDtulo 1",
-    heading2: "T\xEDtulo 2",
-    heading3: "T\xEDtulo 3",
-    bulletPoint: "Vi\xF1eta",
-    todoItem: "Tarea",
-    numberedItem: "Punto numerado",
-    deleteLastParagraph: "Borrar \xFAltimo p\xE1rrafo",
-    deleteLastLine: "Borrar \xFAltima l\xEDnea",
-    undo: "Deshacer",
-    stopRecording: "Parar grabaci\xF3n",
-    colon: "Dos puntos",
-    wikilink: "Wikilink [[\u2026]]",
-    boldOpen: "Abrir negrita **",
-    boldClose: "Cerrar negrita **",
-    italicOpen: "Abrir cursiva *",
-    italicClose: "Cerrar cursiva *",
-    inlineCodeOpen: "Abrir c\xF3digo `",
-    inlineCodeClose: "Cerrar c\xF3digo `",
-    tagOpen: "Abrir etiqueta #",
-    tagClose: "Cerrar etiqueta",
-    codeBlockOpen: "Abrir bloque de c\xF3digo ```",
-    codeBlockClose: "Cerrar bloque de c\xF3digo ```"
-  },
-  mishearings: [],
-  phonetics: [
-    { pattern: "ll", flags: "g", replacement: "y" },
-    { pattern: "v", flags: "g", replacement: "b" },
-    { pattern: "ce", flags: "g", replacement: "se" },
-    { pattern: "ci", flags: "g", replacement: "si" },
-    { pattern: "qu", flags: "g", replacement: "k" },
-    { pattern: "gu(?=[ei])", flags: "g", replacement: "g" },
-    { pattern: "h", flags: "g", replacement: "" }
-  ],
-  articles: ["un", "una", "el", "la", "los", "las", "unos", "unas"],
-  fillers: ["por favor", "ahora", "gracias"]
-};
-
-// src/languages/pt.json
-var pt_default = {
-  code: "pt",
-  name: "Portugu\xEAs",
-  patterns: {
-    newParagraph: ["novo paragrafo", "nova secao"],
-    newLine: ["nova linha", "proxima linha"],
-    heading1: ["titulo um", "titulo 1"],
-    heading2: ["titulo dois", "titulo 2"],
-    heading3: ["titulo tres", "titulo 3"],
-    bulletPoint: ["novo ponto", "novo item", "proximo ponto", "novo elemento"],
-    todoItem: ["nova tarefa", "novo todo", "novo to do"],
-    numberedItem: ["ponto numerado", "novo numero", "proximo numero"],
-    deleteLastParagraph: ["apagar ultimo paragrafo", "excluir ultimo paragrafo"],
-    deleteLastLine: ["apagar ultima linha", "excluir ultima linha", "apagar ultima frase"],
-    undo: ["desfazer"],
-    stopRecording: ["parar gravacao", "encerrar gravacao"],
-    colon: ["dois pontos"],
-    wikilink: ["wikilink", "link wiki"],
-    boldOpen: ["abrir negrito", "negrito abrir"],
-    boldClose: ["fechar negrito", "negrito fechar"],
-    italicOpen: ["abrir italico", "italico abrir"],
-    italicClose: ["fechar italico", "italico fechar"],
-    inlineCodeOpen: ["abrir codigo", "codigo abrir"],
-    inlineCodeClose: ["fechar codigo", "codigo fechar"],
-    tagOpen: ["abrir etiqueta", "abrir tag"],
-    tagClose: ["fechar etiqueta", "fechar tag"],
-    codeBlockOpen: ["abrir bloco de codigo"],
-    codeBlockClose: ["fechar bloco de codigo"]
-  },
-  labels: {
-    newParagraph: "Novo par\xE1grafo",
-    newLine: "Nova linha",
-    heading1: "T\xEDtulo 1",
-    heading2: "T\xEDtulo 2",
-    heading3: "T\xEDtulo 3",
-    bulletPoint: "Ponto",
-    todoItem: "Tarefa",
-    numberedItem: "Ponto numerado",
-    deleteLastParagraph: "Apagar \xFAltimo par\xE1grafo",
-    deleteLastLine: "Apagar \xFAltima linha",
-    undo: "Desfazer",
-    stopRecording: "Parar grava\xE7\xE3o",
-    colon: "Dois pontos",
-    wikilink: "Wikilink [[\u2026]]",
-    boldOpen: "Abrir negrito **",
-    boldClose: "Fechar negrito **",
-    italicOpen: "Abrir it\xE1lico *",
-    italicClose: "Fechar it\xE1lico *",
-    inlineCodeOpen: "Abrir c\xF3digo `",
-    inlineCodeClose: "Fechar c\xF3digo `",
-    tagOpen: "Abrir etiqueta #",
-    tagClose: "Fechar etiqueta",
-    codeBlockOpen: "Abrir bloco de c\xF3digo ```",
-    codeBlockClose: "Fechar bloco de c\xF3digo ```"
-  },
-  mishearings: [],
-  phonetics: [
-    { pattern: "lh", flags: "g", replacement: "ly" },
-    { pattern: "nh", flags: "g", replacement: "ny" },
-    { pattern: "ch", flags: "g", replacement: "sh" },
-    { pattern: "qu", flags: "g", replacement: "k" },
-    { pattern: "\xE7\xE3o", flags: "g", replacement: "saun" },
-    { pattern: "ss", flags: "g", replacement: "s" }
-  ],
-  articles: ["um", "uma", "o", "a", "os", "as", "uns", "umas"],
-  fillers: ["por favor", "agora", "obrigado"]
-};
-
-// src/languages/it.json
-var it_default = {
-  code: "it",
-  name: "Italiano",
-  patterns: {
-    newParagraph: ["nuovo paragrafo", "nuova sezione", "nuovo capoverso"],
-    newLine: ["nuova riga", "a capo", "riga successiva"],
-    heading1: ["titolo uno", "titolo 1"],
-    heading2: ["titolo due", "titolo 2"],
-    heading3: ["titolo tre", "titolo 3"],
-    bulletPoint: ["nuovo punto", "nuovo elemento", "punto successivo", "nuovo elenco"],
-    todoItem: ["nuovo compito", "nuova attivita", "nuovo todo", "nuovo to do"],
-    numberedItem: ["punto numerato", "nuovo numero", "numero successivo"],
-    deleteLastParagraph: ["cancella ultimo paragrafo", "elimina ultimo paragrafo"],
-    deleteLastLine: ["cancella ultima riga", "elimina ultima riga", "cancella ultima frase"],
-    undo: ["annulla"],
-    stopRecording: ["ferma registrazione", "interrompi registrazione", "stop registrazione"],
-    colon: ["due punti"],
-    wikilink: ["wikilink", "link wiki"],
-    boldOpen: ["apri grassetto", "grassetto apri"],
-    boldClose: ["chiudi grassetto", "grassetto chiudi"],
-    italicOpen: ["apri corsivo", "corsivo apri"],
-    italicClose: ["chiudi corsivo", "corsivo chiudi"],
-    inlineCodeOpen: ["apri codice", "codice apri"],
-    inlineCodeClose: ["chiudi codice", "codice chiudi"],
-    tagOpen: ["apri tag", "apri etichetta"],
-    tagClose: ["chiudi tag", "chiudi etichetta"],
-    codeBlockOpen: ["apri blocco di codice"],
-    codeBlockClose: ["chiudi blocco di codice"]
-  },
-  labels: {
-    newParagraph: "Nuovo paragrafo",
-    newLine: "Nuova riga",
-    heading1: "Titolo 1",
-    heading2: "Titolo 2",
-    heading3: "Titolo 3",
-    bulletPoint: "Punto elenco",
-    todoItem: "Attivit\xE0",
-    numberedItem: "Punto numerato",
-    deleteLastParagraph: "Cancella ultimo paragrafo",
-    deleteLastLine: "Cancella ultima riga",
-    undo: "Annulla",
-    stopRecording: "Ferma registrazione",
-    colon: "Due punti",
-    wikilink: "Wikilink [[\u2026]]",
-    boldOpen: "Apri grassetto **",
-    boldClose: "Chiudi grassetto **",
-    italicOpen: "Apri corsivo *",
-    italicClose: "Chiudi corsivo *",
-    inlineCodeOpen: "Apri codice `",
-    inlineCodeClose: "Chiudi codice `",
-    tagOpen: "Apri tag #",
-    tagClose: "Chiudi tag",
-    codeBlockOpen: "Apri blocco di codice ```",
-    codeBlockClose: "Chiudi blocco di codice ```"
-  },
-  mishearings: [],
-  phonetics: [
-    { pattern: "gn", flags: "g", replacement: "ny" },
-    { pattern: "gl(?=[i])", flags: "g", replacement: "ly" },
-    { pattern: "ch", flags: "g", replacement: "k" },
-    { pattern: "gh", flags: "g", replacement: "g" },
-    { pattern: "sc(?=[ei])", flags: "g", replacement: "sh" },
-    { pattern: "zz", flags: "g", replacement: "ts" },
-    { pattern: "cc(?=[ei])", flags: "g", replacement: "ch" }
-  ],
-  articles: ["un", "uno", "una", "il", "lo", "la", "i", "gli", "le"],
-  fillers: ["per favore", "ora", "adesso", "grazie"]
-};
-
-// src/languages/ru.json
-var ru_default = {
-  code: "ru",
-  name: "\u0420\u0443\u0441\u0441\u043A\u0438\u0439",
-  patterns: {
-    newParagraph: ["\u043D\u043E\u0432\u044B\u0439 \u0430\u0431\u0437\u0430\u0446", "\u043D\u043E\u0432\u044B\u0439 \u043F\u0430\u0440\u0430\u0433\u0440\u0430\u0444"],
-    newLine: ["\u043D\u043E\u0432\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430"],
-    heading1: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u043E\u0434\u0438\u043D", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 1"],
-    heading2: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u0434\u0432\u0430", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 2"],
-    heading3: ["\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u0442\u0440\u0438", "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 3"],
-    bulletPoint: ["\u043D\u043E\u0432\u044B\u0439 \u043F\u0443\u043D\u043A\u0442", "\u043D\u043E\u0432\u044B\u0439 \u044D\u043B\u0435\u043C\u0435\u043D\u0442", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u043F\u0443\u043D\u043A\u0442"],
-    todoItem: ["\u043D\u043E\u0432\u0430\u044F \u0437\u0430\u0434\u0430\u0447\u0430", "\u043D\u043E\u0432\u043E\u0435 \u0437\u0430\u0434\u0430\u043D\u0438\u0435"],
-    numberedItem: ["\u043D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442", "\u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0439 \u043D\u043E\u043C\u0435\u0440"],
-    deleteLastParagraph: ["\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0430\u0431\u0437\u0430\u0446"],
-    deleteLastLine: ["\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u044E\u044E \u0441\u0442\u0440\u043E\u043A\u0443", "\u0443\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0435"],
-    undo: ["\u043E\u0442\u043C\u0435\u043D\u0438\u0442\u044C", "\u043E\u0442\u043C\u0435\u043D\u0430"],
-    stopRecording: ["\u043E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C", "\u0441\u0442\u043E\u043F \u0437\u0430\u043F\u0438\u0441\u044C"],
-    colon: ["\u0434\u0432\u043E\u0435\u0442\u043E\u0447\u0438\u0435"],
-    wikilink: ["\u0432\u0438\u043A\u0438 \u0441\u0441\u044B\u043B\u043A\u0430", "\u0432\u0438\u043A\u0438 \u043B\u0438\u043D\u043A"],
-    boldOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439", "\u0436\u0438\u0440\u043D\u044B\u0439 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
-    boldClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439", "\u0436\u0438\u0440\u043D\u044B\u0439 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
-    italicOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432", "\u043A\u0443\u0440\u0441\u0438\u0432 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
-    italicClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432", "\u043A\u0443\u0440\u0441\u0438\u0432 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
-    inlineCodeOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434", "\u043A\u043E\u0434 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
-    inlineCodeClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434", "\u043A\u043E\u0434 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
-    tagOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433", "\u0442\u0435\u0433 \u043E\u0442\u043A\u0440\u044B\u0442\u044C"],
-    tagClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433", "\u0442\u0435\u0433 \u0437\u0430\u043A\u0440\u044B\u0442\u044C"],
-    codeBlockOpen: ["\u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430"],
-    codeBlockClose: ["\u0437\u0430\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430"]
-  },
-  labels: {
-    newParagraph: "\u041D\u043E\u0432\u044B\u0439 \u0430\u0431\u0437\u0430\u0446",
-    newLine: "\u041D\u043E\u0432\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430",
-    heading1: "\u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 1",
-    heading2: "\u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 2",
-    heading3: "\u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A 3",
-    bulletPoint: "\u041D\u043E\u0432\u044B\u0439 \u043F\u0443\u043D\u043A\u0442",
-    todoItem: "\u041D\u043E\u0432\u0430\u044F \u0437\u0430\u0434\u0430\u0447\u0430",
-    numberedItem: "\u041D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442",
-    deleteLastParagraph: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0430\u0431\u0437\u0430\u0446",
-    deleteLastLine: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u044E\u044E \u0441\u0442\u0440\u043E\u043A\u0443",
-    undo: "\u041E\u0442\u043C\u0435\u043D\u0438\u0442\u044C",
-    stopRecording: "\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C",
-    colon: "\u0414\u0432\u043E\u0435\u0442\u043E\u0447\u0438\u0435",
-    wikilink: "\u0412\u0438\u043A\u0438-\u0441\u0441\u044B\u043B\u043A\u0430 [[\u2026]]",
-    boldOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439 **",
-    boldClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0436\u0438\u0440\u043D\u044B\u0439 **",
-    italicOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432 *",
-    italicClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u0443\u0440\u0441\u0438\u0432 *",
-    inlineCodeOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434 `",
-    inlineCodeClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u0434 `",
-    tagOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433 #",
-    tagClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u0433",
-    codeBlockOpen: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430 ```",
-    codeBlockClose: "\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u0431\u043B\u043E\u043A \u043A\u043E\u0434\u0430 ```"
-  },
-  mishearings: [],
-  phonetics: [],
-  articles: [],
-  fillers: []
-};
-
-// src/languages/zh.json
-var zh_default = {
-  code: "zh",
-  name: "\u4E2D\u6587",
-  patterns: {
-    newParagraph: ["\u65B0\u6BB5\u843D", "\u65B0\u7684\u6BB5\u843D"],
-    newLine: ["\u6362\u884C", "\u65B0\u884C", "\u4E0B\u4E00\u884C"],
-    heading1: ["\u6807\u9898\u4E00", "\u6807\u98981", "\u4E00\u7EA7\u6807\u9898"],
-    heading2: ["\u6807\u9898\u4E8C", "\u6807\u98982", "\u4E8C\u7EA7\u6807\u9898"],
-    heading3: ["\u6807\u9898\u4E09", "\u6807\u98983", "\u4E09\u7EA7\u6807\u9898"],
-    bulletPoint: ["\u65B0\u9879\u76EE", "\u5217\u8868\u9879", "\u65B0\u7684\u9879\u76EE"],
-    todoItem: ["\u65B0\u4EFB\u52A1", "\u65B0\u5F85\u529E", "\u5F85\u529E\u4E8B\u9879"],
-    numberedItem: ["\u7F16\u53F7\u9879", "\u65B0\u7F16\u53F7", "\u4E0B\u4E00\u4E2A\u7F16\u53F7"],
-    deleteLastParagraph: ["\u5220\u9664\u4E0A\u4E00\u6BB5", "\u5220\u9664\u6700\u540E\u4E00\u6BB5"],
-    deleteLastLine: ["\u5220\u9664\u4E0A\u4E00\u884C", "\u5220\u9664\u4E0A\u4E00\u53E5"],
-    undo: ["\u64A4\u9500", "\u64A4\u56DE"],
-    stopRecording: ["\u505C\u6B62\u5F55\u97F3", "\u7ED3\u675F\u5F55\u97F3"],
-    colon: ["\u5192\u53F7"],
-    wikilink: ["\u7EF4\u57FA\u94FE\u63A5", "\u94FE\u63A5"],
-    boldOpen: ["\u5F00\u59CB\u52A0\u7C97", "\u52A0\u7C97\u5F00\u59CB", "\u6253\u5F00\u7C97\u4F53"],
-    boldClose: ["\u7ED3\u675F\u52A0\u7C97", "\u52A0\u7C97\u7ED3\u675F", "\u5173\u95ED\u7C97\u4F53"],
-    italicOpen: ["\u5F00\u59CB\u659C\u4F53", "\u659C\u4F53\u5F00\u59CB", "\u6253\u5F00\u659C\u4F53"],
-    italicClose: ["\u7ED3\u675F\u659C\u4F53", "\u659C\u4F53\u7ED3\u675F", "\u5173\u95ED\u659C\u4F53"],
-    inlineCodeOpen: ["\u5F00\u59CB\u4EE3\u7801", "\u4EE3\u7801\u5F00\u59CB", "\u6253\u5F00\u4EE3\u7801"],
-    inlineCodeClose: ["\u7ED3\u675F\u4EE3\u7801", "\u4EE3\u7801\u7ED3\u675F", "\u5173\u95ED\u4EE3\u7801"],
-    tagOpen: ["\u5F00\u59CB\u6807\u7B7E", "\u6253\u5F00\u6807\u7B7E"],
-    tagClose: ["\u7ED3\u675F\u6807\u7B7E", "\u5173\u95ED\u6807\u7B7E"],
-    codeBlockOpen: ["\u5F00\u59CB\u4EE3\u7801\u5757", "\u6253\u5F00\u4EE3\u7801\u5757"],
-    codeBlockClose: ["\u7ED3\u675F\u4EE3\u7801\u5757", "\u5173\u95ED\u4EE3\u7801\u5757"]
-  },
-  labels: {
-    newParagraph: "\u65B0\u6BB5\u843D",
-    newLine: "\u6362\u884C",
-    heading1: "\u6807\u9898 1",
-    heading2: "\u6807\u9898 2",
-    heading3: "\u6807\u9898 3",
-    bulletPoint: "\u5217\u8868\u9879",
-    todoItem: "\u5F85\u529E\u4E8B\u9879",
-    numberedItem: "\u7F16\u53F7\u9879",
-    deleteLastParagraph: "\u5220\u9664\u4E0A\u4E00\u6BB5",
-    deleteLastLine: "\u5220\u9664\u4E0A\u4E00\u884C",
-    undo: "\u64A4\u9500",
-    stopRecording: "\u505C\u6B62\u5F55\u97F3",
-    colon: "\u5192\u53F7",
-    wikilink: "\u7EF4\u57FA\u94FE\u63A5 [[\u2026]]",
-    boldOpen: "\u5F00\u59CB\u52A0\u7C97 **",
-    boldClose: "\u7ED3\u675F\u52A0\u7C97 **",
-    italicOpen: "\u5F00\u59CB\u659C\u4F53 *",
-    italicClose: "\u7ED3\u675F\u659C\u4F53 *",
-    inlineCodeOpen: "\u5F00\u59CB\u4EE3\u7801 `",
-    inlineCodeClose: "\u7ED3\u675F\u4EE3\u7801 `",
-    tagOpen: "\u5F00\u59CB\u6807\u7B7E #",
-    tagClose: "\u7ED3\u675F\u6807\u7B7E",
-    codeBlockOpen: "\u5F00\u59CB\u4EE3\u7801\u5757 ```",
-    codeBlockClose: "\u7ED3\u675F\u4EE3\u7801\u5757 ```"
-  },
-  mishearings: [],
-  phonetics: [],
-  articles: [],
-  fillers: []
-};
-
-// src/languages/hi.json
-var hi_default = {
-  code: "hi",
-  name: "\u0939\u093F\u0928\u094D\u0926\u0940",
-  patterns: {
-    newParagraph: ["\u0928\u092F\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B", "\u0928\u092F\u093E \u0905\u0928\u0941\u091A\u094D\u091B\u0947\u0926"],
-    newLine: ["\u0928\u0908 \u0932\u093E\u0907\u0928", "\u0905\u0917\u0932\u0940 \u0932\u093E\u0907\u0928"],
-    heading1: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u090F\u0915", "\u0936\u0940\u0930\u094D\u0937\u0915 1", "\u0939\u0947\u0921\u093F\u0902\u0917 1"],
-    heading2: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u0926\u094B", "\u0936\u0940\u0930\u094D\u0937\u0915 2", "\u0939\u0947\u0921\u093F\u0902\u0917 2"],
-    heading3: ["\u0936\u0940\u0930\u094D\u0937\u0915 \u0924\u0940\u0928", "\u0936\u0940\u0930\u094D\u0937\u0915 3", "\u0939\u0947\u0921\u093F\u0902\u0917 3"],
-    bulletPoint: ["\u0928\u092F\u093E \u092C\u093F\u0902\u0926\u0941", "\u0928\u092F\u093E \u092A\u0949\u0907\u0902\u091F", "\u0905\u0917\u0932\u093E \u092A\u0949\u0907\u0902\u091F"],
-    todoItem: ["\u0928\u092F\u093E \u0915\u093E\u0930\u094D\u092F", "\u0928\u092F\u093E \u091F\u0942\u0921\u0942"],
-    numberedItem: ["\u0915\u094D\u0930\u092E\u093E\u0902\u0915\u093F\u0924 \u092C\u093F\u0902\u0926\u0941", "\u0905\u0917\u0932\u093E \u0928\u0902\u092C\u0930"],
-    deleteLastParagraph: ["\u092A\u093F\u091B\u0932\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B \u0939\u091F\u093E\u0913"],
-    deleteLastLine: ["\u092A\u093F\u091B\u0932\u0940 \u0932\u093E\u0907\u0928 \u0939\u091F\u093E\u0913", "\u0905\u0902\u0924\u093F\u092E \u0932\u093E\u0907\u0928 \u0939\u091F\u093E\u0913"],
-    undo: ["\u092A\u0942\u0930\u094D\u0935\u0935\u0924", "\u0905\u0928\u0921\u0942"],
-    stopRecording: ["\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B", "\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u0930\u094B\u0915\u094B"],
-    colon: ["\u0915\u094B\u0932\u0928"],
-    wikilink: ["\u0935\u093F\u0915\u093F \u0932\u093F\u0902\u0915", "\u0932\u093F\u0902\u0915"],
-    boldOpen: ["\u092C\u094B\u0932\u094D\u0921 \u0916\u094B\u0932\u094B", "\u092E\u094B\u091F\u093E \u0916\u094B\u0932\u094B"],
-    boldClose: ["\u092C\u094B\u0932\u094D\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B", "\u092E\u094B\u091F\u093E \u092C\u0902\u0926 \u0915\u0930\u094B"],
-    italicOpen: ["\u0907\u091F\u0948\u0932\u093F\u0915 \u0916\u094B\u0932\u094B", "\u0924\u093F\u0930\u091B\u093E \u0916\u094B\u0932\u094B"],
-    italicClose: ["\u0907\u091F\u0948\u0932\u093F\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B", "\u0924\u093F\u0930\u091B\u093E \u092C\u0902\u0926 \u0915\u0930\u094B"],
-    inlineCodeOpen: ["\u0915\u094B\u0921 \u0916\u094B\u0932\u094B"],
-    inlineCodeClose: ["\u0915\u094B\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B"],
-    tagOpen: ["\u091F\u0948\u0917 \u0916\u094B\u0932\u094B"],
-    tagClose: ["\u091F\u0948\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B"],
-    codeBlockOpen: ["\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u0916\u094B\u0932\u094B"],
-    codeBlockClose: ["\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B"]
-  },
-  labels: {
-    newParagraph: "\u0928\u092F\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B",
-    newLine: "\u0928\u0908 \u0932\u093E\u0907\u0928",
-    heading1: "\u0936\u0940\u0930\u094D\u0937\u0915 1",
-    heading2: "\u0936\u0940\u0930\u094D\u0937\u0915 2",
-    heading3: "\u0936\u0940\u0930\u094D\u0937\u0915 3",
-    bulletPoint: "\u0928\u092F\u093E \u092C\u093F\u0902\u0926\u0941",
-    todoItem: "\u0928\u092F\u093E \u0915\u093E\u0930\u094D\u092F",
-    numberedItem: "\u0915\u094D\u0930\u092E\u093E\u0902\u0915\u093F\u0924 \u092C\u093F\u0902\u0926\u0941",
-    deleteLastParagraph: "\u092A\u093F\u091B\u0932\u093E \u092A\u0948\u0930\u093E\u0917\u094D\u0930\u093E\u092B \u0939\u091F\u093E\u0913",
-    deleteLastLine: "\u092A\u093F\u091B\u0932\u0940 \u0932\u093E\u0907\u0928 \u0939\u091F\u093E\u0913",
-    undo: "\u092A\u0942\u0930\u094D\u0935\u0935\u0924",
-    stopRecording: "\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B",
-    colon: "\u0915\u094B\u0932\u0928",
-    wikilink: "\u0935\u093F\u0915\u093F \u0932\u093F\u0902\u0915 [[\u2026]]",
-    boldOpen: "\u092C\u094B\u0932\u094D\u0921 \u0916\u094B\u0932\u094B **",
-    boldClose: "\u092C\u094B\u0932\u094D\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B **",
-    italicOpen: "\u0907\u091F\u0948\u0932\u093F\u0915 \u0916\u094B\u0932\u094B *",
-    italicClose: "\u0907\u091F\u0948\u0932\u093F\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B *",
-    inlineCodeOpen: "\u0915\u094B\u0921 \u0916\u094B\u0932\u094B `",
-    inlineCodeClose: "\u0915\u094B\u0921 \u092C\u0902\u0926 \u0915\u0930\u094B `",
-    tagOpen: "\u091F\u0948\u0917 \u0916\u094B\u0932\u094B #",
-    tagClose: "\u091F\u0948\u0917 \u092C\u0902\u0926 \u0915\u0930\u094B",
-    codeBlockOpen: "\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u0916\u094B\u0932\u094B ```",
-    codeBlockClose: "\u0915\u094B\u0921 \u092C\u094D\u0932\u0949\u0915 \u092C\u0902\u0926 \u0915\u0930\u094B ```"
-  },
-  mishearings: [],
-  phonetics: [],
-  articles: [],
-  fillers: []
-};
-
-// src/languages/ar.json
-var ar_default = {
-  code: "ar",
-  name: "\u0627\u0644\u0639\u0631\u0628\u064A\u0629",
-  patterns: {
-    newParagraph: ["\u0641\u0642\u0631\u0629 \u062C\u062F\u064A\u062F\u0629"],
-    newLine: ["\u0633\u0637\u0631 \u062C\u062F\u064A\u062F", "\u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u062A\u0627\u0644\u064A"],
-    heading1: ["\u0639\u0646\u0648\u0627\u0646 \u0648\u0627\u062D\u062F", "\u0639\u0646\u0648\u0627\u0646 1"],
-    heading2: ["\u0639\u0646\u0648\u0627\u0646 \u0627\u062B\u0646\u064A\u0646", "\u0639\u0646\u0648\u0627\u0646 2"],
-    heading3: ["\u0639\u0646\u0648\u0627\u0646 \u062B\u0644\u0627\u062B\u0629", "\u0639\u0646\u0648\u0627\u0646 3"],
-    bulletPoint: ["\u0646\u0642\u0637\u0629 \u062C\u062F\u064A\u062F\u0629", "\u0639\u0646\u0635\u0631 \u062C\u062F\u064A\u062F"],
-    todoItem: ["\u0645\u0647\u0645\u0629 \u062C\u062F\u064A\u062F\u0629"],
-    numberedItem: ["\u0639\u0646\u0635\u0631 \u0645\u0631\u0642\u0645", "\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u062A\u0627\u0644\u064A"],
-    deleteLastParagraph: ["\u0627\u062D\u0630\u0641 \u0627\u0644\u0641\u0642\u0631\u0629 \u0627\u0644\u0623\u062E\u064A\u0631\u0629"],
-    deleteLastLine: ["\u0627\u062D\u0630\u0641 \u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u0623\u062E\u064A\u0631", "\u0627\u062D\u0630\u0641 \u0627\u0644\u062C\u0645\u0644\u0629 \u0627\u0644\u0623\u062E\u064A\u0631\u0629"],
-    undo: ["\u062A\u0631\u0627\u062C\u0639"],
-    stopRecording: ["\u0623\u0648\u0642\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644", "\u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644"],
-    colon: ["\u0646\u0642\u0637\u062A\u0627\u0646"],
-    wikilink: ["\u0631\u0627\u0628\u0637 \u0648\u064A\u0643\u064A", "\u0631\u0627\u0628\u0637"],
-    boldOpen: ["\u0627\u0641\u062A\u062D \u063A\u0627\u0645\u0642", "\u063A\u0627\u0645\u0642 \u0627\u0641\u062A\u062D"],
-    boldClose: ["\u0623\u063A\u0644\u0642 \u063A\u0627\u0645\u0642", "\u063A\u0627\u0645\u0642 \u0623\u063A\u0644\u0642"],
-    italicOpen: ["\u0627\u0641\u062A\u062D \u0645\u0627\u0626\u0644", "\u0645\u0627\u0626\u0644 \u0627\u0641\u062A\u062D"],
-    italicClose: ["\u0623\u063A\u0644\u0642 \u0645\u0627\u0626\u0644", "\u0645\u0627\u0626\u0644 \u0623\u063A\u0644\u0642"],
-    inlineCodeOpen: ["\u0627\u0641\u062A\u062D \u0643\u0648\u062F", "\u0643\u0648\u062F \u0627\u0641\u062A\u062D"],
-    inlineCodeClose: ["\u0623\u063A\u0644\u0642 \u0643\u0648\u062F", "\u0643\u0648\u062F \u0623\u063A\u0644\u0642"],
-    tagOpen: ["\u0627\u0641\u062A\u062D \u0648\u0633\u0645", "\u0648\u0633\u0645 \u0627\u0641\u062A\u062D"],
-    tagClose: ["\u0623\u063A\u0644\u0642 \u0648\u0633\u0645", "\u0648\u0633\u0645 \u0623\u063A\u0644\u0642"],
-    codeBlockOpen: ["\u0627\u0641\u062A\u062D \u0643\u062A\u0644\u0629 \u0643\u0648\u062F"],
-    codeBlockClose: ["\u0623\u063A\u0644\u0642 \u0643\u062A\u0644\u0629 \u0643\u0648\u062F"]
-  },
-  labels: {
-    newParagraph: "\u0641\u0642\u0631\u0629 \u062C\u062F\u064A\u062F\u0629",
-    newLine: "\u0633\u0637\u0631 \u062C\u062F\u064A\u062F",
-    heading1: "\u0639\u0646\u0648\u0627\u0646 1",
-    heading2: "\u0639\u0646\u0648\u0627\u0646 2",
-    heading3: "\u0639\u0646\u0648\u0627\u0646 3",
-    bulletPoint: "\u0646\u0642\u0637\u0629 \u062C\u062F\u064A\u062F\u0629",
-    todoItem: "\u0645\u0647\u0645\u0629 \u062C\u062F\u064A\u062F\u0629",
-    numberedItem: "\u0639\u0646\u0635\u0631 \u0645\u0631\u0642\u0645",
-    deleteLastParagraph: "\u0627\u062D\u0630\u0641 \u0627\u0644\u0641\u0642\u0631\u0629 \u0627\u0644\u0623\u062E\u064A\u0631\u0629",
-    deleteLastLine: "\u0627\u062D\u0630\u0641 \u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u0623\u062E\u064A\u0631",
-    undo: "\u062A\u0631\u0627\u062C\u0639",
-    stopRecording: "\u0623\u0648\u0642\u0641 \u0627\u0644\u062A\u0633\u062C\u064A\u0644",
-    colon: "\u0646\u0642\u0637\u062A\u0627\u0646",
-    wikilink: "[[\u2026]] \u0631\u0627\u0628\u0637 \u0648\u064A\u0643\u064A",
-    boldOpen: "** \u0627\u0641\u062A\u062D \u063A\u0627\u0645\u0642",
-    boldClose: "** \u0623\u063A\u0644\u0642 \u063A\u0627\u0645\u0642",
-    italicOpen: "* \u0627\u0641\u062A\u062D \u0645\u0627\u0626\u0644",
-    italicClose: "* \u0623\u063A\u0644\u0642 \u0645\u0627\u0626\u0644",
-    inlineCodeOpen: "` \u0627\u0641\u062A\u062D \u0643\u0648\u062F",
-    inlineCodeClose: "` \u0623\u063A\u0644\u0642 \u0643\u0648\u062F",
-    tagOpen: "# \u0627\u0641\u062A\u062D \u0648\u0633\u0645",
-    tagClose: "\u0623\u063A\u0644\u0642 \u0648\u0633\u0645",
-    codeBlockOpen: "``` \u0627\u0641\u062A\u062D \u0643\u062A\u0644\u0629 \u0643\u0648\u062F",
-    codeBlockClose: "``` \u0623\u063A\u0644\u0642 \u0643\u062A\u0644\u0629 \u0643\u0648\u062F"
-  },
-  mishearings: [],
-  phonetics: [],
-  articles: ["\u0627\u0644"],
-  fillers: []
-};
-
-// src/languages/ja.json
-var ja_default = {
-  code: "ja",
-  name: "\u65E5\u672C\u8A9E",
-  patterns: {
-    newParagraph: ["\u65B0\u3057\u3044\u6BB5\u843D", "\u65B0\u6BB5\u843D"],
-    newLine: ["\u6539\u884C", "\u65B0\u3057\u3044\u884C", "\u6B21\u306E\u884C"],
-    heading1: ["\u898B\u51FA\u30571", "\u898B\u51FA\u3057\u3044\u3061"],
-    heading2: ["\u898B\u51FA\u30572", "\u898B\u51FA\u3057\u306B"],
-    heading3: ["\u898B\u51FA\u30573", "\u898B\u51FA\u3057\u3055\u3093"],
-    bulletPoint: ["\u7B87\u6761\u66F8\u304D", "\u65B0\u3057\u3044\u9805\u76EE", "\u6B21\u306E\u9805\u76EE"],
-    todoItem: ["\u65B0\u3057\u3044\u30BF\u30B9\u30AF", "\u30BF\u30B9\u30AF\u8FFD\u52A0"],
-    numberedItem: ["\u756A\u53F7\u4ED8\u304D", "\u6B21\u306E\u756A\u53F7"],
-    deleteLastParagraph: ["\u6700\u5F8C\u306E\u6BB5\u843D\u3092\u524A\u9664"],
-    deleteLastLine: ["\u6700\u5F8C\u306E\u884C\u3092\u524A\u9664", "\u6700\u5F8C\u306E\u6587\u3092\u524A\u9664"],
-    undo: ["\u5143\u306B\u623B\u3059", "\u53D6\u308A\u6D88\u3057"],
-    stopRecording: ["\u9332\u97F3\u505C\u6B62", "\u9332\u97F3\u3092\u6B62\u3081\u3066"],
-    colon: ["\u30B3\u30ED\u30F3"],
-    wikilink: ["\u30A6\u30A3\u30AD\u30EA\u30F3\u30AF", "\u30EA\u30F3\u30AF"],
-    boldOpen: ["\u592A\u5B57\u958B\u59CB", "\u30DC\u30FC\u30EB\u30C9\u958B\u59CB", "\u592A\u5B57\u958B\u304F"],
-    boldClose: ["\u592A\u5B57\u7D42\u4E86", "\u30DC\u30FC\u30EB\u30C9\u7D42\u4E86", "\u592A\u5B57\u9589\u3058\u308B"],
-    italicOpen: ["\u659C\u4F53\u958B\u59CB", "\u30A4\u30BF\u30EA\u30C3\u30AF\u958B\u59CB", "\u659C\u4F53\u958B\u304F"],
-    italicClose: ["\u659C\u4F53\u7D42\u4E86", "\u30A4\u30BF\u30EA\u30C3\u30AF\u7D42\u4E86", "\u659C\u4F53\u9589\u3058\u308B"],
-    inlineCodeOpen: ["\u30B3\u30FC\u30C9\u958B\u59CB", "\u30B3\u30FC\u30C9\u958B\u304F"],
-    inlineCodeClose: ["\u30B3\u30FC\u30C9\u7D42\u4E86", "\u30B3\u30FC\u30C9\u9589\u3058\u308B"],
-    tagOpen: ["\u30BF\u30B0\u958B\u59CB", "\u30BF\u30B0\u958B\u304F"],
-    tagClose: ["\u30BF\u30B0\u7D42\u4E86", "\u30BF\u30B0\u9589\u3058\u308B"],
-    codeBlockOpen: ["\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u958B\u59CB", "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u958B\u304F"],
-    codeBlockClose: ["\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u7D42\u4E86", "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u9589\u3058\u308B"]
-  },
-  labels: {
-    newParagraph: "\u65B0\u3057\u3044\u6BB5\u843D",
-    newLine: "\u6539\u884C",
-    heading1: "\u898B\u51FA\u3057 1",
-    heading2: "\u898B\u51FA\u3057 2",
-    heading3: "\u898B\u51FA\u3057 3",
-    bulletPoint: "\u7B87\u6761\u66F8\u304D",
-    todoItem: "\u65B0\u3057\u3044\u30BF\u30B9\u30AF",
-    numberedItem: "\u756A\u53F7\u4ED8\u304D",
-    deleteLastParagraph: "\u6700\u5F8C\u306E\u6BB5\u843D\u3092\u524A\u9664",
-    deleteLastLine: "\u6700\u5F8C\u306E\u884C\u3092\u524A\u9664",
-    undo: "\u5143\u306B\u623B\u3059",
-    stopRecording: "\u9332\u97F3\u505C\u6B62",
-    colon: "\u30B3\u30ED\u30F3",
-    wikilink: "\u30A6\u30A3\u30AD\u30EA\u30F3\u30AF [[\u2026]]",
-    boldOpen: "\u592A\u5B57\u958B\u59CB **",
-    boldClose: "\u592A\u5B57\u7D42\u4E86 **",
-    italicOpen: "\u659C\u4F53\u958B\u59CB *",
-    italicClose: "\u659C\u4F53\u7D42\u4E86 *",
-    inlineCodeOpen: "\u30B3\u30FC\u30C9\u958B\u59CB `",
-    inlineCodeClose: "\u30B3\u30FC\u30C9\u7D42\u4E86 `",
-    tagOpen: "\u30BF\u30B0\u958B\u59CB #",
-    tagClose: "\u30BF\u30B0\u7D42\u4E86",
-    codeBlockOpen: "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u958B\u59CB ```",
-    codeBlockClose: "\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u7D42\u4E86 ```"
-  },
-  mishearings: [],
-  phonetics: [],
-  articles: [],
-  fillers: []
-};
-
-// src/languages/ko.json
-var ko_default = {
-  code: "ko",
-  name: "\uD55C\uAD6D\uC5B4",
-  patterns: {
-    newParagraph: ["\uC0C8 \uB2E8\uB77D", "\uC0C8 \uBB38\uB2E8"],
-    newLine: ["\uC0C8 \uC904", "\uB2E4\uC74C \uC904", "\uC904 \uBC14\uAFC8"],
-    heading1: ["\uC81C\uBAA9 1", "\uC81C\uBAA9 \uD558\uB098"],
-    heading2: ["\uC81C\uBAA9 2", "\uC81C\uBAA9 \uB458"],
-    heading3: ["\uC81C\uBAA9 3", "\uC81C\uBAA9 \uC14B"],
-    bulletPoint: ["\uC0C8 \uD56D\uBAA9", "\uB2E4\uC74C \uD56D\uBAA9", "\uAE00\uBA38\uB9AC \uAE30\uD638"],
-    todoItem: ["\uC0C8 \uD560\uC77C", "\uD560\uC77C \uCD94\uAC00"],
-    numberedItem: ["\uBC88\uD638 \uD56D\uBAA9", "\uB2E4\uC74C \uBC88\uD638"],
-    deleteLastParagraph: ["\uB9C8\uC9C0\uB9C9 \uB2E8\uB77D \uC0AD\uC81C"],
-    deleteLastLine: ["\uB9C8\uC9C0\uB9C9 \uC904 \uC0AD\uC81C", "\uB9C8\uC9C0\uB9C9 \uBB38\uC7A5 \uC0AD\uC81C"],
-    undo: ["\uC2E4\uD589 \uCDE8\uC18C", "\uB418\uB3CC\uB9AC\uAE30"],
-    stopRecording: ["\uB179\uC74C \uC911\uC9C0", "\uB179\uC74C \uBA48\uCDB0"],
-    colon: ["\uCF5C\uB860"],
-    wikilink: ["\uC704\uD0A4\uB9C1\uD06C", "\uB9C1\uD06C"],
-    boldOpen: ["\uAD75\uAC8C \uC5F4\uAE30", "\uBCFC\uB4DC \uC5F4\uAE30"],
-    boldClose: ["\uAD75\uAC8C \uB2EB\uAE30", "\uBCFC\uB4DC \uB2EB\uAE30"],
-    italicOpen: ["\uAE30\uC6B8\uC784 \uC5F4\uAE30", "\uC774\uD0E4\uB9AD \uC5F4\uAE30"],
-    italicClose: ["\uAE30\uC6B8\uC784 \uB2EB\uAE30", "\uC774\uD0E4\uB9AD \uB2EB\uAE30"],
-    inlineCodeOpen: ["\uCF54\uB4DC \uC5F4\uAE30"],
-    inlineCodeClose: ["\uCF54\uB4DC \uB2EB\uAE30"],
-    tagOpen: ["\uD0DC\uADF8 \uC5F4\uAE30"],
-    tagClose: ["\uD0DC\uADF8 \uB2EB\uAE30"],
-    codeBlockOpen: ["\uCF54\uB4DC\uBE14\uB85D \uC5F4\uAE30", "\uCF54\uB4DC \uBE14\uB85D \uC5F4\uAE30"],
-    codeBlockClose: ["\uCF54\uB4DC\uBE14\uB85D \uB2EB\uAE30", "\uCF54\uB4DC \uBE14\uB85D \uB2EB\uAE30"]
-  },
-  labels: {
-    newParagraph: "\uC0C8 \uB2E8\uB77D",
-    newLine: "\uC0C8 \uC904",
-    heading1: "\uC81C\uBAA9 1",
-    heading2: "\uC81C\uBAA9 2",
-    heading3: "\uC81C\uBAA9 3",
-    bulletPoint: "\uC0C8 \uD56D\uBAA9",
-    todoItem: "\uC0C8 \uD560\uC77C",
-    numberedItem: "\uBC88\uD638 \uD56D\uBAA9",
-    deleteLastParagraph: "\uB9C8\uC9C0\uB9C9 \uB2E8\uB77D \uC0AD\uC81C",
-    deleteLastLine: "\uB9C8\uC9C0\uB9C9 \uC904 \uC0AD\uC81C",
-    undo: "\uC2E4\uD589 \uCDE8\uC18C",
-    stopRecording: "\uB179\uC74C \uC911\uC9C0",
-    colon: "\uCF5C\uB860",
-    wikilink: "\uC704\uD0A4\uB9C1\uD06C [[\u2026]]",
-    boldOpen: "\uAD75\uAC8C \uC5F4\uAE30 **",
-    boldClose: "\uAD75\uAC8C \uB2EB\uAE30 **",
-    italicOpen: "\uAE30\uC6B8\uC784 \uC5F4\uAE30 *",
-    italicClose: "\uAE30\uC6B8\uC784 \uB2EB\uAE30 *",
-    inlineCodeOpen: "\uCF54\uB4DC \uC5F4\uAE30 `",
-    inlineCodeClose: "\uCF54\uB4DC \uB2EB\uAE30 `",
-    tagOpen: "\uD0DC\uADF8 \uC5F4\uAE30 #",
-    tagClose: "\uD0DC\uADF8 \uB2EB\uAE30",
-    codeBlockOpen: "\uCF54\uB4DC\uBE14\uB85D \uC5F4\uAE30 ```",
-    codeBlockClose: "\uCF54\uB4DC\uBE14\uB85D \uB2EB\uAE30 ```"
-  },
-  mishearings: [],
-  phonetics: [],
-  articles: [],
-  fillers: []
-};
-
-// src/lang.ts
-var ALL_LANGS = {
-  nl: nl_default,
-  en: en_default,
-  fr: fr_default,
-  de: de_default,
-  es: es_default,
-  pt: pt_default,
-  it: it_default,
-  ru: ru_default,
-  zh: zh_default,
-  hi: hi_default,
-  ar: ar_default,
-  ja: ja_default,
-  ko: ko_default
-};
-var SUPPORTED_LANGUAGES = [
-  "nl",
-  "en",
-  "fr",
-  "de",
-  "es",
-  "pt",
-  "it",
-  "ru",
-  "zh",
-  "hi",
-  "ar",
-  "ja",
-  "ko"
-];
-var LANGUAGE_NAMES = Object.fromEntries(
-  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].name])
-);
-var PATTERNS = Object.fromEntries(
-  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].patterns])
-);
-var LABELS = Object.fromEntries(
-  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].labels])
-);
-function compileMishearings(data) {
-  return data.map(({ pattern, flags, replacement }) => [
-    new RegExp(pattern, flags),
-    replacement
-  ]);
-}
-var MISHEARINGS = Object.fromEntries(
-  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS[code].mishearings.length > 0).map((code) => [code, compileMishearings(ALL_LANGS[code].mishearings)])
-);
-function getPatternsForCommand(commandId, lang) {
-  var _a, _b, _c, _d;
-  const langPatterns = (_b = (_a = PATTERNS[lang]) == null ? void 0 : _a[commandId]) != null ? _b : [];
-  const enPatterns = lang === "en" ? [] : (_d = (_c = PATTERNS.en) == null ? void 0 : _c[commandId]) != null ? _d : [];
-  const seen = /* @__PURE__ */ new Set();
-  const result = [];
-  for (const p of [...langPatterns, ...enPatterns]) {
-    if (!seen.has(p)) {
-      seen.add(p);
-      result.push(p);
-    }
-  }
-  return result;
-}
-function getLabel(commandId, lang) {
-  var _a, _b, _c, _d;
-  return (_d = (_c = (_a = LABELS[lang]) == null ? void 0 : _a[commandId]) != null ? _c : (_b = LABELS.en) == null ? void 0 : _b[commandId]) != null ? _d : commandId;
-}
-function getMishearings(lang) {
-  var _a;
-  return (_a = MISHEARINGS[lang]) != null ? _a : [];
-}
-
 // src/settings-tab.ts
-var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
+var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.cachedModels = null;
@@ -2073,7 +2191,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     ;
-    new import_obsidian2.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai. Stored in Obsidian\u2019s plugin data folder (data.json), unencrypted. Do not share your data.json file.").addText(
+    new import_obsidian.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai. Stored in Obsidian\u2019s plugin data folder (data.json), unencrypted. Do not share your data.json file.").addText(
       (text) => text.setPlaceholder("Enter your API key").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value.trim();
         await this.plugin.saveSettings();
@@ -2082,7 +2200,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       const input = setting.controlEl.querySelector("input");
       if (input) input.type = "password";
     });
-    const micSetting = new import_obsidian2.Setting(containerEl).setName("Microphone").setDesc("Select which microphone to use");
+    const micSetting = new import_obsidian.Setting(containerEl).setName("Microphone").setDesc("Select which microphone to use");
     micSetting.addDropdown((drop) => {
       drop.addOption("", "System default");
       drop.setValue(this.plugin.settings.microphoneDeviceId);
@@ -2099,9 +2217,9 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    const modeDesc = import_obsidian2.Platform.isMobile ? "Only batch mode is available on mobile. Use tap-to-send to submit chunks while you keep talking." : "Realtime: text appears as you speak. Batch: audio is transcribed after you stop recording.";
-    const modeSetting = new import_obsidian2.Setting(containerEl).setName("Mode").setDesc(modeDesc);
-    if (import_obsidian2.Platform.isMobile) {
+    const modeDesc = import_obsidian.Platform.isMobile ? "Only batch mode is available on mobile. Use tap-to-send to submit chunks while you keep talking." : "Realtime: text appears as you speak. Batch: audio is transcribed after you stop recording.";
+    const modeSetting = new import_obsidian.Setting(containerEl).setName("Mode").setDesc(modeDesc);
+    if (import_obsidian.Platform.isMobile) {
       modeSetting.addDropdown(
         (drop) => drop.addOption("batch", "Batch (after recording)").setValue("batch").setDisabled(true)
       );
@@ -2114,8 +2232,8 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         })
       );
     }
-    const isBatch = this.plugin.settings.mode === "batch" || import_obsidian2.Platform.isMobile;
-    new import_obsidian2.Setting(containerEl).setName("Enter = tap-to-send").setDesc(
+    const isBatch = this.plugin.settings.mode === "batch" || import_obsidian.Platform.isMobile;
+    new import_obsidian.Setting(containerEl).setName("Enter = tap-to-send").setDesc(
       isBatch ? "In batch mode, pressing Enter sends the current audio chunk when the mic is live. While typing, Enter inserts a normal newline." : "Only available in batch mode. Switch to batch mode to change this setting."
     ).addToggle(
       (toggle) => toggle.setValue(isBatch ? this.plugin.settings.enterToSend : false).setDisabled(!isBatch).onChange(async (value) => {
@@ -2123,7 +2241,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian2.Setting(containerEl).setName("Typing cooldown").setDesc(
+    new import_obsidian.Setting(containerEl).setName("Typing cooldown").setDesc(
       "How long after you stop typing before the mic unmutes again"
     ).addDropdown((drop) => {
       const options = {
@@ -2144,7 +2262,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian2.Setting(containerEl).setName("On focus loss").setDesc(
+    new import_obsidian.Setting(containerEl).setName("On focus loss").setDesc(
       "What should happen when you switch apps while recording?"
     ).addDropdown((drop) => {
       drop.addOption("pause", "Pause immediately");
@@ -2162,7 +2280,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       );
     });
     if (this.plugin.settings.focusBehavior === "pause-after-delay") {
-      new import_obsidian2.Setting(containerEl).setName("Pause delay (seconds)").setDesc(
+      new import_obsidian.Setting(containerEl).setName("Pause delay (seconds)").setDesc(
         "How long to wait in the background before pausing the recording"
       ).addDropdown((drop) => {
         const options = {
@@ -2183,7 +2301,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         });
       });
     }
-    new import_obsidian2.Setting(containerEl).setName("Language").setDesc("Language for transcription and voice commands").addDropdown((dropdown) => {
+    new import_obsidian.Setting(containerEl).setName("Language").setDesc("Language for transcription and voice commands").addDropdown((dropdown) => {
       for (const code of SUPPORTED_LANGUAGES) {
         dropdown.addOption(code, `${LANGUAGE_NAMES[code]} (${code})`);
       }
@@ -2193,7 +2311,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian2.Setting(containerEl).setName("Auto-correct").setDesc(
+    new import_obsidian.Setting(containerEl).setName("Auto-correct").setDesc(
       "Automatically correct spelling, capitalization, and punctuation after recording"
     ).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.autoCorrect).onChange(async (value) => {
@@ -2201,7 +2319,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian2.Setting(containerEl).setName("Noise suppression").setDesc(
+    new import_obsidian.Setting(containerEl).setName("Noise suppression").setDesc(
       "Enable browser-level noise suppression, echo cancellation, and auto gain control. Useful in noisy environments."
     ).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.noiseSuppression).onChange(async (value) => {
@@ -2209,9 +2327,9 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    const isRealtime = !isBatch && !import_obsidian2.Platform.isMobile;
-    new import_obsidian2.Setting(containerEl).setName("Dual-delay mode (experimental)").setDesc(
-      import_obsidian2.Platform.isMobile ? "Not available on mobile (requires realtime streaming)." : !isRealtime ? "Only available in realtime mode." : "Experimental: run two parallel streams (fast preview + slow accuracy). Uses 2x API bandwidth and may produce unexpected results. Overrides the streaming delay setting."
+    const isRealtime = !isBatch && !import_obsidian.Platform.isMobile;
+    new import_obsidian.Setting(containerEl).setName("Dual-delay mode (experimental)").setDesc(
+      import_obsidian.Platform.isMobile ? "Not available on mobile (requires realtime streaming)." : !isRealtime ? "Only available in realtime mode." : "Experimental: run two parallel streams (fast preview + slow accuracy). Uses 2x API bandwidth and may produce unexpected results. Overrides the streaming delay setting."
     ).addToggle((toggle) => {
       toggle.setValue(this.plugin.settings.dualDelay).setDisabled(!isRealtime).onChange(async (value) => {
         this.plugin.settings.dualDelay = value;
@@ -2220,7 +2338,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       });
     });
     if (isRealtime && !this.plugin.settings.dualDelay) {
-      new import_obsidian2.Setting(containerEl).setName("Streaming delay").setDesc(
+      new import_obsidian.Setting(containerEl).setName("Streaming delay").setDesc(
         "Delay in ms for realtime mode. Lower = faster but less accurate."
       ).addDropdown((drop) => {
         const options = {
@@ -2243,8 +2361,8 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         });
       });
     }
-    new import_obsidian2.Setting(containerEl).setName("Keyboard shortcuts").setHeading();
-    new import_obsidian2.Setting(containerEl).setName("Customize hotkeys").setDesc(
+    new import_obsidian.Setting(containerEl).setName("Keyboard shortcuts").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Customize hotkeys").setDesc(
       `You can assign keyboard shortcuts to all Voxtral commands (start/stop recording, correct selection, correct note, etc.) via Obsidian's Settings \u2192 Hotkeys. Search for "Voxtral".`
     ).addButton(
       (btn) => btn.setButtonText("Open hotkeys").onClick(() => {
@@ -2258,14 +2376,14 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       })
     );
-    new import_obsidian2.Setting(containerEl).setName("Support this project").setHeading();
-    new import_obsidian2.Setting(containerEl).setName("Buy me a coffee").setDesc("Find this plugin useful? Consider a donation!").addButton(
+    new import_obsidian.Setting(containerEl).setName("Support this project").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Buy me a coffee").setDesc("Find this plugin useful? Consider a donation!").addButton(
       (btn) => btn.setButtonText("Buy me a coffee").onClick(() => {
         window.open("https://buymeacoffee.com/maxonamission");
       })
     );
-    new import_obsidian2.Setting(containerEl).setName("Templates").setHeading();
-    new import_obsidian2.Setting(containerEl).setName("Templates folder").setDesc(
+    new import_obsidian.Setting(containerEl).setName("Templates").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Templates folder").setDesc(
       'Path to your templates folder (e.g. "Templates"). Say "template {name}" or "sjabloon {name}" to insert. Leave empty to disable.'
     ).addText(
       (text) => text.setPlaceholder("Templates").setValue(this.plugin.settings.templatesFolder).onChange(async (value) => {
@@ -2273,9 +2391,9 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian2.Setting(containerEl).setName("Custom voice commands").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Custom voice commands").setHeading();
     this.renderCustomCommands(containerEl);
-    new import_obsidian2.Setting(containerEl).setName("Advanced").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Advanced").setHeading();
     const isRealtimeModel = (m) => m.id.includes("realtime");
     const isBatchModel = (m) => {
       var _a;
@@ -2318,7 +2436,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       },
       isTextChatModel
     );
-    new import_obsidian2.Setting(containerEl).setName("Correction system prompt").setDesc("Leave empty to use the default prompt").addTextArea(
+    new import_obsidian.Setting(containerEl).setName("Correction system prompt").setDesc("Leave empty to use the default prompt").addTextArea(
       (text) => text.setPlaceholder("Default correction prompt will be used...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
         this.plugin.settings.systemPrompt = value;
         await this.plugin.saveSettings();
@@ -2342,7 +2460,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
       const namePrefix = cmd.builtIn ? "\u2699 " : "";
       const displayLabel = (_i = (_h = (_f = cmd.labels) == null ? void 0 : _f[lang]) != null ? _h : (_g = cmd.labels) == null ? void 0 : _g["en"]) != null ? _i : "";
       const displayName = displayLabel || triggers.join(", ") || cmd.id;
-      new import_obsidian2.Setting(containerEl).setName(namePrefix + displayName).setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`).addButton(
+      new import_obsidian.Setting(containerEl).setName(namePrefix + displayName).setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`).addButton(
         (btn) => btn.setButtonText("Edit").onClick(() => {
           this.openCommandEditor(cmd, i);
         })
@@ -2354,7 +2472,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         })
       );
     }
-    new import_obsidian2.Setting(containerEl).setDesc("Add a custom voice command for inserting text or opening a slot").addButton(
+    new import_obsidian.Setting(containerEl).setDesc("Add a custom voice command for inserting text or opening a slot").addButton(
       (btn) => btn.setButtonText("Add command").setCta().onClick(() => {
         const newCmd = {
           id: `custom-${Date.now()}`,
@@ -2366,7 +2484,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         this.openCommandEditor(newCmd, commands.length - 1);
       })
     );
-    new import_obsidian2.Setting(containerEl).setDesc(
+    new import_obsidian.Setting(containerEl).setDesc(
       "Restore the built-in commands (table, callout, etc.) to their defaults. Your own custom commands are not affected."
     ).addButton(
       (btn) => btn.setButtonText("Reset built-ins").onClick(async () => {
@@ -2385,13 +2503,13 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
     const redisplay = () => this.display();
     const lang = this.plugin.settings.language;
     let removeVVListener;
-    const editorModal = new class extends import_obsidian2.Modal {
+    const editorModal = new class extends import_obsidian.Modal {
       onOpen() {
         var _a;
         const { contentEl } = this;
         this.containerEl.addClass("voxtral-cmd-editor-overlay");
         this.modalEl.addClass("voxtral-cmd-editor-modal");
-        if (import_obsidian2.Platform.isMobile && window.visualViewport) {
+        if (import_obsidian.Platform.isMobile && window.visualViewport) {
           const vv = window.visualViewport;
           const adjustHeight = () => {
             this.modalEl.style.maxHeight = `${vv.height - 32}px`;
@@ -2405,21 +2523,21 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         contentEl.addEventListener("keydown", stopLeak, true);
         contentEl.addEventListener("keyup", stopLeak, true);
         contentEl.addEventListener("keypress", stopLeak, true);
-        new import_obsidian2.Setting(contentEl).setName("Custom voice command").setHeading();
+        new import_obsidian.Setting(contentEl).setName("Custom voice command").setHeading();
         let triggerInput;
-        new import_obsidian2.Setting(contentEl).setName("Trigger phrases (comma-separated)").addText((text) => {
+        new import_obsidian.Setting(contentEl).setName("Trigger phrases (comma-separated)").addText((text) => {
           var _a2;
           triggerInput = text.inputEl;
           text.setValue(((_a2 = cmd.triggers[lang]) != null ? _a2 : []).join(", "));
         });
         let labelInput;
-        new import_obsidian2.Setting(contentEl).setName("Label (name in help panel)").setDesc("Leave empty to use trigger phrase").addText((text) => {
+        new import_obsidian.Setting(contentEl).setName("Label (name in help panel)").setDesc("Leave empty to use trigger phrase").addText((text) => {
           var _a2, _b;
           labelInput = text.inputEl;
           text.setValue((_b = (_a2 = cmd.labels) == null ? void 0 : _a2[lang]) != null ? _b : "");
         });
         let typeValue = cmd.type;
-        new import_obsidian2.Setting(contentEl).setName("Type").addDropdown((drop) => {
+        new import_obsidian.Setting(contentEl).setName("Type").addDropdown((drop) => {
           drop.addOption("insert", "Insert text");
           drop.addOption("slot", "Slot (type between prefix/suffix)");
           drop.setValue(cmd.type);
@@ -2430,7 +2548,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         });
         const insertContainer = contentEl.createDiv();
         let insertInput;
-        new import_obsidian2.Setting(insertContainer).setName("Text to insert").setDesc("Use \\n for newline").addText((text) => {
+        new import_obsidian.Setting(insertContainer).setName("Text to insert").setDesc("Use \\n for newline").addText((text) => {
           var _a2;
           insertInput = text.inputEl;
           text.setValue(((_a2 = cmd.insertText) != null ? _a2 : "").replace(/\n/g, "\\n"));
@@ -2439,17 +2557,17 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
         let prefixInput;
         let suffixInput;
         let exitValue = (_a = cmd.slotExit) != null ? _a : "enter";
-        new import_obsidian2.Setting(slotContainer).setName("Prefix (e.g. [[ or **)").addText((text) => {
+        new import_obsidian.Setting(slotContainer).setName("Prefix (e.g. [[ or **)").addText((text) => {
           var _a2;
           prefixInput = text.inputEl;
           text.setValue((_a2 = cmd.slotPrefix) != null ? _a2 : "");
         });
-        new import_obsidian2.Setting(slotContainer).setName("Suffix (e.g. ]] or **)").addText((text) => {
+        new import_obsidian.Setting(slotContainer).setName("Suffix (e.g. ]] or **)").addText((text) => {
           var _a2;
           suffixInput = text.inputEl;
           text.setValue((_a2 = cmd.slotSuffix) != null ? _a2 : "");
         });
-        new import_obsidian2.Setting(slotContainer).setName("Close slot on").addDropdown((drop) => {
+        new import_obsidian.Setting(slotContainer).setName("Close slot on").addDropdown((drop) => {
           drop.addOption("voice", "Voice command only");
           drop.addOption("enter", "Enter");
           drop.addOption("space", "Space");
@@ -2464,10 +2582,10 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
           slotContainer.toggle(typeValue === "slot");
         };
         updateVisibility();
-        if (import_obsidian2.Platform.isMobile) {
+        if (import_obsidian.Platform.isMobile) {
           setTimeout(() => triggerInput == null ? void 0 : triggerInput.focus(), 100);
         }
-        new import_obsidian2.Setting(contentEl).addButton(
+        new import_obsidian.Setting(contentEl).addButton(
           (btn) => btn.setButtonText("Cancel").onClick(() => {
             this.close();
           })
@@ -2518,7 +2636,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
    * The current value is always shown, even if not in the fetched list.
    */
   addModelDropdown(containerEl, name, desc, currentValue, onChange, filter) {
-    const setting = new import_obsidian2.Setting(containerEl).setName(name).setDesc(desc);
+    const setting = new import_obsidian.Setting(containerEl).setName(name).setDesc(desc);
     setting.addDropdown((drop) => {
       if (currentValue) {
         drop.addOption(currentValue, currentValue);
@@ -2547,7 +2665,7 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
   }
   async getModels() {
     if (this.cachedModels) return this.cachedModels;
-    const models = await listModels(this.plugin.settings.apiKey);
+    const models = await listModels(this.plugin.settings.apiKey, this.plugin.httpRequest);
     if (models.length > 0) {
       this.cachedModels = models;
     }
@@ -2556,87 +2674,9 @@ var VoxtralSettingTab = class extends import_obsidian2.PluginSettingTab {
 };
 
 // src/help-view.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian2 = require("obsidian");
 
-// src/phonetics.ts
-var ALL_LANGS2 = {
-  nl: nl_default,
-  en: en_default,
-  fr: fr_default,
-  de: de_default,
-  es: es_default,
-  pt: pt_default,
-  it: it_default,
-  ru: ru_default,
-  zh: zh_default,
-  hi: hi_default,
-  ar: ar_default,
-  ja: ja_default,
-  ko: ko_default
-};
-function compileRules(data) {
-  return data.map(({ pattern, flags, replacement }) => [
-    new RegExp(pattern, flags),
-    replacement
-  ]);
-}
-var PHONETIC_RULES = Object.fromEntries(
-  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS2[code].phonetics.length > 0).map((code) => [code, compileRules(ALL_LANGS2[code].phonetics)])
-);
-var ARTICLES = Object.fromEntries(
-  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS2[code].articles])
-);
-var TRAILING_FILLERS = Object.fromEntries(
-  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS2[code].fillers.length > 0).map((code) => [code, ALL_LANGS2[code].fillers])
-);
-function phoneticNormalize(text, lang) {
-  const rules = PHONETIC_RULES[lang];
-  if (!rules) return text;
-  let result = text;
-  for (const [pattern, replacement] of rules) {
-    result = result.replace(pattern, replacement);
-  }
-  return result;
-}
-function stripArticles(text, lang) {
-  const articles = ARTICLES[lang];
-  if (!articles || articles.length === 0) return text;
-  const words = text.split(/\s+/);
-  let stripped = 0;
-  while (stripped < Math.min(2, words.length - 1)) {
-    if (articles.includes(words[stripped])) {
-      stripped++;
-    } else {
-      break;
-    }
-  }
-  return stripped > 0 ? words.slice(stripped).join(" ") : text;
-}
-function stripTrailingFillers(text, lang) {
-  const fillers = TRAILING_FILLERS[lang];
-  if (!fillers || fillers.length === 0) return text;
-  let result = text;
-  for (const filler of fillers.sort((a, b) => b.length - a.length)) {
-    if (result.endsWith(" " + filler)) {
-      result = result.slice(0, -(filler.length + 1)).trimEnd();
-    }
-  }
-  return result;
-}
-function trySplitCompound(text, knownWords) {
-  if (text.includes(" ") || text.length < 4) return text;
-  for (const phrase of knownWords) {
-    const words = phrase.split(/\s+/);
-    if (words.length < 2) continue;
-    const joined = words.join("");
-    if (text === joined) {
-      return phrase;
-    }
-  }
-  return text;
-}
-
-// src/voice-commands.ts
+// ../shared/src/voice-commands.ts
 var activeLang = "nl";
 function setLanguage(lang) {
   activeLang = lang;
@@ -3364,7 +3404,7 @@ function getStrings(lang) {
   var _a;
   return (_a = UI_STRINGS[lang]) != null ? _a : UI_STRINGS.en;
 }
-var VoxtralHelpView = class extends import_obsidian3.ItemView {
+var VoxtralHelpView = class extends import_obsidian2.ItemView {
   constructor(leaf) {
     super(leaf);
     this.lang = "nl";
@@ -3434,7 +3474,7 @@ function renderHelpContent(container, lang) {
 }
 
 // src/templates.ts
-var import_obsidian4 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 var templateCommands = [];
 function scanTemplates(app, folderPath) {
   templateCommands = [];
@@ -3445,14 +3485,14 @@ function scanTemplates(app, folderPath) {
 }
 function scanFolder(folder) {
   for (const child of folder.children) {
-    if (child instanceof import_obsidian4.TFile && child.extension === "md") {
+    if (child instanceof import_obsidian3.TFile && child.extension === "md") {
       const displayName = child.basename;
       templateCommands.push({
         name: normalizeCommand(displayName),
         displayName,
         path: child.path
       });
-    } else if (child instanceof import_obsidian4.TFolder) {
+    } else if (child instanceof import_obsidian3.TFolder) {
       scanFolder(child);
     }
   }
@@ -3528,48 +3568,7 @@ async function insertTemplate(app, editor, template) {
   editor.setCursor({ line: newLine, ch: newCh });
 }
 
-// src/plugin-logger.ts
-var LOG_BUFFER_SIZE = 500;
-var logBuffer = [];
-function pushLog(level, args) {
-  const ts = (/* @__PURE__ */ new Date()).toISOString();
-  const msg = args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
-  logBuffer.push(`[${ts}] [${level}] ${msg}`);
-  if (logBuffer.length > LOG_BUFFER_SIZE) {
-    logBuffer.shift();
-  }
-}
-var vlog = {
-  debug: (...args) => {
-    pushLog("DEBUG", args);
-    console.debug(...args);
-  },
-  warn: (...args) => {
-    pushLog("WARN", args);
-    console.warn(...args);
-  },
-  error: (...args) => {
-    pushLog("ERROR", args);
-    console.error(...args);
-  }
-};
-function redactForExport(line) {
-  let redacted = line.replace(/\b[A-Za-z0-9]{32,}\b/g, "[REDACTED]");
-  redacted = redacted.replace(/"[^"]{20,}"/g, '"[text redacted]"');
-  redacted = redacted.replace(
-    /(full text:|Hallucination detected —|Discarding hallucinated) .+/gi,
-    "$1 [redacted]"
-  );
-  return redacted;
-}
-function getLogText() {
-  return logBuffer.map(redactForExport).join("\n");
-}
-function getLogCount() {
-  return logBuffer.length;
-}
-
-// src/dictation-tracker.ts
+// ../shared/src/dictation-tracker.ts
 var DictationTracker = class _DictationTracker {
   constructor() {
     this.dictatedRanges = [];
@@ -3677,7 +3676,7 @@ var DictationTracker = class _DictationTracker {
    * independently, processed from end to start so that earlier
    * offsets remain valid after replacements.
    */
-  async autoCorrectAfterStop(editor, settings) {
+  async autoCorrectAfterStop(editor, settings, httpRequest) {
     if (this.dictatedRanges.length === 0) return;
     const merged = _DictationTracker.mergeRanges(this.dictatedRanges);
     merged.sort((a, b) => b.from - a.from);
@@ -3697,7 +3696,7 @@ var DictationTracker = class _DictationTracker {
     }
     for (const c of corrections) {
       try {
-        const corrected = await correctText(c.text, settings);
+        const corrected = await correctText(c.text, settings, httpRequest);
         if (corrected && corrected !== c.text) {
           editor.replaceRange(corrected, c.from, c.to);
         }
@@ -3726,8 +3725,7 @@ var DictationTracker = class _DictationTracker {
   }
 };
 
-// src/realtime-session.ts
-var import_obsidian5 = require("obsidian");
+// ../shared/src/realtime-session.ts
 var RealtimeSession = class {
   constructor(settings, tracker, callbacks) {
     this.settings = settings;
@@ -3796,7 +3794,7 @@ var RealtimeSession = class {
       },
       onError: (message) => {
         vlog.error("Voxtral: Realtime error:", message);
-        new import_obsidian5.Notice(`Streaming error: ${message}`);
+        this.callbacks.notify(`Streaming error: ${message}`);
       },
       onDisconnect: () => {
         void this.handleDisconnect();
@@ -3836,7 +3834,7 @@ var RealtimeSession = class {
         e
       );
       if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
-        new import_obsidian5.Notice(
+        this.callbacks.notify(
           "Cannot connect to the API. Recording stopped.",
           6e3
         );
@@ -3910,8 +3908,7 @@ var RealtimeSession = class {
   }
 };
 
-// src/dual-delay-session.ts
-var import_obsidian6 = require("obsidian");
+// ../shared/src/dual-delay-session.ts
 var _DualDelaySession = class _DualDelaySession {
   constructor(settings, tracker, callbacks) {
     this.settings = settings;
@@ -4109,7 +4106,7 @@ var _DualDelaySession = class _DualDelaySession {
         e
       );
       if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
-        new import_obsidian6.Notice(
+        this.callbacks.notify(
           "Cannot reconnect. Recording stopped.",
           6e3
         );
@@ -4421,7 +4418,7 @@ _DualDelaySession.REMAINDER_DEBOUNCE_MS = 400;
 var DualDelaySession = _DualDelaySession;
 
 // src/main.ts
-var VoxtralPlugin = class extends import_obsidian7.Plugin {
+var VoxtralPlugin = class extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
     this.realtimeSession = null;
@@ -4440,10 +4437,24 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
     this.maxConsecutiveFailures = 5;
     this.currentEditor = null;
     this.keydownHandler = null;
+    /** Platform adapter: wraps Obsidian's requestUrl as HttpRequestFn */
+    this.httpRequest = async (options) => {
+      const response = await (0, import_obsidian4.requestUrl)({
+        url: options.url,
+        method: options.method,
+        headers: options.headers,
+        body: options.body
+      });
+      return {
+        status: response.status,
+        json: response.json,
+        text: response.text
+      };
+    };
   }
   /** Whether realtime mode is available on this platform */
   get canRealtime() {
-    return !import_obsidian7.Platform.isMobile;
+    return !import_obsidian4.Platform.isMobile;
   }
   /** Effective mode: fall back to batch on mobile */
   get effectiveMode() {
@@ -4462,8 +4473,9 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       isRecording: () => this.isRecording,
       getEditor: () => {
         var _a;
-        return this.currentEditor || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView)) == null ? void 0 : _a.editor) || null;
-      }
+        return this.currentEditor || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView)) == null ? void 0 : _a.editor) || null;
+      },
+      notify: (msg, dur) => new import_obsidian4.Notice(msg, dur)
     };
   }
   async onload() {
@@ -4476,7 +4488,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
     this.addRibbonIcon("mic", "Voxtral: start/stop recording", () => {
       void this.toggleRecording();
     });
-    if (!import_obsidian7.Platform.isMobile) {
+    if (!import_obsidian4.Platform.isMobile) {
       this.statusBarEl = this.addStatusBarItem();
       this.updateStatusBar("idle");
     }
@@ -4623,8 +4635,8 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       }
     );
     this.sendRibbonEl.addClass("voxtral-send-button");
-    if (import_obsidian7.Platform.isMobile) {
-      const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+    if (import_obsidian4.Platform.isMobile) {
+      const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
       if (view) {
         this.mobileActionEl = view.addAction(
           "send",
@@ -4685,7 +4697,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
     this.isPaused = false;
     this.recorder.resume();
     this.updateStatusBar("recording");
-    new import_obsidian7.Notice("Recording resumed");
+    new import_obsidian4.Notice("Recording resumed");
     vlog.debug("Voxtral: Recording resumed (app foregrounded)");
   }
   clearFocusPauseTimer() {
@@ -4711,7 +4723,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       const isSpaceExit = (slot == null ? void 0 : slot.def.exitTrigger) === "space" || (slot == null ? void 0 : slot.def.exitTrigger) === "enter-or-space";
       if (e.key === "Enter" && isEnterExit || e.key === " " && isSpaceExit) {
         e.preventDefault();
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
         if (view) {
           closeSlot(view.editor);
           if (this.realtimeSession) {
@@ -4773,12 +4785,12 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
   }
   async startRecording() {
     if (!this.settings.apiKey) {
-      new import_obsidian7.Notice("Please set your API key in the plugin settings.");
+      new import_obsidian4.Notice("Please set your API key in the plugin settings.");
       return;
     }
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
     if (!view) {
-      new import_obsidian7.Notice("Open a note first to start dictating.");
+      new import_obsidian4.Notice("Open a note first to start dictating.");
       return;
     }
     const editor = view.editor;
@@ -4798,7 +4810,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       const micName = this.recorder.activeMicLabel;
       if (this.effectiveMode === "batch") {
         const enterHint = this.settings.enterToSend ? " Press Enter (when not typing) or tap send to transcribe chunks." : " Tap send to transcribe chunks while you keep talking.";
-        if (import_obsidian7.Platform.isMobile && !this.settings.dismissMobileBatchNotice) {
+        if (import_obsidian4.Platform.isMobile && !this.settings.dismissMobileBatchNotice) {
           const frag = document.createDocumentFragment();
           frag.createSpan({
             text: `Recording started (${micName}). Tap the send button (\u2191) to transcribe chunks while you keep talking.`
@@ -4814,20 +4826,20 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
             this.settings.dismissMobileBatchNotice = true;
             void this.saveSettings();
           });
-          new import_obsidian7.Notice(frag, 8e3);
+          new import_obsidian4.Notice(frag, 8e3);
         } else {
-          new import_obsidian7.Notice(
+          new import_obsidian4.Notice(
             `Voxtral: Recording started (${micName})
 ` + enterHint.trim(),
             6e3
           );
         }
       } else {
-        new import_obsidian7.Notice(`Recording started (${micName})`);
+        new import_obsidian4.Notice(`Recording started (${micName})`);
       }
     } catch (e) {
       vlog.error("Voxtral: Failed to start recording", e);
-      new import_obsidian7.Notice(`Could not start recording: ${e}`);
+      new import_obsidian4.Notice(`Could not start recording: ${e}`);
       this.updateStatusBar("idle");
     }
   }
@@ -4850,21 +4862,21 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       }
     } catch (e) {
       vlog.error("Voxtral: Failed to stop recording", e);
-      new import_obsidian7.Notice(`Error stopping recording: ${e}`);
+      new import_obsidian4.Notice(`Error stopping recording: ${e}`);
     }
     this.currentEditor = null;
     if (this.settings.autoCorrect) {
       this.tracker.reset();
     }
     this.updateStatusBar("idle");
-    new import_obsidian7.Notice("Recording stopped");
+    new import_obsidian4.Notice("Recording stopped");
   }
   // ── Tap-to-send: flush current audio chunk without stopping ──
   async sendChunk() {
     if (!this.isRecording || this.effectiveMode !== "batch") {
       return;
     }
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
     if (!view) return;
     const editor = view.editor;
     this.chunkIndex++;
@@ -4875,7 +4887,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
         this.updateStatusBar("recording");
         return;
       }
-      let text = await transcribeBatch(blob, this.settings);
+      let text = await transcribeBatch(blob, this.settings, this.httpRequest);
       if (text && isLikelyHallucination(
         text,
         this.recorder.lastChunkDurationSec
@@ -4886,7 +4898,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       }
       const hasCommand = text ? matchCommand(text) !== null : false;
       if (this.settings.autoCorrect && text && !hasCommand) {
-        text = await correctText(text, this.settings);
+        text = await correctText(text, this.settings, this.httpRequest);
       }
       this.updateStatusBar("recording");
       if (text) {
@@ -4904,7 +4916,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
     } catch (e) {
       vlog.error("Voxtral: Chunk transcription failed", e);
       this.updateStatusBar("recording");
-      new import_obsidian7.Notice(`Chunk failed: ${e}`);
+      new import_obsidian4.Notice(`Chunk failed: ${e}`);
     }
   }
   // ── Realtime recording (delegates to session classes) ──
@@ -4934,11 +4946,11 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       }
     }, this.settings.noiseSuppression);
     if (this.recorder.fallbackUsed) {
-      new import_obsidian7.Notice("Selected mic unavailable \u2014 using default");
+      new import_obsidian4.Notice("Selected mic unavailable \u2014 using default");
     }
   }
   async stopRealtimeRecording() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
     if (this.dualDelaySession) {
       await this.dualDelaySession.stop();
       this.dualDelaySession = null;
@@ -4951,7 +4963,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
     }
     await this.recorder.stop();
     if (this.settings.autoCorrect && view) {
-      await this.tracker.autoCorrectAfterStop(view.editor, this.settings);
+      await this.tracker.autoCorrectAfterStop(view.editor, this.settings, this.httpRequest);
     }
   }
   // ── Batch recording ──
@@ -4959,23 +4971,23 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
     const deviceId = this.settings.microphoneDeviceId || void 0;
     await this.recorder.start(deviceId, void 0, this.settings.noiseSuppression);
     if (this.recorder.fallbackUsed) {
-      new import_obsidian7.Notice("Selected mic unavailable \u2014 using default");
+      new import_obsidian4.Notice("Selected mic unavailable \u2014 using default");
     }
   }
   async stopBatchRecording() {
     const blob = await this.recorder.stop();
     if (blob.size === 0) {
-      new import_obsidian7.Notice("No audio recorded");
+      new import_obsidian4.Notice("No audio recorded");
       return;
     }
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
     if (!view) {
-      new import_obsidian7.Notice("No active note found");
+      new import_obsidian4.Notice("No active note found");
       return;
     }
     const editor = view.editor;
     try {
-      let text = await transcribeBatch(blob, this.settings);
+      let text = await transcribeBatch(blob, this.settings, this.httpRequest);
       if (text && isLikelyHallucination(
         text,
         this.recorder.lastChunkDurationSec
@@ -4985,64 +4997,64 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
       }
       const hasCommand = text ? matchCommand(text) !== null : false;
       if (this.settings.autoCorrect && text && !hasCommand) {
-        text = await correctText(text, this.settings);
+        text = await correctText(text, this.settings, this.httpRequest);
       }
       if (text) {
         processText(editor, text);
       }
     } catch (e) {
       vlog.error("Voxtral: Batch transcription failed", e);
-      new import_obsidian7.Notice(`Transcription failed: ${e}`);
+      new import_obsidian4.Notice(`Transcription failed: ${e}`);
     }
   }
   // ── Text correction ──
   async correctSelection(editor) {
     const selection = editor.getSelection();
     if (!selection) {
-      new import_obsidian7.Notice("Select text first to correct it");
+      new import_obsidian4.Notice("Select text first to correct it");
       return;
     }
     if (!this.settings.apiKey) {
-      new import_obsidian7.Notice("Please set your API key first");
+      new import_obsidian4.Notice("Please set your API key first");
       return;
     }
     try {
-      new import_obsidian7.Notice("Correcting...");
-      const corrected = await correctText(selection, this.settings);
+      new import_obsidian4.Notice("Correcting...");
+      const corrected = await correctText(selection, this.settings, this.httpRequest);
       if (corrected) {
         editor.replaceSelection(corrected);
-        new import_obsidian7.Notice("Selection corrected");
+        new import_obsidian4.Notice("Selection corrected");
       }
     } catch (e) {
-      new import_obsidian7.Notice(`Correction failed: ${e}`);
+      new import_obsidian4.Notice(`Correction failed: ${e}`);
     }
   }
   async correctAll(editor) {
     if (!this.tracker.hasRanges()) {
-      new import_obsidian7.Notice("No dictated text to correct");
+      new import_obsidian4.Notice("No dictated text to correct");
       return;
     }
     if (!this.settings.apiKey) {
-      new import_obsidian7.Notice("Please set your API key first");
+      new import_obsidian4.Notice("Please set your API key first");
       return;
     }
     try {
-      new import_obsidian7.Notice("Correcting...");
-      await this.tracker.autoCorrectAfterStop(editor, this.settings);
+      new import_obsidian4.Notice("Correcting...");
+      await this.tracker.autoCorrectAfterStop(editor, this.settings, this.httpRequest);
       this.tracker.reset();
-      new import_obsidian7.Notice("Dictated text corrected");
+      new import_obsidian4.Notice("Dictated text corrected");
     } catch (e) {
-      new import_obsidian7.Notice(`Correction failed: ${e}`);
+      new import_obsidian4.Notice(`Correction failed: ${e}`);
     }
   }
   // ── Logs ──
   async exportLogs() {
     if (getLogCount() === 0) {
-      new import_obsidian7.Notice("No logs to export");
+      new import_obsidian4.Notice("No logs to export");
       return;
     }
     await navigator.clipboard.writeText(getLogText());
-    new import_obsidian7.Notice(`${getLogCount()} log entries copied to clipboard`);
+    new import_obsidian4.Notice(`${getLogCount()} log entries copied to clipboard`);
   }
   // ── Help panel ──
   async openHelpPanel() {
@@ -5059,7 +5071,7 @@ var VoxtralPlugin = class extends import_obsidian7.Plugin {
         type: VIEW_TYPE_VOXTRAL_HELP,
         active: true
       });
-      if (!import_obsidian7.Platform.isMobile) {
+      if (!import_obsidian4.Platform.isMobile) {
         void this.app.workspace.revealLeaf(leaf);
       }
     }

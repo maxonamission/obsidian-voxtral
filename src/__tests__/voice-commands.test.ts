@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { matchCommand, normalizeCommand, setLanguage } from "../voice-commands";
+import { matchCommand, normalizeCommand, setLanguage } from "../../../shared/src/voice-commands";
 
 // ── Helpers ──
 

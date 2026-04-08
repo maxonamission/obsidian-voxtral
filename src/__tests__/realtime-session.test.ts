@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Editor } from "obsidian";
-import type { SessionCallbacks } from "../realtime-session";
+import type { SessionCallbacks } from "../../../shared/src/realtime-session";
 import { DEFAULT_SETTINGS, VoxtralSettings } from "../types";
-import { DictationTracker } from "../dictation-tracker";
-import { setLanguage } from "../voice-commands";
+import { DictationTracker } from "../../../shared/src/dictation-tracker";
+import { setLanguage } from "../../../shared/src/voice-commands";
 
 /**
  * Tests for RealtimeSession (single-stream mode).
@@ -108,7 +108,7 @@ const transcriberInstances: Array<{
 	close: ReturnType<typeof vi.fn>;
 }> = [];
 
-vi.mock("../mistral-api", () => {
+vi.mock("../../../shared/src/mistral-api", () => {
 	class MockRealtimeTranscriber {
 		callbacks: unknown;
 		connect = vi.fn(() => {
@@ -126,15 +126,11 @@ vi.mock("../mistral-api", () => {
 	return { RealtimeTranscriber: MockRealtimeTranscriber };
 });
 
-vi.mock("../plugin-logger", () => ({
+vi.mock("../../../shared/src/plugin-logger", () => ({
 	vlog: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }));
 
-vi.mock("obsidian", () => ({
-	Notice: vi.fn(),
-}));
-
-const { RealtimeSession } = await import("../realtime-session");
+const { RealtimeSession } = await import("../../../shared/src/realtime-session");
 
 // ── Helpers ──
 
@@ -154,6 +150,7 @@ function createCallbacks(editor: Editor): SessionCallbacks {
 		stopRecording: mockStopRecording,
 		isRecording: mockIsRecording,
 		getEditor: vi.fn(() => editor),
+		notify: vi.fn(),
 	};
 }
 

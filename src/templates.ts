@@ -2,7 +2,7 @@
 // Licensed under GPL-3.0 — see LICENSE for details
 // https://github.com/maxonamission/voxtral-transcribe
 import { App, TFile, TFolder, Editor } from "obsidian";
-import { normalizeCommand } from "./voice-commands";
+import { normalizeCommand } from "../../shared/src/voice-commands";
 
 /**
  * Template integration — scans the user's templates folder and
