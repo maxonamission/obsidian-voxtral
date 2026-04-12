@@ -28,6 +28,7 @@ var import_obsidian4 = require("obsidian");
 var DEFAULT_SETTINGS = {
   settingsVersion: 1,
   apiKey: "",
+  apiBaseUrl: "https://api.mistral.ai",
   language: "nl",
   realtimeModel: "voxtral-mini-transcribe-realtime-2602",
   batchModel: "voxtral-mini-latest",
@@ -1857,7 +1858,7 @@ var AudioRecorder = class {
 };
 
 // ../shared/src/mistral-api.ts
-var BASE_URL = "https://api.mistral.ai";
+var DEFAULT_BASE_URL = "https://api.mistral.ai";
 function sanitizeApiError(status, rawBody) {
   var _a;
   try {
@@ -1887,11 +1888,12 @@ function sanitizeApiError(status, rawBody) {
       return `HTTP ${status}: Request failed`;
   }
 }
-async function listModels(apiKey, httpRequest) {
+async function listModels(apiKey, httpRequest, baseUrl) {
   if (!apiKey) return [];
+  const base = baseUrl || DEFAULT_BASE_URL;
   try {
     const response = await httpRequest({
-      url: `${BASE_URL}/v1/models`,
+      url: `${base}/v1/models`,
       method: "GET",
       headers: {
         Authorization: `Bearer ${apiKey}`
@@ -1963,8 +1965,9 @@ true\r
   body.set(headerBuf, 0);
   body.set(fileBytes, headerBuf.length);
   body.set(tailBuf, headerBuf.length + fileBytes.length);
+  const base = settings.apiBaseUrl || DEFAULT_BASE_URL;
   const response = await httpRequest({
-    url: `${BASE_URL}/v1/audio/transcriptions`,
+    url: `${base}/v1/audio/transcriptions`,
     method: "POST",
     headers: {
       Authorization: `Bearer ${settings.apiKey}`,
@@ -1995,8 +1998,9 @@ async function correctText(text, settings, httpRequest) {
     ],
     temperature: 0.1
   };
+  const base = settings.apiBaseUrl || DEFAULT_BASE_URL;
   const response = await httpRequest({
-    url: `${BASE_URL}/v1/chat/completions`,
+    url: `${base}/v1/chat/completions`,
     method: "POST",
     headers: {
       Authorization: `Bearer ${settings.apiKey}`,
@@ -2035,7 +2039,9 @@ var RealtimeTranscriber = class {
     const params = new URLSearchParams({
       model: this.settings.realtimeModel
     });
-    const url = `wss://api.mistral.ai/v1/audio/transcriptions/realtime?${params}`;
+    const httpBase = this.settings.apiBaseUrl || DEFAULT_BASE_URL;
+    const wsBase = httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
+    const url = `${wsBase}/v1/audio/transcriptions/realtime?${params}`;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         var _a;
@@ -2200,6 +2206,18 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       const input = setting.controlEl.querySelector("input");
       if (input) input.type = "password";
     });
+    new import_obsidian.Setting(containerEl).setName("API base URL").setDesc(createFragment((frag) => {
+      const exampleUrl = "http://localhost:8000";
+      frag.appendText("Base URL for Mistral-compatible API. Use ");
+      frag.createEl("code", { text: exampleUrl });
+      frag.appendText(" for local vLLM.");
+    })).addText(
+      (text) => text.setPlaceholder("https://api.mistral.ai").setValue(this.plugin.settings.apiBaseUrl).onChange(async (value) => {
+        this.plugin.settings.apiBaseUrl = value.trim();
+        this.cachedModels = null;
+        await this.plugin.saveSettings();
+      })
+    );
     const micSetting = new import_obsidian.Setting(containerEl).setName("Microphone").setDesc("Select which microphone to use");
     micSetting.addDropdown((drop) => {
       drop.addOption("", "System default");
@@ -2665,7 +2683,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
   }
   async getModels() {
     if (this.cachedModels) return this.cachedModels;
-    const models = await listModels(this.plugin.settings.apiKey, this.plugin.httpRequest);
+    const models = await listModels(this.plugin.settings.apiKey, this.plugin.httpRequest, this.plugin.settings.apiBaseUrl);
     if (models.length > 0) {
       this.cachedModels = models;
     }
