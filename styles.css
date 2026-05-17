@@ -66,14 +66,14 @@
 
 /* ── Send button (tap-to-send during batch recording) ── */
 
-.voxtral-send-button {
-	color: var(--text-accent) !important;
+.voxtral-send-button.voxtral-send-button {
+	color: var(--text-accent);
 }
 
 /* ── Mobile view-header send action (during batch recording) ── */
 
-.voxtral-mobile-send {
-	color: var(--text-accent) !important;
+.voxtral-mobile-send.voxtral-mobile-send {
+	color: var(--text-accent);
 }
 
 /* ── Notice dismiss link ── */
