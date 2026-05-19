@@ -4536,8 +4536,8 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     });
     this.addCommand({
       id: "export-logs",
-      name: "Export logs to clipboard",
-      icon: "clipboard-copy",
+      name: "Export logs to file",
+      icon: "file-text",
       callback: () => {
         void this.exportLogs();
       }
@@ -5067,12 +5067,27 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
   }
   // ── Logs ──
   async exportLogs() {
-    if (getLogCount() === 0) {
+    const count = getLogCount();
+    if (count === 0) {
       new import_obsidian4.Notice("No logs to export");
       return;
     }
-    await navigator.clipboard.writeText(getLogText());
-    new import_obsidian4.Notice(`${getLogCount()} log entries copied to clipboard`);
+    const now = /* @__PURE__ */ new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const fileName = `voxtral-logs-${ts}.md`;
+    const content = `# Voxtral Transcribe \u2014 Log Export
+
+Exported: ${now.toISOString()}
+Entries: ${count}
+
+\`\`\`
+${getLogText()}
+\`\`\`
+`;
+    const file = await this.app.vault.create(fileName, content);
+    await this.app.workspace.getLeaf(true).openFile(file);
+    new import_obsidian4.Notice(`${count} log entries saved to ${file.path}`);
   }
   // ── Help panel ──
   async openHelpPanel() {
