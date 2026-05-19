@@ -1,6 +1,25 @@
 # Voxtral Transcribe
 
-Dictate directly into Markdown — insert headings, lists, and to-dos by voice, correct text on the fly, and keep talking while edits happen. Speech-to-text dictation for [Obsidian](https://obsidian.md) powered by [Mistral's Voxtral](https://mistral.ai/) models.
+**Thoughts move fast. Your transcription should keep up.**
+
+Voxtral Transcribe streams text into your notes as you speak. Add structure by voice (headings, bullets, to-dos), or grab the keyboard mid-dictation — the mic waits for you and resumes when you stop typing. Edits happen as you go, not after.
+
+Dictate directly into Markdown using [Mistral's Voxtral](https://mistral.ai/) speech-to-text. Insert headings, lists, to-dos and other elements by voice, correct text inline or on the fly, use real-time streaming or batch tap-to-send. Supports transcription in 13+ languages.
+
+### Get going in under a minute
+1. Install and paste your [Mistral API key](https://console.mistral.ai/)
+2. Press `Ctrl+Space` (desktop) or tap the mic icon (mobile)
+3. Start talking — say *"heading 2"*, *"new bullet"*, *"for the correction: ..."* as you go
+
+## Why Voxtral?
+
+Voxtral is purpose-built for transcription, not retrofitted from a general audio model. Three things that matter for dictation:
+
+- **Low word error rate on hard audio** — handles background noise, accents, and technical jargon well, including on continuous speech
+- **Streaming-first** — designed for low-latency partial results, which is what makes "text appears as you speak" feel real-time instead of stuttery
+- **Multilingual by design** — 13+ languages with consistent quality, not English-first with the rest bolted on
+
+If you're choosing between speech-to-text models for dictation specifically (rather than, say, post-hoc transcription of meeting recordings), this is a strong fit.
 
 ## Features
 
@@ -18,9 +37,7 @@ Dictate directly into Markdown — insert headings, lists, and to-dos by voice, 
 - **Configurable Enter-to-send** — optionally use Enter as tap-to-send when the mic is live (batch mode)
 - **Typing cooldown** — adjustable delay before the mic resumes after typing
 
-Need coffee to process all this? Me too.
-
-<a href="https://buymeacoffee.com/maxonamission" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
+Need coffee to process all this? Me too. [☕ Buy Me a Coffee](https://buymeacoffee.com/maxonamission)
 
 ## Requirements
 
