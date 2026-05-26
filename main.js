@@ -48,7 +48,9 @@ var DEFAULT_SETTINGS = {
   typingCooldownMs: 800,
   noiseSuppression: false,
   customCommands: [],
-  templatesFolder: ""
+  templatesFolder: "",
+  autoOpenHelpDesktop: true,
+  autoOpenHelpMobile: false
 };
 
 // ../shared/src/similarity.ts
@@ -2379,6 +2381,23 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         });
       });
     }
+    new import_obsidian.Setting(containerEl).setName("Help panel").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Auto-open on desktop").setDesc(
+      "Open the voice help panel in the right sidebar when recording starts on desktop."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.autoOpenHelpDesktop).onChange(async (value) => {
+        this.plugin.settings.autoOpenHelpDesktop = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Auto-open on mobile").setDesc(
+      `Open the voice help panel when recording starts on mobile. Off by default so the panel doesn't slide over your note. You can still open it manually via the "Show voice help panel" command or by swiping from the right.`
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.autoOpenHelpMobile).onChange(async (value) => {
+        this.plugin.settings.autoOpenHelpMobile = value;
+        await this.plugin.saveSettings();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("Keyboard shortcuts").setHeading();
     new import_obsidian.Setting(containerEl).setName("Customize hotkeys").setDesc(
       `You can assign keyboard shortcuts to all Voxtral commands (start/stop recording, correct selection, correct note, etc.) via Obsidian's Settings \u2192 Hotkeys. Search for "Voxtral".`
@@ -4824,7 +4843,10 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       this.chunkIndex = 0;
       this.consecutiveFailures = 0;
       this.updateStatusBar("recording");
-      void this.openHelpPanel();
+      const shouldAutoOpenHelp = import_obsidian4.Platform.isMobile ? this.settings.autoOpenHelpMobile : this.settings.autoOpenHelpDesktop;
+      if (shouldAutoOpenHelp) {
+        void this.openHelpPanel();
+      }
       const micName = this.recorder.activeMicLabel;
       if (this.effectiveMode === "batch") {
         const enterHint = this.settings.enterToSend ? " Press Enter (when not typing) or tap send to transcribe chunks." : " Tap send to transcribe chunks while you keep talking.";
