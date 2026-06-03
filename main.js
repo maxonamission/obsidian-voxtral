@@ -3763,7 +3763,7 @@ var DictationTracker = class _DictationTracker {
 };
 
 // ../shared/src/realtime-session.ts
-var RealtimeSession = class {
+var _RealtimeSession = class _RealtimeSession {
   constructor(settings, tracker, callbacks) {
     this.settings = settings;
     this.tracker = tracker;
@@ -3775,6 +3775,11 @@ var RealtimeSession = class {
     this.turnProcessed = 0;
     this.consecutiveFailures = 0;
     this.maxConsecutiveFailures = 5;
+    // Debounce for flushing on a trailing voice command that has no
+    // sentence-ending punctuation (e.g. "nieuwe alinea"). Waiting briefly
+    // lets cumulative deltas finish (e.g. "nieuw todo" → "nieuw todo item")
+    // before we match and execute the command.
+    this.commandFlushTimer = null;
   }
   /** Connect the WebSocket and start receiving transcription. */
   async start(editor) {
@@ -3783,7 +3788,14 @@ var RealtimeSession = class {
     this.turnDelta = 0;
     this.turnProcessed = 0;
     this.consecutiveFailures = 0;
+    this.clearCommandFlushTimer();
     await this.connectWebSocket(editor);
+  }
+  clearCommandFlushTimer() {
+    if (this.commandFlushTimer) {
+      clearTimeout(this.commandFlushTimer);
+      this.commandFlushTimer = null;
+    }
   }
   /** Send PCM audio data to the transcriber. */
   sendAudio(pcmData) {
@@ -3794,6 +3806,7 @@ var RealtimeSession = class {
   async stop(editor) {
     var _a, _b;
     (_a = this.transcriber) == null ? void 0 : _a.endAudio();
+    this.clearCommandFlushTimer();
     await new Promise((resolve) => setTimeout(resolve, 1e3));
     if (this.pendingText.trim()) {
       this.tracker.trackProcessText(
@@ -3860,6 +3873,7 @@ var RealtimeSession = class {
     this.prevRaw = "";
     this.turnDelta = 0;
     this.turnProcessed = 0;
+    this.clearCommandFlushTimer();
     try {
       await this.connectWebSocket(editor);
       this.consecutiveFailures = 0;
@@ -3901,41 +3915,68 @@ var RealtimeSession = class {
     const sentenceEnd = /[.!?]\s*$/;
     const longEnough = this.pendingText.length > 120;
     if (sentenceEnd.test(this.pendingText) || longEnough) {
-      const sentence = this.pendingText.trim();
-      this.turnProcessed += this.pendingText.length;
-      this.pendingText = "";
-      const normalized = normalizeCommand(sentence);
-      const stopPatterns = [
-        "beeindig opname",
-        "beeindig de opname",
-        "beeindigt opname",
-        "beeindigt de opname",
-        "beeindigde opname",
-        "beeindigde de opname",
-        "stop opname",
-        "stopopname",
-        "stop de opname",
-        "stop recording"
-      ];
-      if (stopPatterns.some((p) => normalized.includes(p))) {
-        this.callbacks.stopRecording();
-        return;
-      }
-      this.tracker.trackProcessText(
-        editor,
-        sentence + " ",
-        () => this.callbacks.updateStatusBar("slot")
-      );
+      this.clearCommandFlushTimer();
+      this.flushPending(editor);
+      return;
     }
+    if (matchCommand(this.pendingText.trim())) {
+      this.clearCommandFlushTimer();
+      this.commandFlushTimer = setTimeout(() => {
+        this.commandFlushTimer = null;
+        this.flushPending(editor);
+      }, _RealtimeSession.COMMAND_FLUSH_DEBOUNCE_MS);
+    }
+  }
+  /**
+   * Process and commit the accumulated pending text. Recognizes the
+   * "stop recording" voice command; otherwise hands the text to the
+   * tracker for command matching and insertion.
+   */
+  flushPending(editor) {
+    const sentence = this.pendingText.trim();
+    if (!sentence) {
+      this.pendingText = "";
+      return;
+    }
+    this.turnProcessed += this.pendingText.length;
+    this.pendingText = "";
+    const normalized = normalizeCommand(sentence);
+    const stopPatterns = [
+      "beeindig opname",
+      "beeindig de opname",
+      "beeindigt opname",
+      "beeindigt de opname",
+      "beeindigde opname",
+      "beeindigde de opname",
+      "stop opname",
+      "stopopname",
+      "stop de opname",
+      "stop recording"
+    ];
+    if (stopPatterns.some((p) => normalized.includes(p))) {
+      this.callbacks.stopRecording();
+      return;
+    }
+    this.tracker.trackProcessText(
+      editor,
+      sentence + " ",
+      () => this.callbacks.updateStatusBar("slot")
+    );
   }
   handleDone(editor, doneText) {
     if (doneText && doneText.length > this.turnDelta) {
       this.pendingText += doneText.substring(this.turnDelta);
     }
-    if (this.pendingText.trim()) {
+    this.clearCommandFlushTimer();
+    const trimmed = this.pendingText.trim();
+    if (trimmed) {
+      let textToCommit = trimmed;
+      if (!/[.!?:,]$/.test(trimmed) && !matchCommand(trimmed)) {
+        textToCommit = trimmed + ".";
+      }
       this.tracker.trackProcessText(
         editor,
-        this.pendingText.trim() + " ",
+        textToCommit + " ",
         () => this.callbacks.updateStatusBar("slot")
       );
       this.pendingText = "";
@@ -3944,6 +3985,8 @@ var RealtimeSession = class {
     this.turnProcessed = 0;
   }
 };
+_RealtimeSession.COMMAND_FLUSH_DEBOUNCE_MS = 400;
+var RealtimeSession = _RealtimeSession;
 
 // ../shared/src/dual-delay-session.ts
 var _DualDelaySession = class _DualDelaySession {

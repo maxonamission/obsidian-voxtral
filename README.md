@@ -10,6 +10,7 @@ Dictate directly into Markdown using [Mistral's Voxtral](https://mistral.ai/) sp
 1. Install and paste your [Mistral API key](https://console.mistral.ai/)
 2. Press `Ctrl+Space` (desktop) or tap the mic icon (mobile)
 3. Start talking — say *"heading 2"*, *"new bullet"*, *"for the correction: ..."* as you go
+4. Like it? [☕ Buy Me a Coffee](https://buymeacoffee.com/maxonamission)
 
 ## Why Voxtral?
 
