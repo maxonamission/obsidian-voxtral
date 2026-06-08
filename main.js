@@ -3832,6 +3832,11 @@ var _RealtimeSession = class _RealtimeSession {
     // the first words spoken when resuming after a pause would be dropped.
     this.audioBuffer = [];
     this.audioBufferBytes = 0;
+    // Where the session last committed text (document offset). The session —
+    // not editor.getCursor() — is authoritative about where dictation
+    // continues, because Obsidian's Live Preview re-renders a table widget
+    // after we edit a cell and resets the cursor to the cell start.
+    this.insertOffset = null;
   }
   /** Connect the WebSocket and start receiving transcription. */
   async start(editor) {
@@ -3843,7 +3848,61 @@ var _RealtimeSession = class _RealtimeSession {
     this.clearCommandFlushTimer();
     this.audioBuffer = [];
     this.audioBufferBytes = 0;
+    this.insertOffset = null;
     await this.connectWebSocket(editor);
+  }
+  /**
+   * Insert committed dictation text, keeping the session — not the editor —
+   * authoritative about where dictation continues. Obsidian's Live Preview
+   * re-renders a table widget after we edit a cell and resets the cursor to
+   * the cell start; without this the next turn would prepend its text and the
+   * visible cursor would sit at the wrong spot. We restore our tracked
+   * insertion point before inserting, and re-assert it after the async
+   * re-render. Both are scoped to the table-reset signature (cursor moved
+   * backward on the same table line), so genuine repositioning is respected.
+   */
+  commit(editor, text, opts = {}) {
+    this.restoreInsertPoint(editor);
+    this.tracker.trackProcessText(
+      editor,
+      text,
+      () => this.callbacks.updateStatusBar("slot")
+    );
+    this.insertOffset = editor.posToOffset(editor.getCursor());
+    if (opts.reassert !== false) {
+      this.reassertInsertPoint(editor, this.insertOffset);
+    }
+  }
+  /** Restore the cursor to our insertion point if a table re-render moved it. */
+  restoreInsertPoint(editor) {
+    if (this.insertOffset === null) return;
+    const curPos = editor.getCursor();
+    const cur = editor.posToOffset(curPos);
+    if (cur === this.insertOffset) return;
+    if (this.isTableReset(editor, curPos, cur, this.insertOffset)) {
+      editor.setCursor(editor.offsetToPos(this.insertOffset));
+    } else {
+      this.insertOffset = cur;
+    }
+  }
+  /** Re-assert the cursor after Obsidian's async table re-render. */
+  reassertInsertPoint(editor, offset) {
+    const pos = editor.offsetToPos(offset);
+    if (!isTableLine(editor.getLine(pos.line))) return;
+    setTimeout(() => {
+      const curPos = editor.getCursor();
+      const cur = editor.posToOffset(curPos);
+      if (this.isTableReset(editor, curPos, cur, offset)) {
+        editor.setCursor(editor.offsetToPos(offset));
+      }
+    }, 0);
+  }
+  /**
+   * True when the cursor sits at the table-re-render reset signature:
+   * jumped backward on the same line, and that line is a table row.
+   */
+  isTableReset(editor, curPos, cur, ref) {
+    return cur < ref && curPos.line === editor.offsetToPos(ref).line && isTableLine(editor.getLine(curPos.line));
   }
   clearCommandFlushTimer() {
     if (this.commandFlushTimer) {
@@ -3889,11 +3948,7 @@ var _RealtimeSession = class _RealtimeSession {
     this.clearCommandFlushTimer();
     await new Promise((resolve) => setTimeout(resolve, 1e3));
     if (this.pendingText.trim()) {
-      this.tracker.trackProcessText(
-        editor,
-        this.pendingText.trim(),
-        () => this.callbacks.updateStatusBar("slot")
-      );
+      this.commit(editor, this.pendingText.trim(), { reassert: false });
       this.pendingText = "";
     }
     (_b = this.transcriber) == null ? void 0 : _b.close();
@@ -3904,11 +3959,7 @@ var _RealtimeSession = class _RealtimeSession {
   /** Flush any remaining pending text (called after slot close). */
   flushAfterSlot(editor) {
     if (this.pendingText.trim()) {
-      this.tracker.trackProcessText(
-        editor,
-        this.pendingText.trim() + " ",
-        () => this.callbacks.updateStatusBar("slot")
-      );
+      this.commit(editor, this.pendingText.trim() + " ");
       this.pendingText = "";
     }
   }
@@ -4040,11 +4091,7 @@ var _RealtimeSession = class _RealtimeSession {
       this.callbacks.stopRecording();
       return;
     }
-    this.tracker.trackProcessText(
-      editor,
-      sentence + " ",
-      () => this.callbacks.updateStatusBar("slot")
-    );
+    this.commit(editor, sentence + " ");
   }
   handleDone(editor, doneText) {
     if (doneText && doneText.length > this.turnDelta) {
@@ -4057,11 +4104,7 @@ var _RealtimeSession = class _RealtimeSession {
       if (!/[.!?:,]$/.test(trimmed) && !matchCommand(trimmed)) {
         textToCommit = trimmed + ".";
       }
-      this.tracker.trackProcessText(
-        editor,
-        textToCommit + " ",
-        () => this.callbacks.updateStatusBar("slot")
-      );
+      this.commit(editor, textToCommit + " ");
       this.pendingText = "";
     }
     this.turnDelta = 0;
