@@ -2,9 +2,9 @@
 
 **Thoughts move fast. Your transcription should keep up.**
 
-Voxtral Transcribe streams text into your notes as you speak. Add structure by voice (headings, bullets, to-dos), or grab the keyboard mid-dictation — the mic waits for you and resumes when you stop typing. Edits happen as you go, not after.
+Voxtral Transcribe allows you to dictate directly into Markdown using [Mistral's Voxtral](https://mistral.ai/) speech-to-text. Speak your text and add structure by voice — headings, lists, to-dos and other elements. Correct inline as you go: grab the keyboard mid-dictation and the mic waits, resuming when you stop typing. Edits happen along the way, not after.
 
-Dictate directly into Markdown using [Mistral's Voxtral](https://mistral.ai/) speech-to-text. Insert headings, lists, to-dos and other elements by voice, correct text inline or on the fly, use real-time streaming or batch tap-to-send. Supports transcription in 13+ languages.
+Choose real-time streaming or tap-to-send batch mode. Supports 13+ languages.
 
 ### Get going in under a minute
 1. Install and paste your [Mistral API key](https://console.mistral.ai/)

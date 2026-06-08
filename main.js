@@ -114,6 +114,13 @@ function lowercaseFirstLetter(text) {
 function stripTrailingPunctuation(text) {
   return text.replace(/[.!?]+\s*$/, "");
 }
+function isTableLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("|")) return true;
+  if (/^:?-{2,}:?(\s*\|\s*:?-{2,}:?)+$/.test(trimmed)) return true;
+  return false;
+}
 
 // ../shared/src/correction.ts
 var DEFAULT_CORRECT_PROMPT = "You are a precise text corrector for dictated text. The input language may vary (commonly Dutch, but follow whatever language the text is in).\n\nCORRECT ONLY:\n- Capitalization (sentence starts, proper nouns)\n- Clearly misspelled or garbled words (from speech recognition)\n- Missing or wrong punctuation\n\nDO NOT CHANGE:\n- Sentence structure or word order\n- Style or tone\n- Markdown formatting (# headings, - lists, - [ ] to-do items)\n- Special prefix markers at the start of lines (e.g. >>, >, > [!note], etc.)\n- Text inserted by custom commands \u2014 these are intentional formatting elements\n\nINLINE CORRECTION INSTRUCTIONS:\nThe text was dictated via speech recognition. The speaker sometimes gives inline instructions meant for you. Recognize these patterns:\n- Explicit markers: 'voor de correctie', 'voor de correctie achteraf', 'for the correction', 'correction note'\n- Spelled-out words: 'V-O-X-T-R-A-L' or 'with an x' \u2192 merge into the intended word\n- Self-corrections: 'no not X but Y', 'nee niet X maar Y', 'I mean Y', 'ik bedoel Y'\n- Meta-commentary: 'that's a Dutch word', 'with a capital letter', 'met een hoofdletter'\n\nWhen you encounter such instructions:\n1. Apply the instruction to the REST of the text\n2. Remove the instruction/meta-commentary itself from the output\n3. Keep all content text \u2014 NEVER remove normal sentences\n\nCRITICAL RULES:\n- Your output must be SHORTER than or equal to the input (after removing meta-instructions)\n- NEVER add your own text, commentary, explanations, or notes\n- NEVER add parenthesized text like '(text missing)' or '(no corrections needed)'\n- NEVER continue, elaborate, or expand on the content\n- NEVER invent or hallucinate text that wasn't in the input\n- If the input is short (even one word), just return it corrected\n- Your output must contain ONLY the corrected version of the input text, NOTHING else";
@@ -1738,7 +1745,7 @@ var AudioRecorder = class {
         resolve(new Blob([]));
         return;
       }
-      const timeout = setTimeout(() => {
+      const timeout = window.setTimeout(() => {
         console.warn("Voxtral: flushChunk timed out after 5s");
         const blob = new Blob(this.chunks, {
           type: this.getSupportedMimeType()
@@ -1747,7 +1754,7 @@ var AudioRecorder = class {
         resolve(blob);
       }, 5e3);
       this.mediaRecorder.onstop = () => {
-        clearTimeout(timeout);
+        window.clearTimeout(timeout);
         const now = Date.now();
         this.lastChunkDurationSec = (now - this.lastFlushTime) / 1e3;
         this.lastFlushTime = now;
@@ -2620,7 +2627,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         };
         updateVisibility();
         if (import_obsidian.Platform.isMobile) {
-          setTimeout(() => triggerInput == null ? void 0 : triggerInput.focus(), 100);
+          window.setTimeout(() => triggerInput == null ? void 0 : triggerInput.focus(), 100);
         }
         new import_obsidian.Setting(contentEl).addButton(
           (btn) => btn.setButtonText("Cancel").onClick(() => {
@@ -3460,7 +3467,6 @@ var VoxtralHelpView = class extends import_obsidian2.ItemView {
     this.lang = lang;
     this.render();
   }
-  // eslint-disable-next-line @typescript-eslint/require-await -- base class requires async signature
   async onOpen() {
     this.render();
   }
@@ -3469,7 +3475,6 @@ var VoxtralHelpView = class extends import_obsidian2.ItemView {
     container.empty();
     renderHelpContent(container, this.lang);
   }
-  // eslint-disable-next-line @typescript-eslint/require-await -- base class requires async signature
   async onClose() {
     this.contentEl.empty();
   }
@@ -3716,21 +3721,29 @@ var DictationTracker = class _DictationTracker {
   async autoCorrectAfterStop(editor, settings, httpRequest) {
     if (this.dictatedRanges.length === 0) return;
     const merged = _DictationTracker.mergeRanges(this.dictatedRanges);
-    merged.sort((a, b) => b.from - a.from);
     const fullText = editor.getValue();
     const corrections = [];
     for (const range of merged) {
       if (range.from >= fullText.length || range.to > fullText.length) {
         continue;
       }
-      const text = fullText.substring(range.from, range.to);
-      if (!text.trim()) continue;
-      corrections.push({
-        from: editor.offsetToPos(range.from),
-        to: editor.offsetToPos(range.to),
-        text
-      });
+      for (const span of this.splitAroundTables(
+        editor,
+        range.from,
+        range.to
+      )) {
+        const text = fullText.substring(span.from, span.to);
+        if (!text.trim()) continue;
+        corrections.push({
+          from: editor.offsetToPos(span.from),
+          to: editor.offsetToPos(span.to),
+          text
+        });
+      }
     }
+    corrections.sort(
+      (a, b) => editor.posToOffset(b.from) - editor.posToOffset(a.from)
+    );
     for (const c of corrections) {
       try {
         const corrected = await correctText(c.text, settings, httpRequest);
@@ -3741,6 +3754,39 @@ var DictationTracker = class _DictationTracker {
         vlog.error("Voxtral: Auto-correct failed", e);
       }
     }
+  }
+  /**
+   * Split an offset range into the sub-spans that do NOT fall on markdown
+   * table lines. Contiguous non-table lines are kept together (so multi-line
+   * prose is corrected with full context); each table line acts as a barrier
+   * that ends the current span and is itself excluded from correction.
+   */
+  splitAroundTables(editor, from, to) {
+    const result = [];
+    const fromPos = editor.offsetToPos(from);
+    const toPos = editor.offsetToPos(to);
+    let groupFrom = null;
+    let groupTo = from;
+    for (let line = fromPos.line; line <= toPos.line; line++) {
+      const lineText = editor.getLine(line);
+      const lineStart = editor.posToOffset({ line, ch: 0 });
+      const lineEnd = lineStart + lineText.length;
+      const segStart = Math.max(from, lineStart);
+      const segEnd = Math.min(to, lineEnd);
+      if (isTableLine(lineText)) {
+        if (groupFrom !== null) {
+          result.push({ from: groupFrom, to: groupTo });
+          groupFrom = null;
+        }
+        continue;
+      }
+      if (groupFrom === null) groupFrom = segStart;
+      groupTo = segEnd;
+    }
+    if (groupFrom !== null) {
+      result.push({ from: groupFrom, to: groupTo });
+    }
+    return result;
   }
   /**
    * Merge overlapping or adjacent dictated ranges into a minimal set.
@@ -3780,6 +3826,12 @@ var _RealtimeSession = class _RealtimeSession {
     // lets cumulative deltas finish (e.g. "nieuw todo" → "nieuw todo item")
     // before we match and execute the command.
     this.commandFlushTimer = null;
+    // Audio captured while the WebSocket is (re)connecting is buffered here
+    // and flushed once the new session is ready. The Mistral realtime API
+    // closes the connection after each utterance (silence), so without this
+    // the first words spoken when resuming after a pause would be dropped.
+    this.audioBuffer = [];
+    this.audioBufferBytes = 0;
   }
   /** Connect the WebSocket and start receiving transcription. */
   async start(editor) {
@@ -3789,6 +3841,8 @@ var _RealtimeSession = class _RealtimeSession {
     this.turnProcessed = 0;
     this.consecutiveFailures = 0;
     this.clearCommandFlushTimer();
+    this.audioBuffer = [];
+    this.audioBufferBytes = 0;
     await this.connectWebSocket(editor);
   }
   clearCommandFlushTimer() {
@@ -3800,7 +3854,33 @@ var _RealtimeSession = class _RealtimeSession {
   /** Send PCM audio data to the transcriber. */
   sendAudio(pcmData) {
     var _a;
-    (_a = this.transcriber) == null ? void 0 : _a.sendAudio(pcmData);
+    if ((_a = this.transcriber) == null ? void 0 : _a.isConnected) {
+      this.transcriber.sendAudio(pcmData);
+    } else {
+      this.bufferAudio(pcmData);
+    }
+  }
+  /** Buffer audio during a (re)connect, capped to bound memory. */
+  bufferAudio(pcmData) {
+    this.audioBuffer.push(pcmData);
+    this.audioBufferBytes += pcmData.byteLength;
+    while (this.audioBufferBytes > _RealtimeSession.MAX_AUDIO_BUFFER_BYTES && this.audioBuffer.length > 1) {
+      const dropped = this.audioBuffer.shift();
+      if (dropped) this.audioBufferBytes -= dropped.byteLength;
+    }
+  }
+  /** Send any buffered audio once the (new) session is connected. */
+  flushAudioBuffer() {
+    var _a;
+    if (!((_a = this.transcriber) == null ? void 0 : _a.isConnected) || this.audioBuffer.length === 0) {
+      return;
+    }
+    const buffered = this.audioBuffer;
+    this.audioBuffer = [];
+    this.audioBufferBytes = 0;
+    for (const chunk of buffered) {
+      this.transcriber.sendAudio(chunk);
+    }
   }
   /** Signal end of audio and finalize any pending text. */
   async stop(editor) {
@@ -3818,6 +3898,8 @@ var _RealtimeSession = class _RealtimeSession {
     }
     (_b = this.transcriber) == null ? void 0 : _b.close();
     this.transcriber = null;
+    this.audioBuffer = [];
+    this.audioBufferBytes = 0;
   }
   /** Flush any remaining pending text (called after slot close). */
   flushAfterSlot(editor) {
@@ -3851,6 +3933,7 @@ var _RealtimeSession = class _RealtimeSession {
       }
     });
     await this.transcriber.connect();
+    this.flushAudioBuffer();
   }
   /**
    * Handle WebSocket closure during recording.
@@ -3986,6 +4069,9 @@ var _RealtimeSession = class _RealtimeSession {
   }
 };
 _RealtimeSession.COMMAND_FLUSH_DEBOUNCE_MS = 400;
+// Cap the buffer so a long disconnect can't grow memory without bound.
+// 16kHz · 16-bit · mono = 32000 bytes/s, so this holds ~10s of audio.
+_RealtimeSession.MAX_AUDIO_BUFFER_BYTES = 32e4;
 var RealtimeSession = _RealtimeSession;
 
 // ../shared/src/dual-delay-session.ts
@@ -4507,6 +4593,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.isRecording = false;
     this.isPaused = false;
     this.isTypingMuted = false;
+    // `window.setTimeout` (Obsidian/DOM runtime) returns a numeric handle.
     this.typingResumeTimer = null;
     this.focusPauseTimer = null;
     this.statusBarEl = null;
@@ -4752,7 +4839,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
         console.debug(
           `Voxtral: App backgrounded, pausing in ${delaySec}s`
         );
-        this.focusPauseTimer = setTimeout(() => {
+        this.focusPauseTimer = window.setTimeout(() => {
           if (this.isRecording && document.hidden) {
             this.pauseRecording();
           }
@@ -4782,7 +4869,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
   }
   clearFocusPauseTimer() {
     if (this.focusPauseTimer) {
-      clearTimeout(this.focusPauseTimer);
+      window.clearTimeout(this.focusPauseTimer);
       this.focusPauseTimer = null;
     }
   }
@@ -4829,8 +4916,8 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     }
     if (e.key === "Escape" || e.key === "Tab" || e.key === "Enter" || e.key === "Backspace" || e.key === "Delete" || e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End" || e.key === "PageUp" || e.key === "PageDown" || e.key.startsWith("F") && e.key.length <= 3) {
       if (this.isTypingMuted && this.typingResumeTimer) {
-        clearTimeout(this.typingResumeTimer);
-        this.typingResumeTimer = setTimeout(() => {
+        window.clearTimeout(this.typingResumeTimer);
+        this.typingResumeTimer = window.setTimeout(() => {
           this.typingResumeTimer = null;
           if (this.isRecording && this.isTypingMuted && !this.isPaused) {
             this.isTypingMuted = false;
@@ -4845,9 +4932,9 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       this.recorder.mute();
     }
     if (this.typingResumeTimer) {
-      clearTimeout(this.typingResumeTimer);
+      window.clearTimeout(this.typingResumeTimer);
     }
-    this.typingResumeTimer = setTimeout(() => {
+    this.typingResumeTimer = window.setTimeout(() => {
       this.typingResumeTimer = null;
       if (this.isRecording && this.isTypingMuted && !this.isPaused) {
         this.isTypingMuted = false;
@@ -4863,6 +4950,19 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       await this.startRecording();
     }
   }
+  /**
+   * If text is selected when dictation starts, delete it and collapse the
+   * cursor to where the selection began — mirroring how typing replaces a
+   * selection. Transcribed text then lands in place of the old selection
+   * instead of being appended after it.
+   */
+  replaceSelectionBeforeDictation(editor) {
+    if (!editor.getSelection()) return;
+    const from = editor.getCursor("from");
+    const to = editor.getCursor("to");
+    editor.replaceRange("", from, to);
+    editor.setCursor(from);
+  }
   async startRecording() {
     if (!this.settings.apiKey) {
       new import_obsidian4.Notice("Please set your API key in the plugin settings.");
@@ -4875,6 +4975,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     }
     const editor = view.editor;
     this.currentEditor = editor;
+    this.replaceSelectionBeforeDictation(editor);
     try {
       if (this.effectiveMode === "realtime") {
         await this.startRealtimeRecording(editor);
@@ -4922,7 +5023,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       }
     } catch (e) {
       vlog.error("Voxtral: Failed to start recording", e);
-      new import_obsidian4.Notice(`Could not start recording: ${e}`);
+      new import_obsidian4.Notice(`Could not start recording: ${String(e)}`);
       this.updateStatusBar("idle");
     }
   }
@@ -4931,7 +5032,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.isPaused = false;
     this.isTypingMuted = false;
     if (this.typingResumeTimer) {
-      clearTimeout(this.typingResumeTimer);
+      window.clearTimeout(this.typingResumeTimer);
       this.typingResumeTimer = null;
     }
     this.clearFocusPauseTimer();
@@ -4945,7 +5046,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       }
     } catch (e) {
       vlog.error("Voxtral: Failed to stop recording", e);
-      new import_obsidian4.Notice(`Error stopping recording: ${e}`);
+      new import_obsidian4.Notice(`Error stopping recording: ${String(e)}`);
     }
     this.currentEditor = null;
     if (this.settings.autoCorrect) {
@@ -4999,7 +5100,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     } catch (e) {
       vlog.error("Voxtral: Chunk transcription failed", e);
       this.updateStatusBar("recording");
-      new import_obsidian4.Notice(`Chunk failed: ${e}`);
+      new import_obsidian4.Notice(`Chunk failed: ${String(e)}`);
     }
   }
   // ── Realtime recording (delegates to session classes) ──
@@ -5087,7 +5188,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       }
     } catch (e) {
       vlog.error("Voxtral: Batch transcription failed", e);
-      new import_obsidian4.Notice(`Transcription failed: ${e}`);
+      new import_obsidian4.Notice(`Transcription failed: ${String(e)}`);
     }
   }
   // ── Text correction ──
@@ -5109,7 +5210,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
         new import_obsidian4.Notice("Selection corrected");
       }
     } catch (e) {
-      new import_obsidian4.Notice(`Correction failed: ${e}`);
+      new import_obsidian4.Notice(`Correction failed: ${String(e)}`);
     }
   }
   async correctAll(editor) {
@@ -5127,7 +5228,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       this.tracker.reset();
       new import_obsidian4.Notice("Dictated text corrected");
     } catch (e) {
-      new import_obsidian4.Notice(`Correction failed: ${e}`);
+      new import_obsidian4.Notice(`Correction failed: ${String(e)}`);
     }
   }
   // ── Logs ──
@@ -5212,12 +5313,12 @@ ${getLogText()}
         break;
       }
       case "paused":
-        this.statusBarEl.setText("\u23F8 paused");
+        this.statusBarEl.setText("\u23F8 Paused");
         this.statusBarEl.addClass("voxtral-paused");
         this.statusBarEl.removeClass("voxtral-recording", "voxtral-processing");
         break;
       case "processing":
-        this.statusBarEl.setText("\u23F3 processing...");
+        this.statusBarEl.setText("\u23F3 Processing...");
         this.statusBarEl.addClass("voxtral-processing");
         this.statusBarEl.removeClass("voxtral-recording", "voxtral-paused");
         break;
