@@ -50,7 +50,8 @@ var DEFAULT_SETTINGS = {
   customCommands: [],
   templatesFolder: "",
   autoOpenHelpDesktop: true,
-  autoOpenHelpMobile: false
+  autoOpenHelpMobile: false,
+  debugLogging: false
 };
 
 // ../shared/src/similarity.ts
@@ -1226,6 +1227,10 @@ function trySplitCompound(text, knownWords) {
 // ../shared/src/plugin-logger.ts
 var LOG_BUFFER_SIZE = 500;
 var logBuffer = [];
+var debugEnabled = false;
+function setDebugLogging(enabled) {
+  debugEnabled = enabled;
+}
 function pushLog(level, args) {
   const ts = (/* @__PURE__ */ new Date()).toISOString();
   const msg = args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
@@ -1236,6 +1241,7 @@ function pushLog(level, args) {
 }
 var vlog = {
   debug: (...args) => {
+    if (!debugEnabled) return;
     pushLog("DEBUG", args);
     console.debug(...args);
   },
@@ -2492,6 +2498,15 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         textarea.classList.add("voxtral-textarea-full");
       }
     });
+    new import_obsidian.Setting(containerEl).setName("Debug logging").setDesc(
+      `Record verbose diagnostic logs for the "export logs to file" command. Leave off unless you're troubleshooting.`
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.debugLogging).onChange(async (value) => {
+        this.plugin.settings.debugLogging = value;
+        setDebugLogging(value);
+        await this.plugin.saveSettings();
+      })
+    );
   }
   renderCustomCommands(containerEl) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i;
@@ -2793,6 +2808,15 @@ function insertAtCursor(editor, text, posOverride) {
   }
   if (shouldStripTrailingPunctuation(context)) {
     text = stripTrailingPunctuation(text);
+  }
+  if (text.length > 0 && !/[\s\n]$/.test(text) && !isSlotActive()) {
+    const charAfter = editor.getRange(cursor, {
+      line: cursor.line,
+      ch: cursor.ch + 1
+    });
+    if (charAfter && /\S/.test(charAfter)) {
+      text = text + " ";
+    }
   }
   editor.replaceRange(text, cursor);
   const lines = text.split("\n");
@@ -3625,13 +3649,14 @@ var DictationTracker = class _DictationTracker {
    * @param posOverride — explicit insertion point. When supplied, the
    *   insertion point and resulting end are derived from it and the document
    *   length delta rather than editor.getCursor(), which Obsidian resets to
-   *   the cell start after an async table re-render. Returns the resulting
-   *   end offset so a caller can keep tracking it across turns.
+   *   the cell start after an async table re-render.
+   * @returns the resulting end offset (so a caller can keep tracking it across
+   *   turns) and whether a stop-recording command was hit.
    */
   trackProcessText(editor, text, onSlotActive, posOverride) {
     const offsetBefore = posOverride ? editor.posToOffset(posOverride) : editor.posToOffset(editor.getCursor());
     const lenBefore = posOverride ? editor.getValue().length : 0;
-    processText(editor, text, posOverride);
+    const stop = processText(editor, text, posOverride);
     if (isSlotActive() && onSlotActive) {
       onSlotActive();
     }
@@ -3666,7 +3691,7 @@ var DictationTracker = class _DictationTracker {
         (r) => r.to > r.from
       );
     }
-    return offsetAfter;
+    return { end: offsetAfter, stop };
   }
   /**
    * Insert text at cursor and track the range for auto-correct.
@@ -3811,7 +3836,7 @@ var DictationTracker = class _DictationTracker {
   }
 };
 
-// ../shared/src/realtime-session.ts
+// ../shared/src/table-insert.ts
 function cellIndexOf(line, ch) {
   let count = 0;
   for (let i = 0; i < ch && i < line.length; i++) {
@@ -3819,6 +3844,113 @@ function cellIndexOf(line, ch) {
   }
   return count;
 }
+function cellStartCh(line, col) {
+  if (col - 1 < 0) return 0;
+  let seen = 0;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === "|" && ++seen === col) return i + 1;
+  }
+  return 0;
+}
+function cellTextEndCh(line, col) {
+  var _a;
+  const pipes = [];
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === "|") pipes.push(i);
+  }
+  const cellStart = col - 1 >= 0 ? ((_a = pipes[col - 1]) != null ? _a : -1) + 1 : 0;
+  const cellEnd = col < pipes.length ? pipes[col] : line.length;
+  if (cellStart > cellEnd || cellStart < 0) return null;
+  const content = line.substring(cellStart, cellEnd);
+  return cellStart + content.replace(/\s+$/, "").length;
+}
+var TableInsertTracker = class {
+  /** No state is kept; provided for call-site symmetry with recording start. */
+  reset() {
+  }
+  /**
+   * Insert committed dictation text, table-aware.
+   * @returns whether a stop-recording command was hit.
+   */
+  commit(editor, tracker, text, onSlotActive) {
+    const selectionText = editor.getSelection();
+    if (selectionText.length > 0) {
+      const replacement = text.trim();
+      if (!replacement) return false;
+      const selLine = editor.getLine(editor.getCursor().line);
+      if (isTableLine(selLine)) {
+        vlog.debug(
+          `Voxtral[table] replace-selection atomic line=${JSON.stringify(selLine)}`
+        );
+        editor.replaceSelection(replacement);
+        return false;
+      }
+      editor.replaceSelection("");
+    }
+    const curPos = editor.getCursor();
+    const line = editor.getLine(curPos.line);
+    if (!isTableLine(line)) {
+      vlog.debug(
+        `Voxtral[table] off-table cur=${curPos.line}:${curPos.ch}`
+      );
+      return tracker.trackProcessText(editor, text, onSlotActive).stop;
+    }
+    if (matchCommand(text)) {
+      const col2 = cellIndexOf(line, curPos.ch);
+      const insertCh = cellTextEndCh(line, col2);
+      const posOverride = insertCh !== null ? { line: curPos.line, ch: insertCh } : void 0;
+      vlog.debug(
+        `Voxtral[table] command-append cell=${curPos.line}:col${col2} insertCh=${insertCh} line=${JSON.stringify(line)}`
+      );
+      const result = tracker.trackProcessText(
+        editor,
+        text,
+        onSlotActive,
+        posOverride
+      );
+      this.reassertCursor(editor, curPos.line, col2);
+      return result.stop;
+    }
+    const col = cellIndexOf(line, curPos.ch);
+    const cStart = cellStartCh(line, col);
+    const context = detectContext(line.substring(cStart, curPos.ch));
+    let out = text;
+    if (shouldLowercase(context)) out = lowercaseFirstLetter(out);
+    if (shouldStripTrailingPunctuation(context)) {
+      out = stripTrailingPunctuation(out);
+    }
+    const before = curPos.ch > 0 ? editor.getRange({ line: curPos.line, ch: curPos.ch - 1 }, curPos) : "";
+    if (before && /\S/.test(before) && !/^[\s\n|]/.test(out)) out = " " + out;
+    const charAfter = editor.getRange(curPos, {
+      line: curPos.line,
+      ch: curPos.ch + 1
+    });
+    if (charAfter && /\S/.test(charAfter) && /\S$/.test(out)) out = out + " ";
+    vlog.debug(
+      `Voxtral[table] cursor-insert PRE cur=${curPos.line}:${curPos.ch} ctx=${context} line=${JSON.stringify(line)}`
+    );
+    editor.replaceSelection(out);
+    const after = editor.getCursor();
+    vlog.debug(
+      `Voxtral[table] cursor-insert POST cur=${after.line}:${after.ch}`
+    );
+    return false;
+  }
+  /**
+   * Best-effort cosmetic: after the async reflow, drop the caret at the end of
+   * the cell's text. Correctness no longer depends on this.
+   */
+  reassertCursor(editor, line, col) {
+    setTimeout(() => {
+      const l = editor.getLine(line);
+      if (!isTableLine(l)) return;
+      const ch = cellTextEndCh(l, col);
+      if (ch !== null) editor.setCursor({ line, ch });
+    }, 0);
+  }
+};
+
+// ../shared/src/realtime-session.ts
 var _RealtimeSession = class _RealtimeSession {
   constructor(settings, tracker, callbacks) {
     this.settings = settings;
@@ -3842,11 +3974,9 @@ var _RealtimeSession = class _RealtimeSession {
     // the first words spoken when resuming after a pause would be dropped.
     this.audioBuffer = [];
     this.audioBufferBytes = 0;
-    // Where the session last committed text (document offset). The session —
-    // not editor.getCursor() — is authoritative about where dictation
-    // continues, because Obsidian's Live Preview re-renders a table widget
-    // after we edit a cell and resets the cursor to the cell start.
-    this.insertOffset = null;
+    // Keeps dictation appending in the right table cell despite Obsidian
+    // resetting the cursor after its async table re-render.
+    this.tableInserter = new TableInsertTracker();
   }
   /** Connect the WebSocket and start receiving transcription. */
   async start(editor) {
@@ -3858,74 +3988,17 @@ var _RealtimeSession = class _RealtimeSession {
     this.clearCommandFlushTimer();
     this.audioBuffer = [];
     this.audioBufferBytes = 0;
-    this.insertOffset = null;
+    this.tableInserter.reset();
     await this.connectWebSocket(editor);
   }
-  /**
-   * Insert committed dictation text.
-   *
-   * Inside a markdown table cell, Obsidian's Live Preview re-renders the table
-   * widget after we edit it and asynchronously resets the cursor to the start
-   * of *that same cell*. By the next turn editor.getCursor() therefore points
-   * at the cell start, so inserting there prepends each turn before the last.
-   * We keep our own tracked offset and, when the cursor has been reset within
-   * the same cell we were dictating into, insert at the tracked offset instead
-   * (passed explicitly down the insert path so it never reads getCursor()),
-   * advancing it from the document length change. A genuine move to another
-   * cell/column or off the table is followed as before.
-   */
+  /** Insert committed dictation text (table-aware; see TableInsertTracker). */
   commit(editor, text) {
-    const curPos = editor.getCursor();
-    const curOffset = editor.posToOffset(curPos);
-    const line = editor.getLine(curPos.line);
-    const onTable = isTableLine(line);
-    let anchorOffset = curOffset;
-    let mode = "cursor";
-    if (onTable && this.insertOffset !== null) {
-      const insPos = editor.offsetToPos(this.insertOffset);
-      const sameCell = insPos.line === curPos.line && cellIndexOf(line, curPos.ch) === cellIndexOf(line, insPos.ch);
-      if (sameCell && curOffset <= this.insertOffset) {
-        anchorOffset = this.insertOffset;
-        mode = "tracked";
-      }
-    }
-    vlog.debug(
-      `Voxtral[table] pre onTable=${onTable} mode=${mode} cur=${curPos.line}:${curPos.ch}(${curOffset}) ins=${this.insertOffset} anchor=${anchorOffset} line=${JSON.stringify(line)}`
+    this.tableInserter.commit(
+      editor,
+      this.tracker,
+      text,
+      () => this.callbacks.updateStatusBar("slot")
     );
-    if (onTable) {
-      const lenBefore = editor.getValue().length;
-      this.insertOffset = this.tracker.trackProcessText(
-        editor,
-        text,
-        () => this.callbacks.updateStatusBar("slot"),
-        editor.offsetToPos(anchorOffset)
-      );
-      const after = editor.getCursor();
-      vlog.debug(
-        `Voxtral[table] post newIns=${this.insertOffset} lenDelta=${editor.getValue().length - lenBefore} cursorNow=${after.line}:${after.ch} lineNow=${JSON.stringify(editor.getLine(editor.offsetToPos(this.insertOffset).line))}`
-      );
-      this.reassertCursor(editor, this.insertOffset);
-    } else {
-      this.tracker.trackProcessText(
-        editor,
-        text,
-        () => this.callbacks.updateStatusBar("slot")
-      );
-      this.insertOffset = editor.posToOffset(editor.getCursor());
-    }
-  }
-  /**
-   * Best-effort cosmetic fix: after the async table re-render resets the
-   * visible cursor to the cell start, put it back at the end of our text.
-   * Text correctness no longer depends on this — only where the caret shows.
-   */
-  reassertCursor(editor, offset) {
-    if (!isTableLine(editor.getLine(editor.offsetToPos(offset).line))) return;
-    setTimeout(() => {
-      if (isTableLine(editor.getLine(editor.offsetToPos(offset).line))) {
-        editor.setCursor(editor.offsetToPos(offset));
-      }
-    }, 0);
   }
   clearCommandFlushTimer() {
     if (this.commandFlushTimer) {
@@ -4656,6 +4729,10 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.realtimeSession = null;
     this.dualDelaySession = null;
     this.tracker = new DictationTracker();
+    // Table-aware insertion for the batch/chunk path (used on mobile, where
+    // realtime streaming is unavailable). Keeps dictation appending in the
+    // right table cell despite Obsidian's async table-widget cursor reset.
+    this.batchInserter = new TableInsertTracker();
     this.isRecording = false;
     this.isPaused = false;
     this.isTypingMuted = false;
@@ -4713,6 +4790,10 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    setDebugLogging(this.settings.debugLogging);
+    vlog.debug(
+      `Voxtral: plugin loaded (debug logging on), mode=${this.settings.mode}`
+    );
     this.recorder = new AudioRecorder();
     this.registerView(
       VIEW_TYPE_VOXTRAL_HELP,
@@ -5152,12 +5233,11 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       }
       this.updateStatusBar("recording");
       if (text) {
-        const offsetBefore = editor.posToOffset(editor.getCursor());
-        const stopRequested = processText(editor, text);
-        const offsetAfter = editor.posToOffset(editor.getCursor());
-        if (offsetAfter > offsetBefore) {
-          this.tracker.addRange(offsetBefore, offsetAfter);
-        }
+        const stopRequested = this.batchInserter.commit(
+          editor,
+          this.tracker,
+          text
+        );
         if (stopRequested) {
           await this.stopRecording();
           return;
@@ -5218,6 +5298,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
   }
   // ── Batch recording ──
   async startBatchRecording() {
+    this.batchInserter.reset();
     const deviceId = this.settings.microphoneDeviceId || void 0;
     await this.recorder.start(deviceId, void 0, this.settings.noiseSuppression);
     if (this.recorder.fallbackUsed) {
@@ -5250,7 +5331,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
         text = await correctText(text, this.settings, this.httpRequest);
       }
       if (text) {
-        processText(editor, text);
+        this.batchInserter.commit(editor, this.tracker, text);
       }
     } catch (e) {
       vlog.error("Voxtral: Batch transcription failed", e);
