@@ -2773,15 +2773,9 @@ function fixMishearings(text) {
   }
   return text;
 }
-function detectInsertionContext(editor) {
-  const cursor = editor.getCursor();
-  if (cursor.ch === 0) return "new-line";
-  const lineBefore = editor.getRange({ line: cursor.line, ch: 0 }, cursor);
-  return detectContext(lineBefore);
-}
-function insertAtCursor(editor, text) {
-  const cursor = editor.getCursor();
-  const context = detectInsertionContext(editor);
+function insertAtCursor(editor, text, posOverride) {
+  const cursor = posOverride != null ? posOverride : editor.getCursor();
+  const context = cursor.ch === 0 ? "new-line" : detectContext(editor.getRange({ line: cursor.line, ch: 0 }, cursor));
   if (cursor.ch === 0) {
     text = text.replace(/^ +/, "");
   }
@@ -3234,28 +3228,30 @@ var preMatchHook = null;
 function setPreMatchHook(hook) {
   preMatchHook = hook;
 }
-function processText(editor, text) {
+function processText(editor, text, posOverride) {
   let stopRequested = false;
   const segments = text.match(/[^.!?]+[.!?]+\s*/g);
   if (!segments) {
-    stopRequested = processSegment(editor, text);
+    stopRequested = processSegment(editor, text, posOverride);
     return stopRequested;
   }
   const joined = segments.join("");
   const remainder = text.slice(joined.length);
+  let first = true;
   for (const segment of segments) {
-    if (processSegment(editor, segment)) {
+    if (processSegment(editor, segment, first ? posOverride : void 0)) {
       stopRequested = true;
     }
+    first = false;
   }
   if (remainder.trim()) {
-    if (processSegment(editor, remainder)) {
+    if (processSegment(editor, remainder, first ? posOverride : void 0)) {
       stopRequested = true;
     }
   }
   return stopRequested;
 }
-function processSegment(editor, text) {
+function processSegment(editor, text, posOverride) {
   if (preMatchHook) {
     const normalized = fixMishearings(normalizeCommand(text));
     if (preMatchHook(editor, normalized, text)) return false;
@@ -3267,12 +3263,12 @@ function processSegment(editor, text) {
       if (match.command.punctuation) {
         before = before.replace(/[,;.!?]+\s*$/, "");
       }
-      insertAtCursor(editor, before);
+      insertAtCursor(editor, before, posOverride);
     }
     match.command.action(editor);
     return match.command.id === "stopRecording";
   } else {
-    insertAtCursor(editor, text);
+    insertAtCursor(editor, text, posOverride);
   }
   return false;
 }
@@ -3626,14 +3622,20 @@ var DictationTracker = class _DictationTracker {
    * insertion shifts them.
    *
    * @param onSlotActive — optional callback when a slot becomes active
+   * @param posOverride — explicit insertion point. When supplied, the
+   *   insertion point and resulting end are derived from it and the document
+   *   length delta rather than editor.getCursor(), which Obsidian resets to
+   *   the cell start after an async table re-render. Returns the resulting
+   *   end offset so a caller can keep tracking it across turns.
    */
-  trackProcessText(editor, text, onSlotActive) {
-    const offsetBefore = editor.posToOffset(editor.getCursor());
-    processText(editor, text);
+  trackProcessText(editor, text, onSlotActive, posOverride) {
+    const offsetBefore = posOverride ? editor.posToOffset(posOverride) : editor.posToOffset(editor.getCursor());
+    const lenBefore = posOverride ? editor.getValue().length : 0;
+    processText(editor, text, posOverride);
     if (isSlotActive() && onSlotActive) {
       onSlotActive();
     }
-    const offsetAfter = editor.posToOffset(editor.getCursor());
+    const offsetAfter = posOverride ? offsetBefore + (editor.getValue().length - lenBefore) : editor.posToOffset(editor.getCursor());
     const delta = offsetAfter - offsetBefore;
     if (delta > 0) {
       for (const range of this.dictatedRanges) {
@@ -3664,6 +3666,7 @@ var DictationTracker = class _DictationTracker {
         (r) => r.to > r.from
       );
     }
+    return offsetAfter;
   }
   /**
    * Insert text at cursor and track the range for auto-correct.
@@ -3809,6 +3812,13 @@ var DictationTracker = class _DictationTracker {
 };
 
 // ../shared/src/realtime-session.ts
+function cellIndexOf(line, ch) {
+  let count = 0;
+  for (let i = 0; i < ch && i < line.length; i++) {
+    if (line[i] === "|") count++;
+  }
+  return count;
+}
 var _RealtimeSession = class _RealtimeSession {
   constructor(settings, tracker, callbacks) {
     this.settings = settings;
@@ -3852,57 +3862,70 @@ var _RealtimeSession = class _RealtimeSession {
     await this.connectWebSocket(editor);
   }
   /**
-   * Insert committed dictation text, keeping the session — not the editor —
-   * authoritative about where dictation continues. Obsidian's Live Preview
-   * re-renders a table widget after we edit a cell and resets the cursor to
-   * the cell start; without this the next turn would prepend its text and the
-   * visible cursor would sit at the wrong spot. We restore our tracked
-   * insertion point before inserting, and re-assert it after the async
-   * re-render. Both are scoped to the table-reset signature (cursor moved
-   * backward on the same table line), so genuine repositioning is respected.
+   * Insert committed dictation text.
+   *
+   * Inside a markdown table cell, Obsidian's Live Preview re-renders the table
+   * widget after we edit it and asynchronously resets the cursor to the start
+   * of *that same cell*. By the next turn editor.getCursor() therefore points
+   * at the cell start, so inserting there prepends each turn before the last.
+   * We keep our own tracked offset and, when the cursor has been reset within
+   * the same cell we were dictating into, insert at the tracked offset instead
+   * (passed explicitly down the insert path so it never reads getCursor()),
+   * advancing it from the document length change. A genuine move to another
+   * cell/column or off the table is followed as before.
    */
-  commit(editor, text, opts = {}) {
-    this.restoreInsertPoint(editor);
-    this.tracker.trackProcessText(
-      editor,
-      text,
-      () => this.callbacks.updateStatusBar("slot")
-    );
-    this.insertOffset = editor.posToOffset(editor.getCursor());
-    if (opts.reassert !== false) {
-      this.reassertInsertPoint(editor, this.insertOffset);
-    }
-  }
-  /** Restore the cursor to our insertion point if a table re-render moved it. */
-  restoreInsertPoint(editor) {
-    if (this.insertOffset === null) return;
+  commit(editor, text) {
     const curPos = editor.getCursor();
-    const cur = editor.posToOffset(curPos);
-    if (cur === this.insertOffset) return;
-    if (this.isTableReset(editor, curPos, cur, this.insertOffset)) {
-      editor.setCursor(editor.offsetToPos(this.insertOffset));
+    const curOffset = editor.posToOffset(curPos);
+    const line = editor.getLine(curPos.line);
+    const onTable = isTableLine(line);
+    let anchorOffset = curOffset;
+    let mode = "cursor";
+    if (onTable && this.insertOffset !== null) {
+      const insPos = editor.offsetToPos(this.insertOffset);
+      const sameCell = insPos.line === curPos.line && cellIndexOf(line, curPos.ch) === cellIndexOf(line, insPos.ch);
+      if (sameCell && curOffset <= this.insertOffset) {
+        anchorOffset = this.insertOffset;
+        mode = "tracked";
+      }
+    }
+    vlog.debug(
+      `Voxtral[table] pre onTable=${onTable} mode=${mode} cur=${curPos.line}:${curPos.ch}(${curOffset}) ins=${this.insertOffset} anchor=${anchorOffset} line=${JSON.stringify(line)}`
+    );
+    if (onTable) {
+      const lenBefore = editor.getValue().length;
+      this.insertOffset = this.tracker.trackProcessText(
+        editor,
+        text,
+        () => this.callbacks.updateStatusBar("slot"),
+        editor.offsetToPos(anchorOffset)
+      );
+      const after = editor.getCursor();
+      vlog.debug(
+        `Voxtral[table] post newIns=${this.insertOffset} lenDelta=${editor.getValue().length - lenBefore} cursorNow=${after.line}:${after.ch} lineNow=${JSON.stringify(editor.getLine(editor.offsetToPos(this.insertOffset).line))}`
+      );
+      this.reassertCursor(editor, this.insertOffset);
     } else {
-      this.insertOffset = cur;
+      this.tracker.trackProcessText(
+        editor,
+        text,
+        () => this.callbacks.updateStatusBar("slot")
+      );
+      this.insertOffset = editor.posToOffset(editor.getCursor());
     }
   }
-  /** Re-assert the cursor after Obsidian's async table re-render. */
-  reassertInsertPoint(editor, offset) {
-    const pos = editor.offsetToPos(offset);
-    if (!isTableLine(editor.getLine(pos.line))) return;
+  /**
+   * Best-effort cosmetic fix: after the async table re-render resets the
+   * visible cursor to the cell start, put it back at the end of our text.
+   * Text correctness no longer depends on this — only where the caret shows.
+   */
+  reassertCursor(editor, offset) {
+    if (!isTableLine(editor.getLine(editor.offsetToPos(offset).line))) return;
     setTimeout(() => {
-      const curPos = editor.getCursor();
-      const cur = editor.posToOffset(curPos);
-      if (this.isTableReset(editor, curPos, cur, offset)) {
+      if (isTableLine(editor.getLine(editor.offsetToPos(offset).line))) {
         editor.setCursor(editor.offsetToPos(offset));
       }
     }, 0);
-  }
-  /**
-   * True when the cursor sits at the table-re-render reset signature:
-   * jumped backward on the same line, and that line is a table row.
-   */
-  isTableReset(editor, curPos, cur, ref) {
-    return cur < ref && curPos.line === editor.offsetToPos(ref).line && isTableLine(editor.getLine(curPos.line));
   }
   clearCommandFlushTimer() {
     if (this.commandFlushTimer) {
@@ -3948,7 +3971,7 @@ var _RealtimeSession = class _RealtimeSession {
     this.clearCommandFlushTimer();
     await new Promise((resolve) => setTimeout(resolve, 1e3));
     if (this.pendingText.trim()) {
-      this.commit(editor, this.pendingText.trim(), { reassert: false });
+      this.commit(editor, this.pendingText.trim());
       this.pendingText = "";
     }
     (_b = this.transcriber) == null ? void 0 : _b.close();
