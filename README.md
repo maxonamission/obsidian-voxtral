@@ -126,6 +126,16 @@ When switching apps on mobile, you can configure what happens to an active recor
 | Auto-correct | Enable/disable automatic correction |
 | Streaming delay | Latency vs accuracy tradeoff for realtime mode |
 
+## Privacy & permissions
+
+What the plugin accesses and why. The Obsidian review page lists some of these without context.
+
+- **Network** — Your audio is sent to `api.mistral.ai` for transcription (and, if Auto-correct is on, dictated text for correction). That is the only place your content leaves your device. A custom **API base URL** can point this elsewhere — e.g. `http://localhost:8000` for a self-hosted/local model — so nothing leaves your machine. `buymeacoffee.com` is a support link only, opened in your browser when you click it in Settings; no data is sent.
+- **Audio encoding** — Captured audio is base64-encoded (`btoa()`) to include it in the API request. This is transport encoding, not obfuscation.
+- **Vault access** — The plugin reads and writes the **active note** to insert transcribed text and to run "Correct dictated text" on what you dictated. If you enable Templates, it reads template files from the folder you configure. It does not scan or upload your vault.
+- **Clipboard** — Not used. The plugin neither reads nor writes the clipboard. ("Export logs" writes a new note in your vault, not the clipboard.)
+- **API key storage** — Your Mistral API key is stored in the plugin's `data.json` (Obsidian's plugin data folder), unencrypted, like most Obsidian plugins. Don't share that file.
+
 ## Development
 
 ```bash

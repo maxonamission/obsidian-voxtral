@@ -1,7 +1,7 @@
 {
 	"id": "voxtral-transcribe",
 	"name": "Voxtral Transcribe",
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"minAppVersion": "1.7.2",
 	"description": "Real-time streaming transcription using Mistral Voxtral, supports voice commands (headings, lists, to-dos and more) and automatic text correction.",
 	"author": "Max Kloosterman",
