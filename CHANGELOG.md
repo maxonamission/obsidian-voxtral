@@ -4,6 +4,13 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.4.3] - 2026-06-23
+
+- **Help panel: tidier "don't auto-open" control on mobile.** The opt-out
+  checkbox and its text now line up cleanly — the label and helper text share one
+  column beside the checkbox instead of drifting to a ragged left edge, and the
+  oversized gap between the checkbox and its text on mobile is gone.
+
 ## [1.4.2] - 2026-06-23
 
 - **Voice help panel: stop it auto-opening, from the panel itself.** A new checkbox

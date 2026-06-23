@@ -3672,13 +3672,11 @@ function renderHelpContent(container, lang, control) {
     const label = box.createEl("label", { cls: "voxtral-help-autoopen-label" });
     const checkbox = label.createEl("input", { type: "checkbox" });
     checkbox.checked = !control.enabled;
-    label.createSpan({ text: auto.label });
+    const text = label.createDiv({ cls: "voxtral-help-autoopen-text" });
+    text.createSpan({ text: auto.label });
+    text.createDiv({ text: auto.helper, cls: "voxtral-help-autoopen-helper" });
     checkbox.addEventListener("change", () => {
       void control.onChange(!checkbox.checked);
-    });
-    box.createEl("div", {
-      text: auto.helper,
-      cls: "voxtral-help-autoopen-helper"
     });
   }
 }
@@ -5021,14 +5019,18 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
         void this.exportLogs();
       }
     });
-    this.addCommand({
-      id: "transcribe-audio-file",
-      name: "Transcribe audio file",
-      icon: "file-audio",
-      callback: () => {
-        void this.transcribeAudioFile();
-      }
-    });
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (!(file instanceof import_obsidian4.TFile) || !isAudioFile(file.extension)) {
+          return;
+        }
+        menu.addItem(
+          (item) => item.setTitle("Transcribe audio file").setIcon("file-audio").onClick(() => {
+            void this.transcribeFileFromMenu(file);
+          })
+        );
+      })
+    );
     this.addCommand({
       id: "correct-selection",
       name: "Correct selected text",
@@ -5595,22 +5597,14 @@ ${getLogText()}
     new import_obsidian4.Notice(`${count} log entries saved to ${file.path}`);
   }
   // ── File transcription (batch) ──
-  /** Pick an audio file from the vault and transcribe it into the active note. */
-  async transcribeAudioFile() {
+  /** Transcribe a vault audio file (chosen via its right-click menu) into the active note. */
+  async transcribeFileFromMenu(file) {
     const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
     if (!view) {
       new import_obsidian4.Notice("Open a note first to insert the transcript.");
       return;
     }
-    const editor = view.editor;
-    const audioFiles = this.app.vault.getFiles().filter((f) => isAudioFile(f.extension));
-    if (audioFiles.length === 0) {
-      new import_obsidian4.Notice("No audio files found in this vault.");
-      return;
-    }
-    new AudioFileSuggestModal(this.app, audioFiles, (file) => {
-      void this.runFileTranscription(file, editor);
-    }).open();
+    await this.runFileTranscription(file, view.editor);
   }
   /** Read a vault audio file, transcribe it (batch), and insert at the cursor. */
   async runFileTranscription(file, editor) {
@@ -5724,22 +5718,5 @@ ${getLogText()}
         this.statusBarEl.removeClass("voxtral-recording", "voxtral-paused");
         break;
     }
-  }
-};
-var AudioFileSuggestModal = class extends import_obsidian4.FuzzySuggestModal {
-  constructor(app, files, onChoose) {
-    super(app);
-    this.files = files;
-    this.onChoose = onChoose;
-    this.setPlaceholder("Select an audio file to transcribe");
-  }
-  getItems() {
-    return this.files;
-  }
-  getItemText(file) {
-    return file.path;
-  }
-  onChooseItem(file) {
-    this.onChoose(file);
   }
 };
