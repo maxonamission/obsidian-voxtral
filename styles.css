@@ -66,6 +66,28 @@
 	color: var(--text-muted);
 }
 
+/* ── Help panel: auto-open opt-out control ── */
+
+.voxtral-help-autoopen {
+	margin-top: 16px;
+	padding-top: 12px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.voxtral-help-autoopen-label {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	font-size: 0.85em;
+	cursor: pointer;
+}
+
+.voxtral-help-autoopen-helper {
+	margin-top: 4px;
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
 /* ── Send button (tap-to-send during batch recording) ── */
 
 .voxtral-send-button.voxtral-send-button {

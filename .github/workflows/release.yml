@@ -14,6 +14,20 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v4
+      - name: Extract release notes for this version
+        # Pull just this version's section out of CHANGELOG.md (the tag is the
+        # bare version, e.g. "1.4.2") for use as the release body. Falls back to
+        # an empty body so the auto-generated notes still appear.
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          : > RELEASE_NOTES.md
+          if [ -f CHANGELOG.md ]; then
+            awk -v v="$VERSION" '
+              $0 ~ ("^## \\[" v "\\]") { f=1; next }
+              /^## \[/ && f { exit }
+              f { print }
+            ' CHANGELOG.md > RELEASE_NOTES.md
+          fi
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
@@ -22,6 +36,7 @@ jobs:
             styles.css
       - uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
           files: |
             main.js

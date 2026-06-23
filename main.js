@@ -1937,7 +1937,8 @@ async function listModels(apiKey, httpRequest, baseUrl) {
 }
 async function transcribeBatch(audioBlob, settings, httpRequest, diarize = false) {
   var _a;
-  const ext = audioBlob.type.includes("mp4") ? "m4a" : audioBlob.type.includes("ogg") ? "ogg" : "webm";
+  const t = audioBlob.type;
+  const ext = t.includes("mp4") ? "m4a" : t.includes("ogg") ? "ogg" : t.includes("mpeg") || t.includes("mp3") ? "mp3" : t.includes("wav") ? "wav" : t.includes("flac") ? "flac" : t.includes("aac") ? "aac" : "webm";
   const mimeType = audioBlob.type || `audio/${ext}`;
   const boundary = `----VoxtralBoundary${Date.now()}`;
   const arrayBuf = await audioBlob.arrayBuffer();
@@ -2523,13 +2524,14 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         (btn) => btn.setButtonText("Edit").onClick(() => {
           this.openCommandEditor(cmd, i);
         })
-      ).addButton(
-        (btn) => btn.setButtonText("Delete").setWarning().onClick(async () => {
+      ).addButton((btn) => {
+        btn.setButtonText("Delete").onClick(async () => {
           commands.splice(i, 1);
           await this.plugin.saveSettings();
           this.display();
-        })
-      );
+        });
+        btn.buttonEl.addClass("mod-warning");
+      });
     }
     new import_obsidian.Setting(containerEl).setDesc("Add a custom voice command for inserting text or opening a slot").addButton(
       (btn) => btn.setButtonText("Add command").setCta().onClick(() => {
@@ -3462,16 +3464,144 @@ var UI_STRINGS = {
       "Le impostazioni (inclusa la chiave API) sono memorizzate in data.json.",
       "L'esportazione dei log non contiene testo trascritto n\xE9 chiavi API."
     ]
+  },
+  ru: {
+    title: "\u0413\u043E\u043B\u043E\u0441\u043E\u0432\u044B\u0435 \u043A\u043E\u043C\u0430\u043D\u0434\u044B Voxtral",
+    command: "\u041A\u043E\u043C\u0430\u043D\u0434\u0430",
+    say: "\u0421\u043A\u0430\u0436\u0438\u0442\u0435...",
+    tips: "\u0421\u043E\u0432\u0435\u0442\u044B",
+    tipItems: [
+      "\u041A\u043E\u043C\u0430\u043D\u0434\u044B \u0440\u0430\u0441\u043F\u043E\u0437\u043D\u0430\u044E\u0442\u0441\u044F \u0432 \u043A\u043E\u043D\u0446\u0435 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u044F.",
+      "\u0421\u043A\u0430\u0436\u0438\u0442\u0435 \xAB\u0434\u043B\u044F \u043A\u043E\u0440\u0440\u0435\u043A\u0446\u0438\u0438: ...\xBB, \u0447\u0442\u043E\u0431\u044B \u0434\u0430\u0442\u044C \u0443\u043A\u0430\u0437\u0430\u043D\u0438\u044F \u043A\u043E\u0440\u0440\u0435\u043A\u0442\u043E\u0440\u0443.",
+      "\u0421\u043B\u043E\u0432\u0430, \u043F\u0440\u043E\u0438\u0437\u043D\u0435\u0441\u0451\u043D\u043D\u044B\u0435 \u043F\u043E \u0431\u0443\u043A\u0432\u0430\u043C (V-O-X-T-R-A-L), \u043E\u0431\u044A\u0435\u0434\u0438\u043D\u044F\u044E\u0442\u0441\u044F \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438.",
+      "\u0421\u0430\u043C\u043E\u0438\u0441\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F (\xAB\u043D\u0435\u0442, \u043D\u0435 X, \u0430 Y\xBB) \u0440\u0430\u0441\u043F\u043E\u0437\u043D\u0430\u044E\u0442\u0441\u044F."
+    ],
+    privacy: "\u041A\u043E\u043D\u0444\u0438\u0434\u0435\u043D\u0446\u0438\u0430\u043B\u044C\u043D\u043E\u0441\u0442\u044C",
+    privacyItems: [
+      "\u0410\u0443\u0434\u0438\u043E \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u0432 API Mistral \u043F\u043E HTTPS/WSS \u0438 \u043D\u0435 \u0445\u0440\u0430\u043D\u0438\u0442\u0441\u044F \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E.",
+      "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 (\u0432\u043A\u043B\u044E\u0447\u0430\u044F \u043A\u043B\u044E\u0447 API) \u0445\u0440\u0430\u043D\u044F\u0442\u0441\u044F \u0432 \u0444\u0430\u0439\u043B\u0435 data.json \u0432 \u043F\u0430\u043F\u043A\u0435 \u043F\u043B\u0430\u0433\u0438\u043D\u0430.",
+      "\u042D\u043A\u0441\u043F\u043E\u0440\u0442 \u0436\u0443\u0440\u043D\u0430\u043B\u043E\u0432 \u043D\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u0442 \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u043D\u043E\u0433\u043E \u0442\u0435\u043A\u0441\u0442\u0430 \u0438\u043B\u0438 \u043A\u043B\u044E\u0447\u0435\u0439 API."
+    ]
+  },
+  zh: {
+    title: "Voxtral \u8BED\u97F3\u547D\u4EE4",
+    command: "\u547D\u4EE4",
+    say: "\u8BF4\u2026\u2026",
+    tips: "\u63D0\u793A",
+    tipItems: [
+      "\u547D\u4EE4\u5728\u53E5\u5B50\u7ED3\u5C3E\u5904\u88AB\u8BC6\u522B\u3002",
+      "\u8BF4\u201C\u7528\u4E8E\u66F4\u6B63\uFF1A\u2026\u2026\u201D\u53EF\u5411\u6821\u6B63\u5668\u63D0\u4F9B\u5185\u8054\u6307\u4EE4\u3002",
+      "\u9010\u5B57\u6BCD\u62FC\u51FA\u7684\u5355\u8BCD\uFF08V-O-X-T-R-A-L\uFF09\u4F1A\u81EA\u52A8\u5408\u5E76\u3002",
+      "\u81EA\u6211\u66F4\u6B63\uFF08\u201C\u4E0D\uFF0C\u4E0D\u662F X \u800C\u662F Y\u201D\uFF09\u4F1A\u88AB\u8BC6\u522B\u3002"
+    ],
+    privacy: "\u9690\u79C1",
+    privacyItems: [
+      "\u97F3\u9891\u901A\u8FC7 HTTPS/WSS \u53D1\u9001\u5230 Mistral API\uFF0C\u4E0D\u4F1A\u5728\u672C\u5730\u5B58\u50A8\u3002",
+      "\u8BBE\u7F6E\uFF08\u5305\u62EC API \u5BC6\u94A5\uFF09\u5B58\u50A8\u5728\u63D2\u4EF6\u6587\u4EF6\u5939\u7684 data.json \u4E2D\u3002",
+      "\u65E5\u5FD7\u5BFC\u51FA\u4E0D\u5305\u542B\u8F6C\u5F55\u6587\u672C\u6216 API \u5BC6\u94A5\u3002"
+    ]
+  },
+  hi: {
+    title: "Voxtral \u0935\u0949\u0907\u0938 \u0915\u092E\u093E\u0902\u0921",
+    command: "\u0915\u092E\u093E\u0902\u0921",
+    say: "\u0915\u0939\u0947\u0902...",
+    tips: "\u0938\u0941\u091D\u093E\u0935",
+    tipItems: [
+      "\u0915\u092E\u093E\u0902\u0921 \u0935\u093E\u0915\u094D\u092F \u0915\u0947 \u0905\u0902\u0924 \u092E\u0947\u0902 \u092A\u0939\u091A\u093E\u0928\u0947 \u091C\u093E\u0924\u0947 \u0939\u0948\u0902\u0964",
+      "\u0915\u0930\u0947\u0915\u094D\u091F\u0930 \u0915\u094B \u0928\u093F\u0930\u094D\u0926\u0947\u0936 \u0926\u0947\u0928\u0947 \u0915\u0947 \u0932\u093F\u090F '\u0938\u0941\u0927\u093E\u0930 \u0915\u0947 \u0932\u093F\u090F: ...' \u0915\u0939\u0947\u0902\u0964",
+      "\u0935\u0930\u094D\u0924\u0928\u0940 \u092E\u0947\u0902 \u092C\u094B\u0932\u0947 \u0917\u090F \u0936\u092C\u094D\u0926 (V-O-X-T-R-A-L) \u0938\u094D\u0935\u0924\u0903 \u091C\u0941\u0921\u093C \u091C\u093E\u0924\u0947 \u0939\u0948\u0902\u0964",
+      "\u0938\u094D\u0935-\u0938\u0941\u0927\u093E\u0930 ('\u0928\u0939\u0940\u0902, X \u0928\u0939\u0940\u0902 \u092C\u0932\u094D\u0915\u093F Y') \u092A\u0939\u091A\u093E\u0928\u0947 \u091C\u093E\u0924\u0947 \u0939\u0948\u0902\u0964"
+    ],
+    privacy: "\u0917\u094B\u092A\u0928\u0940\u092F\u0924\u093E",
+    privacyItems: [
+      "\u0911\u0921\u093F\u092F\u094B HTTPS/WSS \u0915\u0947 \u092E\u093E\u0927\u094D\u092F\u092E \u0938\u0947 Mistral API \u0915\u094B \u092D\u0947\u091C\u093E \u091C\u093E\u0924\u093E \u0939\u0948 \u0914\u0930 \u0938\u094D\u0925\u093E\u0928\u0940\u092F \u0930\u0942\u092A \u0938\u0947 \u0938\u0902\u0917\u094D\u0930\u0939\u0940\u0924 \u0928\u0939\u0940\u0902 \u0939\u094B\u0924\u093E\u0964",
+      "\u0938\u0947\u091F\u093F\u0902\u0917\u094D\u0938 (API \u0915\u0941\u0902\u091C\u0940 \u0938\u0939\u093F\u0924) \u092A\u094D\u0932\u0917\u0907\u0928 \u092B\u093C\u094B\u0932\u094D\u0921\u0930 \u0915\u0940 data.json \u092E\u0947\u0902 \u0938\u0902\u0917\u094D\u0930\u0939\u0940\u0924 \u0939\u094B\u0924\u0940 \u0939\u0948\u0902\u0964",
+      "\u0932\u0949\u0917 \u0928\u093F\u0930\u094D\u092F\u093E\u0924 \u092E\u0947\u0902 \u091F\u094D\u0930\u093E\u0902\u0938\u0915\u094D\u0930\u093E\u0907\u092C \u0915\u093F\u092F\u093E \u0917\u092F\u093E \u091F\u0947\u0915\u094D\u0938\u094D\u091F \u092F\u093E API \u0915\u0941\u0902\u091C\u093F\u092F\u093E\u0901 \u0928\u0939\u0940\u0902 \u0939\u094B\u0924\u0940\u0902\u0964"
+    ]
+  },
+  ar: {
+    title: "\u0623\u0648\u0627\u0645\u0631 Voxtral \u0627\u0644\u0635\u0648\u062A\u064A\u0629",
+    command: "\u0627\u0644\u0623\u0645\u0631",
+    say: "\u0642\u0644...",
+    tips: "\u0646\u0635\u0627\u0626\u062D",
+    tipItems: [
+      "\u064A\u062A\u0645 \u0627\u0644\u062A\u0639\u0631\u0651\u0641 \u0639\u0644\u0649 \u0627\u0644\u0623\u0648\u0627\u0645\u0631 \u0641\u064A \u0646\u0647\u0627\u064A\u0629 \u0627\u0644\u062C\u0645\u0644\u0629.",
+      "\u0642\u0644 \xAB\u0644\u0644\u062A\u0635\u062D\u064A\u062D: ...\xBB \u0644\u0625\u0639\u0637\u0627\u0621 \u062A\u0639\u0644\u064A\u0645\u0627\u062A \u0645\u0628\u0627\u0634\u0631\u0629 \u0644\u0644\u0645\u0635\u062D\u0651\u062D.",
+      "\u062A\u064F\u062F\u0645\u062C \u0627\u0644\u0643\u0644\u0645\u0627\u062A \u0627\u0644\u0645\u062A\u0647\u062C\u0651\u0627\u0629 (V-O-X-T-R-A-L) \u062A\u0644\u0642\u0627\u0626\u064A\u064B\u0627.",
+      "\u062A\u064F\u0645\u064A\u064E\u0651\u0632 \u0627\u0644\u062A\u0635\u062D\u064A\u062D\u0627\u062A \u0627\u0644\u0630\u0627\u062A\u064A\u0629 (\xAB\u0644\u0627\u060C \u0644\u064A\u0633 X \u0628\u0644 Y\xBB)."
+    ],
+    privacy: "\u0627\u0644\u062E\u0635\u0648\u0635\u064A\u0629",
+    privacyItems: [
+      "\u064A\u064F\u0631\u0633\u064E\u0644 \u0627\u0644\u0635\u0648\u062A \u0625\u0644\u0649 \u0648\u0627\u062C\u0647\u0629 Mistral \u0639\u0628\u0631 HTTPS/WSS \u0648\u0644\u0627 \u064A\u064F\u062E\u0632\u064E\u0651\u0646 \u0645\u062D\u0644\u064A\u064B\u0627.",
+      "\u062A\u064F\u062E\u0632\u064E\u0651\u0646 \u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A (\u0628\u0645\u0627 \u0641\u064A \u0630\u0644\u0643 \u0645\u0641\u062A\u0627\u062D API) \u0641\u064A \u0645\u0644\u0641 data.json \u062F\u0627\u062E\u0644 \u0645\u062C\u0644\u062F \u0627\u0644\u0625\u0636\u0627\u0641\u0629.",
+      "\u0644\u0627 \u064A\u062D\u062A\u0648\u064A \u062A\u0635\u062F\u064A\u0631 \u0627\u0644\u0633\u062C\u0644\u0651\u0627\u062A \u0639\u0644\u0649 \u0646\u0635 \u0645\u064F\u0641\u0631\u064E\u0651\u063A \u0623\u0648 \u0645\u0641\u0627\u062A\u064A\u062D API."
+    ]
+  },
+  ja: {
+    title: "Voxtral \u97F3\u58F0\u30B3\u30DE\u30F3\u30C9",
+    command: "\u30B3\u30DE\u30F3\u30C9",
+    say: "\u8A00\u3044\u65B9",
+    tips: "\u30D2\u30F3\u30C8",
+    tipItems: [
+      "\u30B3\u30DE\u30F3\u30C9\u306F\u6587\u306E\u7D42\u308F\u308A\u3067\u8A8D\u8B58\u3055\u308C\u307E\u3059\u3002",
+      "\u300C\u4FEE\u6B63\u306E\u305F\u3081\u306B: \u2026\u300D\u3068\u8A00\u3046\u3068\u3001\u6821\u6B63\u62C5\u5F53\u306B\u6307\u793A\u3092\u51FA\u305B\u307E\u3059\u3002",
+      "\u4E00\u6587\u5B57\u305A\u3064\u7DB4\u3063\u305F\u5358\u8A9E\uFF08V-O-X-T-R-A-L\uFF09\u306F\u81EA\u52D5\u7684\u306B\u7D50\u5408\u3055\u308C\u307E\u3059\u3002",
+      "\u81EA\u5DF1\u4FEE\u6B63\uFF08\u300C\u3044\u3044\u3048\u3001X\u3067\u306F\u306A\u304FY\u300D\uFF09\u306F\u8A8D\u8B58\u3055\u308C\u307E\u3059\u3002"
+    ],
+    privacy: "\u30D7\u30E9\u30A4\u30D0\u30B7\u30FC",
+    privacyItems: [
+      "\u97F3\u58F0\u306F HTTPS/WSS \u3067 Mistral API \u306B\u9001\u4FE1\u3055\u308C\u3001\u30ED\u30FC\u30AB\u30EB\u306B\u306F\u4FDD\u5B58\u3055\u308C\u307E\u305B\u3093\u3002",
+      "\u8A2D\u5B9A\uFF08API \u30AD\u30FC\u3092\u542B\u3080\uFF09\u306F\u30D7\u30E9\u30B0\u30A4\u30F3\u30D5\u30A9\u30EB\u30C0\u30FC\u306E data.json \u306B\u4FDD\u5B58\u3055\u308C\u307E\u3059\u3002",
+      "\u30ED\u30B0\u306E\u30A8\u30AF\u30B9\u30DD\u30FC\u30C8\u306B\u306F\u6587\u5B57\u8D77\u3053\u3057\u30C6\u30AD\u30B9\u30C8\u3084 API \u30AD\u30FC\u306F\u542B\u307E\u308C\u307E\u305B\u3093\u3002"
+    ]
+  },
+  ko: {
+    title: "Voxtral \uC74C\uC131 \uBA85\uB839",
+    command: "\uBA85\uB839",
+    say: "\uB9D0\uD558\uAE30...",
+    tips: "\uD301",
+    tipItems: [
+      "\uBA85\uB839\uC740 \uBB38\uC7A5 \uB05D\uC5D0\uC11C \uC778\uC2DD\uB429\uB2C8\uB2E4.",
+      "\uAD50\uC815\uAE30\uC5D0 \uC9C0\uC2DC\uD558\uB824\uBA74 '\uAD50\uC815\uC744 \uC704\uD574: ...'\uB77C\uACE0 \uB9D0\uD558\uC138\uC694.",
+      "\uCCA0\uC790\uB85C \uB9D0\uD55C \uB2E8\uC5B4(V-O-X-T-R-A-L)\uB294 \uC790\uB3D9\uC73C\uB85C \uD569\uCCD0\uC9D1\uB2C8\uB2E4.",
+      "\uC790\uAE30 \uC218\uC815('\uC544\uB2C8, X\uAC00 \uC544\uB2C8\uB77C Y')\uC774 \uC778\uC2DD\uB429\uB2C8\uB2E4."
+    ],
+    privacy: "\uAC1C\uC778\uC815\uBCF4 \uBCF4\uD638",
+    privacyItems: [
+      "\uC624\uB514\uC624\uB294 HTTPS/WSS\uB97C \uD1B5\uD574 Mistral API\uB85C \uC804\uC1A1\uB418\uBA70 \uB85C\uCEEC\uC5D0 \uC800\uC7A5\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.",
+      "\uC124\uC815(API \uD0A4 \uD3EC\uD568)\uC740 \uD50C\uB7EC\uADF8\uC778 \uD3F4\uB354\uC758 data.json\uC5D0 \uC800\uC7A5\uB429\uB2C8\uB2E4.",
+      "\uB85C\uADF8 \uB0B4\uBCF4\uB0B4\uAE30\uC5D0\uB294 \uC804\uC0AC\uB41C \uD14D\uC2A4\uD2B8\uB098 API \uD0A4\uAC00 \uD3EC\uD568\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
+    ]
   }
 };
 function getStrings(lang) {
   var _a;
   return (_a = UI_STRINGS[lang]) != null ? _a : UI_STRINGS.en;
 }
+var AUTO_OPEN_STRINGS = {
+  en: { heading: "Help panel in the way?", label: "Don't open it automatically when recording starts", helper: "You can turn it back on in settings." },
+  nl: { heading: "Hulppaneel in de weg?", label: "Niet automatisch openen bij het starten van een opname", helper: "Je kunt dit altijd weer aanzetten in de instellingen." },
+  fr: { heading: "Le panneau d'aide vous g\xEAne ?", label: "Ne pas l'ouvrir automatiquement au d\xE9marrage de l'enregistrement", helper: "Vous pouvez le r\xE9activer dans les param\xE8tres." },
+  de: { heading: "Hilfe-Panel im Weg?", label: "Beim Start einer Aufnahme nicht automatisch \xF6ffnen", helper: "Du kannst es in den Einstellungen wieder aktivieren." },
+  es: { heading: "\xBFEl panel de ayuda te estorba?", label: "No abrirlo autom\xE1ticamente al iniciar la grabaci\xF3n", helper: "Puedes volver a activarlo en los ajustes." },
+  pt: { heading: "O painel de ajuda atrapalha?", label: "N\xE3o abrir automaticamente ao iniciar a grava\xE7\xE3o", helper: "Voc\xEA pode reativ\xE1-lo nas configura\xE7\xF5es." },
+  it: { heading: "Il pannello di aiuto \xE8 d'intralcio?", label: "Non aprirlo automaticamente all'avvio della registrazione", helper: "Puoi riattivarlo nelle impostazioni." },
+  ru: { heading: "\u041F\u0430\u043D\u0435\u043B\u044C \u043F\u043E\u043C\u043E\u0449\u0438 \u043C\u0435\u0448\u0430\u0435\u0442?", label: "\u041D\u0435 \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u0442\u044C \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u043F\u0440\u0438 \u043D\u0430\u0447\u0430\u043B\u0435 \u0437\u0430\u043F\u0438\u0441\u0438", helper: "\u0412\u044B \u043C\u043E\u0436\u0435\u0442\u0435 \u0441\u043D\u043E\u0432\u0430 \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u044D\u0442\u043E \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445." },
+  zh: { heading: "\u5E2E\u52A9\u9762\u677F\u6321\u8DEF\u4E86\uFF1F", label: "\u5F55\u97F3\u5F00\u59CB\u65F6\u4E0D\u81EA\u52A8\u6253\u5F00", helper: "\u60A8\u53EF\u4EE5\u5728\u8BBE\u7F6E\u4E2D\u91CD\u65B0\u5F00\u542F\u3002" },
+  hi: { heading: "\u0915\u094D\u092F\u093E \u0938\u0939\u093E\u092F\u0924\u093E \u092A\u0948\u0928\u0932 \u092C\u0940\u091A \u092E\u0947\u0902 \u0906 \u0930\u0939\u093E \u0939\u0948?", label: "\u0930\u093F\u0915\u0949\u0930\u094D\u0921\u093F\u0902\u0917 \u0936\u0941\u0930\u0942 \u0939\u094B\u0928\u0947 \u092A\u0930 \u0938\u094D\u0935\u0924\u0903 \u0928 \u0916\u094B\u0932\u0947\u0902", helper: "\u0906\u092A \u0907\u0938\u0947 \u0938\u0947\u091F\u093F\u0902\u0917\u094D\u0938 \u092E\u0947\u0902 \u092B\u093F\u0930 \u0938\u0947 \u091A\u093E\u0932\u0942 \u0915\u0930 \u0938\u0915\u0924\u0947 \u0939\u0948\u0902\u0964" },
+  ar: { heading: "\u0647\u0644 \u0644\u0648\u062D\u0629 \u0627\u0644\u0645\u0633\u0627\u0639\u062F\u0629 \u062A\u0639\u062A\u0631\u0636 \u0637\u0631\u064A\u0642\u0643\u061F", label: "\u0639\u062F\u0645 \u0641\u062A\u062D\u0647\u0627 \u062A\u0644\u0642\u0627\u0626\u064A\u064B\u0627 \u0639\u0646\u062F \u0628\u062F\u0621 \u0627\u0644\u062A\u0633\u062C\u064A\u0644", helper: "\u064A\u0645\u0643\u0646\u0643 \u0625\u0639\u0627\u062F\u0629 \u062A\u0641\u0639\u064A\u0644\u0647\u0627 \u0645\u0646 \u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A." },
+  ja: { heading: "\u30D8\u30EB\u30D7\u30D1\u30CD\u30EB\u304C\u90AA\u9B54\u3067\u3059\u304B\uFF1F", label: "\u9332\u97F3\u958B\u59CB\u6642\u306B\u81EA\u52D5\u7684\u306B\u958B\u304B\u306A\u3044", helper: "\u8A2D\u5B9A\u3067\u3044\u3064\u3067\u3082\u518D\u5EA6\u6709\u52B9\u306B\u3067\u304D\u307E\u3059\u3002" },
+  ko: { heading: "\uB3C4\uC6C0\uB9D0 \uD328\uB110\uC774 \uBC29\uD574\uB418\uB098\uC694?", label: "\uB179\uC74C \uC2DC\uC791 \uC2DC \uC790\uB3D9\uC73C\uB85C \uC5F4\uC9C0 \uC54A\uAE30", helper: "\uC124\uC815\uC5D0\uC11C \uB2E4\uC2DC \uCF24 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }
+};
+function getAutoOpenStrings(lang) {
+  var _a;
+  return (_a = AUTO_OPEN_STRINGS[lang]) != null ? _a : AUTO_OPEN_STRINGS.en;
+}
 var VoxtralHelpView = class extends import_obsidian2.ItemView {
-  constructor(leaf) {
+  constructor(leaf, host) {
     super(leaf);
     this.lang = "nl";
+    this.host = host;
   }
   getViewType() {
     return VIEW_TYPE_VOXTRAL_HELP;
@@ -3493,13 +3623,15 @@ var VoxtralHelpView = class extends import_obsidian2.ItemView {
   render() {
     const container = this.contentEl;
     container.empty();
-    renderHelpContent(container, this.lang);
+    const host = this.host;
+    const control = host ? { enabled: host.getAutoOpen(), onChange: (enabled) => host.setAutoOpen(enabled) } : void 0;
+    renderHelpContent(container, this.lang, control);
   }
   async onClose() {
     this.contentEl.empty();
   }
 };
-function renderHelpContent(container, lang) {
+function renderHelpContent(container, lang, control) {
   container.addClass("voxtral-help-view");
   const strings = getStrings(lang);
   container.createEl("h3", { text: strings.title });
@@ -3533,6 +3665,58 @@ function renderHelpContent(container, lang) {
   for (const item of strings.privacyItems) {
     privacyList.createEl("li", { text: item });
   }
+  if (control) {
+    const auto = getAutoOpenStrings(lang);
+    const box = container.createDiv({ cls: "voxtral-help-autoopen" });
+    box.createEl("h4", { text: auto.heading });
+    const label = box.createEl("label", { cls: "voxtral-help-autoopen-label" });
+    const checkbox = label.createEl("input", { type: "checkbox" });
+    checkbox.checked = !control.enabled;
+    label.createSpan({ text: auto.label });
+    checkbox.addEventListener("change", () => {
+      void control.onChange(!checkbox.checked);
+    });
+    box.createEl("div", {
+      text: auto.helper,
+      cls: "voxtral-help-autoopen-helper"
+    });
+  }
+}
+
+// src/file-transcription.ts
+var AUDIO_EXTENSIONS = /* @__PURE__ */ new Set([
+  "m4a",
+  "mp4",
+  "aac",
+  "mp3",
+  "wav",
+  "ogg",
+  "oga",
+  "opus",
+  "webm",
+  "flac"
+]);
+function isAudioFile(extension) {
+  return AUDIO_EXTENSIONS.has(extension.toLowerCase());
+}
+var MIME_BY_EXTENSION = {
+  m4a: "audio/mp4",
+  mp4: "audio/mp4",
+  aac: "audio/aac",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+  oga: "audio/ogg",
+  opus: "audio/ogg",
+  webm: "audio/webm",
+  flac: "audio/flac"
+};
+function mimeForExtension(extension) {
+  var _a;
+  return (_a = MIME_BY_EXTENSION[extension.toLowerCase()]) != null ? _a : "application/octet-stream";
+}
+function isTooLargeError(message) {
+  return /\b413\b|too large/i.test(message);
 }
 
 // src/templates.ts
@@ -4746,7 +4930,6 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.consecutiveFailures = 0;
     this.maxConsecutiveFailures = 5;
     this.currentEditor = null;
-    this.keydownHandler = null;
     /** Platform adapter: wraps Obsidian's requestUrl as HttpRequestFn */
     this.httpRequest = async (options) => {
       const response = await (0, import_obsidian4.requestUrl)({
@@ -4797,7 +4980,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
     this.recorder = new AudioRecorder();
     this.registerView(
       VIEW_TYPE_VOXTRAL_HELP,
-      (leaf) => new VoxtralHelpView(leaf)
+      (leaf) => new VoxtralHelpView(leaf, this)
     );
     this.addRibbonIcon("mic", "Voxtral: start/stop recording", () => {
       void this.toggleRecording();
@@ -4839,6 +5022,14 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       }
     });
     this.addCommand({
+      id: "transcribe-audio-file",
+      name: "Transcribe audio file",
+      icon: "file-audio",
+      callback: () => {
+        void this.transcribeAudioFile();
+      }
+    });
+    this.addCommand({
       id: "correct-selection",
       name: "Correct selected text",
       icon: "spell-check",
@@ -4855,20 +5046,21 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       }
     });
     this.addSettingTab(new VoxtralSettingTab(this.app, this));
-    this.registerDomEvent(document, "visibilitychange", () => {
+    this.registerDomEvent(activeDocument, "visibilitychange", () => {
       this.handleVisibilityChange();
     });
-    this.keydownHandler = (e) => this.handleTypingMute(e);
-    document.addEventListener("keydown", this.keydownHandler, true);
+    this.registerDomEvent(
+      activeDocument,
+      "keydown",
+      (e) => this.handleTypingMute(e),
+      { capture: true }
+    );
   }
   onunload() {
     if (this.isRecording) {
       void this.stopRecording();
     }
     this.removeSendButton();
-    if (this.keydownHandler) {
-      document.removeEventListener("keydown", this.keydownHandler, true);
-    }
   }
   async loadSettings() {
     this.settings = migrateSettings(await this.loadData());
@@ -4977,7 +5169,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
   handleVisibilityChange() {
     if (!this.isRecording) return;
     const behavior = this.settings.focusBehavior;
-    if (document.hidden) {
+    if (activeDocument.hidden) {
       this.clearFocusPauseTimer();
       if (behavior === "keep-recording") {
         vlog.debug("Voxtral: App backgrounded, recording continues");
@@ -4987,7 +5179,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
           `Voxtral: App backgrounded, pausing in ${delaySec}s`
         );
         this.focusPauseTimer = window.setTimeout(() => {
-          if (this.isRecording && document.hidden) {
+          if (this.isRecording && activeDocument.hidden) {
             this.pauseRecording();
           }
         }, delaySec * 1e3);
@@ -5142,7 +5334,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       if (this.effectiveMode === "batch") {
         const enterHint = this.settings.enterToSend ? " Press Enter (when not typing) or tap send to transcribe chunks." : " Tap send to transcribe chunks while you keep talking.";
         if (import_obsidian4.Platform.isMobile && !this.settings.dismissMobileBatchNotice) {
-          const frag = document.createDocumentFragment();
+          const frag = activeDocument.createDocumentFragment();
           frag.createSpan({
             text: `Recording started (${micName}). Tap the send button (\u2191) to transcribe chunks while you keep talking.`
           });
@@ -5402,6 +5594,68 @@ ${getLogText()}
     await this.app.workspace.getLeaf(true).openFile(file);
     new import_obsidian4.Notice(`${count} log entries saved to ${file.path}`);
   }
+  // ── File transcription (batch) ──
+  /** Pick an audio file from the vault and transcribe it into the active note. */
+  async transcribeAudioFile() {
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+    if (!view) {
+      new import_obsidian4.Notice("Open a note first to insert the transcript.");
+      return;
+    }
+    const editor = view.editor;
+    const audioFiles = this.app.vault.getFiles().filter((f) => isAudioFile(f.extension));
+    if (audioFiles.length === 0) {
+      new import_obsidian4.Notice("No audio files found in this vault.");
+      return;
+    }
+    new AudioFileSuggestModal(this.app, audioFiles, (file) => {
+      void this.runFileTranscription(file, editor);
+    }).open();
+  }
+  /** Read a vault audio file, transcribe it (batch), and insert at the cursor. */
+  async runFileTranscription(file, editor) {
+    try {
+      this.updateStatusBar("processing");
+      new import_obsidian4.Notice(`Transcribing ${file.name}\u2026`);
+      const bytes = await this.app.vault.readBinary(file);
+      const blob = new Blob([bytes], { type: mimeForExtension(file.extension) });
+      const text = await transcribeBatch(blob, this.settings, this.httpRequest);
+      this.updateStatusBar("idle");
+      const trimmed = text.trim();
+      if (trimmed) {
+        editor.replaceSelection(trimmed + "\n");
+        new import_obsidian4.Notice(`Inserted transcript of ${file.name}.`);
+      } else {
+        new import_obsidian4.Notice(`No speech detected in ${file.name}.`);
+      }
+    } catch (e) {
+      this.updateStatusBar("idle");
+      const msg = String(e);
+      if (isTooLargeError(msg)) {
+        new import_obsidian4.Notice(
+          `${file.name} is too large to transcribe in one request. Support for long recordings (automatic splitting) is coming in a later version.`,
+          8e3
+        );
+      } else {
+        new import_obsidian4.Notice(`Transcription failed: ${msg}`);
+      }
+      vlog.error("Voxtral: File transcription failed", e);
+    }
+  }
+  // ── Help panel host (read/write the per-platform auto-open setting) ──
+  /** HelpPanelHost: current auto-open value for the active platform. */
+  getAutoOpen() {
+    return import_obsidian4.Platform.isMobile ? this.settings.autoOpenHelpMobile : this.settings.autoOpenHelpDesktop;
+  }
+  /** HelpPanelHost: persist a new auto-open value for the active platform. */
+  async setAutoOpen(enabled) {
+    if (import_obsidian4.Platform.isMobile) {
+      this.settings.autoOpenHelpMobile = enabled;
+    } else {
+      this.settings.autoOpenHelpDesktop = enabled;
+    }
+    await this.saveSettings();
+  }
   // ── Help panel ──
   async openHelpPanel() {
     const existing = this.app.workspace.getLeavesOfType(
@@ -5470,5 +5724,22 @@ ${getLogText()}
         this.statusBarEl.removeClass("voxtral-recording", "voxtral-paused");
         break;
     }
+  }
+};
+var AudioFileSuggestModal = class extends import_obsidian4.FuzzySuggestModal {
+  constructor(app, files, onChoose) {
+    super(app);
+    this.files = files;
+    this.onChoose = onChoose;
+    this.setPlaceholder("Select an audio file to transcribe");
+  }
+  getItems() {
+    return this.files;
+  }
+  getItemText(file) {
+    return file.path;
+  }
+  onChooseItem(file) {
+    this.onChoose(file);
   }
 };
