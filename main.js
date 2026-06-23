@@ -5597,12 +5597,22 @@ ${getLogText()}
     new import_obsidian4.Notice(`${count} log entries saved to ${file.path}`);
   }
   // ── File transcription (batch) ──
-  /** Transcribe a vault audio file (chosen via its right-click menu) into the active note. */
+  /** Transcribe a vault audio file (chosen via its right-click menu) into a note. */
   async transcribeFileFromMenu(file) {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+    let view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+    if (!view) {
+      const recent = this.app.workspace.getMostRecentLeaf();
+      if ((recent == null ? void 0 : recent.view) instanceof import_obsidian4.MarkdownView) {
+        view = recent.view;
+      }
+    }
     if (!view) {
       new import_obsidian4.Notice("Open a note first to insert the transcript.");
       return;
+    }
+    this.app.workspace.setActiveLeaf(view.leaf, { focus: true });
+    if (import_obsidian4.Platform.isMobile) {
+      this.app.workspace.leftSplit.collapse();
     }
     await this.runFileTranscription(file, view.editor);
   }
