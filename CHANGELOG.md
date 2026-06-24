@@ -4,6 +4,25 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.4.5] - 2026-06-24
+
+- **File transcription: choose where the text lands, plus optional cleanup.** When
+  you transcribe an audio file you can now pick the destination — the active note
+  (at the cursor) or a new note linked to the audio file — and optionally run the
+  result through the correction pass. The correction toggle is off by default,
+  since file transcripts can be long and the extra pass adds API cost.
+- **Gentler help-panel auto-open.** Starting a recording no longer pulls focus out
+  of the note you're dictating into, and won't yank the panel to the front —
+  hiding a stacked outline or properties panel — when it's already open. Opening it
+  yourself via the "Show voice help panel" command still brings it forward.
+
+## [1.4.4] - 2026-06-23
+
+- **Transcribe an existing audio file from your vault.** Right-click an audio file
+  → "Transcribe audio file" to transcribe it with Voxtral and insert the text into
+  your note — on desktop and mobile. (Automatic splitting of very long recordings
+  is still on the roadmap.)
+
 ## [1.4.3] - 2026-06-23
 
 - **Help panel: tidier "don't auto-open" control on mobile.** The opt-out
