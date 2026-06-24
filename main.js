@@ -26,7 +26,7 @@ var import_obsidian4 = require("obsidian");
 
 // ../shared/src/types.ts
 var DEFAULT_SETTINGS = {
-  settingsVersion: 1,
+  settingsVersion: 2,
   apiKey: "",
   apiBaseUrl: "https://api.mistral.ai",
   language: "nl",
@@ -51,7 +51,9 @@ var DEFAULT_SETTINGS = {
   templatesFolder: "",
   autoOpenHelpDesktop: true,
   autoOpenHelpMobile: false,
-  debugLogging: false
+  debugLogging: false,
+  fileTranscriptOutput: "cursor",
+  fileTranscriptCorrect: false
 };
 
 // ../shared/src/similarity.ts
@@ -1598,9 +1600,18 @@ function getDefaultBuiltInCommands() {
 }
 
 // src/settings-migration.ts
-var CURRENT_VERSION = 1;
+var CURRENT_VERSION = 2;
 var migrations = {
-  // No migrations yet — v0 → v1 is handled by the default merge below
+  // v1 → v2: add file-transcription output placement + correction toggle (E23_S3).
+  1: (data) => {
+    if (typeof data.fileTranscriptOutput !== "string") {
+      data.fileTranscriptOutput = "cursor";
+    }
+    if (typeof data.fileTranscriptCorrect !== "boolean") {
+      data.fileTranscriptCorrect = false;
+    }
+    return data;
+  }
 };
 function migrateSettings(data) {
   if (!data) {
@@ -2395,6 +2406,26 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         });
       });
     }
+    new import_obsidian.Setting(containerEl).setName("File transcription").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Transcript destination").setDesc(
+      "Where the text goes when you transcribe an audio file (right-click the file)."
+    ).addDropdown((drop) => {
+      drop.addOption("cursor", "Insert into the active note");
+      drop.addOption("newNote", "New note linked to the audio file");
+      drop.setValue(this.plugin.settings.fileTranscriptOutput);
+      drop.onChange(async (value) => {
+        this.plugin.settings.fileTranscriptOutput = value;
+        await this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian.Setting(containerEl).setName("Correct file transcripts").setDesc(
+      "Run a transcribed file through the correction layer (spelling, punctuation). Off by default \u2014 file transcripts can be long, so this adds extra API cost."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.fileTranscriptCorrect).onChange(async (value) => {
+        this.plugin.settings.fileTranscriptCorrect = value;
+        await this.plugin.saveSettings();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("Help panel").setHeading();
     new import_obsidian.Setting(containerEl).setName("Auto-open on desktop").setDesc(
       "Open the voice help panel in the right sidebar when recording starts on desktop."
@@ -5330,7 +5361,7 @@ var VoxtralPlugin = class extends import_obsidian4.Plugin {
       this.updateStatusBar("recording");
       const shouldAutoOpenHelp = import_obsidian4.Platform.isMobile ? this.settings.autoOpenHelpMobile : this.settings.autoOpenHelpDesktop;
       if (shouldAutoOpenHelp) {
-        void this.openHelpPanel();
+        void this.openHelpPanel({ keepEditorFocus: true, skipIfOpen: true });
       }
       const micName = this.recorder.activeMicLabel;
       if (this.effectiveMode === "batch") {
@@ -5597,24 +5628,28 @@ ${getLogText()}
     new import_obsidian4.Notice(`${count} log entries saved to ${file.path}`);
   }
   // ── File transcription (batch) ──
-  /** Transcribe a vault audio file (chosen via its right-click menu) into a note. */
+  /** Transcribe a vault audio file (chosen via its right-click menu). */
   async transcribeFileFromMenu(file) {
-    let view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
-    if (!view) {
-      const recent = this.app.workspace.getMostRecentLeaf();
-      if ((recent == null ? void 0 : recent.view) instanceof import_obsidian4.MarkdownView) {
-        view = recent.view;
+    let editor = null;
+    if (this.settings.fileTranscriptOutput === "cursor") {
+      let view = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+      if (!view) {
+        const recent = this.app.workspace.getMostRecentLeaf();
+        if ((recent == null ? void 0 : recent.view) instanceof import_obsidian4.MarkdownView) {
+          view = recent.view;
+        }
       }
+      if (!view) {
+        new import_obsidian4.Notice("Open a note first to insert the transcript.");
+        return;
+      }
+      this.app.workspace.setActiveLeaf(view.leaf, { focus: true });
+      if (import_obsidian4.Platform.isMobile) {
+        this.app.workspace.leftSplit.collapse();
+      }
+      editor = view.editor;
     }
-    if (!view) {
-      new import_obsidian4.Notice("Open a note first to insert the transcript.");
-      return;
-    }
-    this.app.workspace.setActiveLeaf(view.leaf, { focus: true });
-    if (import_obsidian4.Platform.isMobile) {
-      this.app.workspace.leftSplit.collapse();
-    }
-    await this.runFileTranscription(file, view.editor);
+    await this.runFileTranscription(file, editor);
   }
   /** Read a vault audio file, transcribe it (batch), and insert at the cursor. */
   async runFileTranscription(file, editor) {
@@ -5623,14 +5658,20 @@ ${getLogText()}
       new import_obsidian4.Notice(`Transcribing ${file.name}\u2026`);
       const bytes = await this.app.vault.readBinary(file);
       const blob = new Blob([bytes], { type: mimeForExtension(file.extension) });
-      const text = await transcribeBatch(blob, this.settings, this.httpRequest);
+      let text = (await transcribeBatch(blob, this.settings, this.httpRequest)).trim();
+      if (text && this.settings.fileTranscriptCorrect) {
+        text = (await correctText(text, this.settings, this.httpRequest)).trim();
+      }
       this.updateStatusBar("idle");
-      const trimmed = text.trim();
-      if (trimmed) {
-        editor.replaceSelection(trimmed + "\n");
+      if (!text) {
+        new import_obsidian4.Notice(`No speech detected in ${file.name}.`);
+        return;
+      }
+      if (editor) {
+        editor.replaceSelection(text + "\n");
         new import_obsidian4.Notice(`Inserted transcript of ${file.name}.`);
       } else {
-        new import_obsidian4.Notice(`No speech detected in ${file.name}.`);
+        await this.createTranscriptNote(file, text);
       }
     } catch (e) {
       this.updateStatusBar("idle");
@@ -5645,6 +5686,32 @@ ${getLogText()}
       }
       vlog.error("Voxtral: File transcription failed", e);
     }
+  }
+  /** Create a new note holding the transcript, linked to the source audio, and open it. */
+  async createTranscriptNote(file, text) {
+    const folder = file.parent && file.parent.path !== "/" ? file.parent.path : "";
+    const path = this.uniqueNotePath(folder, `${file.basename} (transcript)`);
+    let link = this.app.fileManager.generateMarkdownLink(file, path);
+    if (link.startsWith("!")) {
+      link = link.slice(1);
+    }
+    const note = await this.app.vault.create(path, `Source: ${link}
+
+${text}
+`);
+    await this.app.workspace.getLeaf(true).openFile(note);
+    new import_obsidian4.Notice(`Transcript saved to ${note.path}.`);
+  }
+  /** A note path under `folder` based on `base`, suffixed with a number if taken. */
+  uniqueNotePath(folder, base) {
+    const dir = folder ? `${folder}/` : "";
+    let candidate = `${dir}${base}.md`;
+    let i = 2;
+    while (this.app.vault.getAbstractFileByPath(candidate)) {
+      candidate = `${dir}${base} ${i}.md`;
+      i++;
+    }
+    return candidate;
   }
   // ── Help panel host (read/write the per-platform auto-open setting) ──
   /** HelpPanelHost: current auto-open value for the active platform. */
@@ -5661,24 +5728,26 @@ ${getLogText()}
     await this.saveSettings();
   }
   // ── Help panel ──
-  async openHelpPanel() {
+  async openHelpPanel(opts = {}) {
+    var _a;
     const existing = this.app.workspace.getLeavesOfType(
       VIEW_TYPE_VOXTRAL_HELP
     );
     if (existing.length > 0) {
+      if (opts.skipIfOpen) return;
       void this.app.workspace.revealLeaf(existing[0]);
       return;
     }
     const leaf = this.app.workspace.getRightLeaf(false);
-    if (leaf) {
-      await leaf.setViewState({
-        type: VIEW_TYPE_VOXTRAL_HELP,
-        active: true
-      });
-      if (!import_obsidian4.Platform.isMobile) {
-        void this.app.workspace.revealLeaf(leaf);
-      }
-    }
+    if (!leaf) return;
+    await leaf.setViewState({
+      type: VIEW_TYPE_VOXTRAL_HELP,
+      active: !opts.keepEditorFocus
+    });
+    if (import_obsidian4.Platform.isMobile) return;
+    const editor = opts.keepEditorFocus ? (_a = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView)) == null ? void 0 : _a.editor : void 0;
+    await this.app.workspace.revealLeaf(leaf);
+    editor == null ? void 0 : editor.focus();
   }
   // ── Status bar ──
   updateStatusBar(state) {
