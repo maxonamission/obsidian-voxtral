@@ -4,6 +4,49 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.5.0] - 2026-06-27
+
+This release builds out **file transcription** — the same engine, pointed at
+recordings you already have. Dictation is unchanged.
+
+- **Long recordings are transcribed automatically, in parts.** Files over the
+  single-request limit (~90 MB) are now split in the app and transcribed part by
+  part — each part appears as it finishes, with a Cancel button, and a part length
+  you can set under **Settings → File transcription**. Previously such files were
+  rejected as too large.
+- **Optional speaker labels (diarization).** A new toggle (off by default) labels
+  who said what (`**Speaker 1:** …`) when transcribing a file. Labels are detected
+  automatically; for long recordings split into parts they reset per part, and a
+  note at the top of the transcript says so. This is an extra for file transcripts,
+  not a change to dictation.
+- **More readable transcripts.** File transcripts are broken into paragraphs
+  instead of one long block, and parts are clearly separated.
+- **Transcribe an audio embed from the current line.** A new command transcribes
+  the `![[recording]]` on your cursor's line and inserts the text right below it.
+- **A heads-up before transcribing a low-quality file.** An optional pre-flight
+  check warns about likely problems (very short, silent, or low-bitrate audio)
+  before spending an API call — handy because, with a file, you'd otherwise only
+  find out after transcribing.
+
+## [1.4.5] - 2026-06-24
+
+- **File transcription: choose where the text lands, plus optional cleanup.** When
+  you transcribe an audio file you can now pick the destination — the active note
+  (at the cursor) or a new note linked to the audio file — and optionally run the
+  result through the correction pass. The correction toggle is off by default,
+  since file transcripts can be long and the extra pass adds API cost.
+- **Gentler help-panel auto-open.** Starting a recording no longer pulls focus out
+  of the note you're dictating into, and won't yank the panel to the front —
+  hiding a stacked outline or properties panel — when it's already open. Opening it
+  yourself via the "Show voice help panel" command still brings it forward.
+
+## [1.4.4] - 2026-06-23
+
+- **Transcribe an existing audio file from your vault.** Right-click an audio file
+  → "Transcribe audio file" to transcribe it with Voxtral and insert the text into
+  your note — on desktop and mobile. (Automatic splitting of very long recordings
+  is still on the roadmap.)
+
 ## [1.4.3] - 2026-06-23
 
 - **Help panel: tidier "don't auto-open" control on mobile.** The opt-out

@@ -1,9 +1,9 @@
 {
 	"id": "voxtral-transcribe",
 	"name": "Voxtral Transcribe",
-	"version": "1.4.5",
+	"version": "1.5.0",
 	"minAppVersion": "1.7.2",
-	"description": "Real-time streaming transcription using Mistral Voxtral, supports voice commands (headings, lists, to-dos and more) and automatic text correction.",
+	"description": "Speech-to-text with Mistral Voxtral: real-time dictation with voice commands and automatic correction, plus transcription of audio files in your vault.",
 	"author": "Max Kloosterman",
 	"authorUrl": "https://github.com/maxonamission",
 	"fundingUrl": "https://buymeacoffee.com/maxonamission",

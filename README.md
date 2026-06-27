@@ -2,9 +2,11 @@
 
 **Thoughts move fast. Your transcription should keep up.**
 
-Voxtral Transcribe allows you to dictate directly into Markdown using [Mistral's Voxtral](https://mistral.ai/) speech-to-text. Speak your text and add structure by voice — headings, lists, to-dos and other elements. Correct inline as you go: grab the keyboard mid-dictation and the mic waits, resuming when you stop typing. Edits happen along the way, not after.
+Voxtral Transcribe lets you talk and type in the same breath: dictate straight into your notes, add structure by voice — headings, lists, to-dos — and grab the keyboard mid-sentence whenever you want. The mic waits while you type and picks back up when you stop, so editing happens along the way, not after.
 
-Choose real-time streaming or tap-to-send batch mode. Supports 13+ languages.
+And it's not only for what you say next. Already have a recording — a lecture, a meeting, a voice memo? Right-click it in your vault and Voxtral transcribes it into a note you can search, link, and build on.
+
+Powered by [Mistral's Voxtral](https://mistral.ai/), a speech-to-text engine built for transcription from the ground up. Real-time streaming, tap-to-send batch, and now file transcription. 13+ languages, all inside your vault.
 
 ### Get going in under a minute
 1. Install and paste your [Mistral API key](https://console.mistral.ai/)
@@ -20,12 +22,33 @@ Voxtral is purpose-built for transcription, not retrofitted from a general audio
 - **Streaming-first** — designed for low-latency partial results, which is what makes "text appears as you speak" feel real-time instead of stuttery
 - **Multilingual by design** — 13+ languages with consistent quality, not English-first with the rest bolted on
 
-If you're choosing between speech-to-text models for dictation specifically (rather than, say, post-hoc transcription of meeting recordings), this is a strong fit.
+If you're choosing a speech-to-text model for dictation — or for turning recordings you already have into text — this is a strong fit.
+
+## Same engine. More of what it can do.
+
+Voxtral was never just a dictation tool — it's a full transcription engine that happens to be fast enough to keep up with live speech. So we started there: real-time dictation. Then tap-to-send batch mode, so it worked on mobile too. That batch pipeline turned out to be the foundation for the obvious next step — pointing the same engine at recordings you already have.
+
+Right-click any audio file in your vault → **Transcribe audio file**. The lecture, the interview, the meeting — same Voxtral quality, now on your back catalogue, not just your next sentence.
+
+### Getting good results from a recording
+
+Transcription quality follows recording quality — and with a file you only find out *after* it's transcribed (live dictation lets you fix things as you go). The plugin runs a quick pre-flight check and warns about obvious problems first, but the basics still matter:
+
+- **Get the mic close to the speaker.** Distance and room echo (reverb) hurt accuracy more than the recording device does.
+- **A phone is often good enough.** Its built-in processing (auto-gain, noise reduction) handles most rooms — you don't need pro gear.
+- **Quieter is better.** Background chatter, music, and air-conditioning all cost accuracy.
+- **Long recordings are split automatically.** Files over the single-request limit (~90 MB) are decoded in the app and transcribed in parts, with each part appearing as it finishes and a Cancel button if you want to stop early. You can set the part length under **Settings → File transcription → Chunk length for long recordings**. Splitting decodes the whole file into memory, so very large files (especially on mobile, where memory is tighter) may fail to decode — if that happens you'll get a clear message; transcribe it on desktop or pre-convert to a smaller/compressed format such as 16 kHz mono.
 
 ## Features
 
 - **Real-time streaming** (desktop) — text appears as you speak
 - **Batch mode with tap-to-send** (desktop + mobile) — send audio chunks while you keep talking
+- **Transcribe existing audio files** (desktop + mobile) — right-click any audio file in your vault → "Transcribe audio file" to turn a meeting, lecture, or voice memo into text. Choose where it lands (the active note, or a new note linked to the audio file) and optionally run it through the correction pass
+- **Transcribe an audio embed at your cursor** — a command that transcribes the `![[recording]]` on the current line and inserts the text right below it
+- **Long recordings, handled** — files over the single-request limit are split and transcribed in parts automatically, each part appearing as it finishes (with a Cancel button); part length is configurable
+- **Readable layout** — file transcripts are broken into paragraphs rather than one long block, with parts clearly separated
+- **Speaker labels (optional)** — turn on diarization to label who said what in a file transcript (`**Speaker 1:** …`). Off by default; for long files split into parts, labels are detected per part and a note at the top explains they don't carry across the whole transcript
+- **Quality heads-up before transcribing a file** — an optional pre-flight check warns about likely problems (very short, silent, or low-bitrate audio) before spending an API call
 - **Voice commands** — insert headings, bullet points, to-do items, numbered lists, and more by voice
 - **13 languages** — voice commands automatically adapt to the selected language; English always works as fallback (Dutch, English, French, German, Spanish, Portuguese, Italian, Russian, Chinese, Hindi, Arabic, Japanese, Korean)
 - **Voice command help panel** — shows available commands and trigger phrases for the active language
@@ -82,6 +105,13 @@ On mobile, only batch mode is available (real-time streaming requires Node.js).
 5. Keep talking and tap/press send again for the next chunk
 6. Tap the microphone to stop — the last chunk is processed automatically
 
+### Transcribe an audio file
+
+- **From the vault:** right-click any audio file → **Transcribe audio file**.
+- **From an embed:** put your cursor on a line with an `![[recording]]` embed and run **Transcribe the audio embed on the current line** — the text is inserted right below the embed.
+
+Long recordings are split and transcribed part by part. Turn on **Speaker labels (diarization)** in settings to label who said what (off by default).
+
 ### Voice commands
 
 Voice commands are recognized at the end of a sentence. Commands automatically adapt to the language selected in settings — the table below shows examples in English, but equivalent phrases are available in all 13 supported languages. Open the **Voice Commands** help panel (ribbon icon or command palette) to see the exact phrases for your active language.
@@ -125,6 +155,16 @@ When switching apps on mobile, you can configure what happens to an active recor
 | Language | Language for transcription and voice commands (13 languages, default: Nederlands) |
 | Auto-correct | Enable/disable automatic correction |
 | Streaming delay | Latency vs accuracy tradeoff for realtime mode |
+
+### File transcription
+
+| Setting | Description |
+|---|---|
+| Transcript destination | Where the text goes when you transcribe an audio file — the active note (at the cursor) or a new linked note |
+| Correct file transcripts | Run a transcribed file through the correction pass (off by default; adds API cost on long transcripts) |
+| Warn about low-quality or oversized files | Pre-flight check that warns before transcribing a likely-poor recording |
+| Chunk length for long recordings | Part length used when splitting recordings over the single-request limit |
+| Speaker labels (diarization) | Label different speakers in a transcribed file (off by default) |
 
 ## Privacy & permissions
 
