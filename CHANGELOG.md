@@ -4,6 +4,16 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.6.0] - 2026-06-28
+
+- **Listen back to a selection (experimental).** A new, opt-in option reads the
+  selected text — or the current paragraph — aloud using Voxtral text-to-speech, with
+  a Stop command and a right-click "Read selection aloud". Turn it on under
+  **Settings → Listen back (experimental)** and pick a voice; the voice list is fetched
+  from your account (presets and any voices you've cloned on Mistral), with a refresh
+  button. Handy for proofreading — you often hear a mistake you'd skim past. Off by
+  default; each listen makes an API call.
+
 ## [1.5.0] - 2026-06-27
 
 This release builds out **file transcription** — the same engine, pointed at

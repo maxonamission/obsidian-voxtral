@@ -26,7 +26,7 @@ var import_obsidian5 = require("obsidian");
 
 // ../shared/src/types.ts
 var DEFAULT_SETTINGS = {
-  settingsVersion: 5,
+  settingsVersion: 6,
   apiKey: "",
   apiBaseUrl: "https://api.mistral.ai",
   language: "nl",
@@ -56,7 +56,10 @@ var DEFAULT_SETTINGS = {
   fileTranscriptCorrect: false,
   fileTranscriptQualityWarnings: true,
   chunkSeconds: 600,
-  fileTranscriptDiarize: false
+  fileTranscriptDiarize: false,
+  ttsEnabled: false,
+  ttsVoice: "en_paul_neutral"
+  // a confirmed preset id; the live list is fetched (shared/src/tts.ts)
 };
 
 // ../shared/src/similarity.ts
@@ -1603,7 +1606,7 @@ function getDefaultBuiltInCommands() {
 }
 
 // src/settings-migration.ts
-var CURRENT_VERSION = 5;
+var CURRENT_VERSION = 6;
 var migrations = {
   // v1 → v2: add file-transcription output placement + correction toggle (E23_S3).
   1: (data) => {
@@ -1633,6 +1636,16 @@ var migrations = {
   4: (data) => {
     if (typeof data.fileTranscriptDiarize !== "boolean") {
       data.fileTranscriptDiarize = false;
+    }
+    return data;
+  },
+  // v5 → v6: add the experimental "listen back" TTS settings (E26).
+  5: (data) => {
+    if (typeof data.ttsEnabled !== "boolean") {
+      data.ttsEnabled = false;
+    }
+    if (typeof data.ttsVoice !== "string") {
+      data.ttsVoice = "en_paul_neutral";
     }
     return data;
   }
@@ -1907,6 +1920,14 @@ var AudioRecorder = class {
   }
 };
 
+// ../shared/src/tts.ts
+var TTS_MODEL = "voxtral-mini-tts-2603";
+var TTS_RESPONSE_FORMAT = "wav";
+var TTS_VOICES = [
+  { id: "en_paul_neutral", label: "Paul \u2014 neutral (US English)" },
+  { id: "gb_jane_neutral", label: "Jane \u2014 neutral (UK English)" }
+];
+
 // ../shared/src/mistral-api.ts
 var DEFAULT_BASE_URL = "https://api.mistral.ai";
 function sanitizeApiError(status, rawBody) {
@@ -1974,6 +1995,33 @@ async function listModels(apiKey, httpRequest, baseUrl) {
     return models;
   } catch (e) {
     console.warn("Voxtral: Could not fetch models", e);
+    return [];
+  }
+}
+async function listVoices(apiKey, httpRequest, baseUrl) {
+  var _a, _b, _c, _d;
+  if (!apiKey) return [];
+  const base = baseUrl || DEFAULT_BASE_URL;
+  try {
+    const response = await httpRequest({
+      url: `${base}/v1/audio/voices?limit=100`,
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` }
+    });
+    if (response.status !== 200) {
+      console.warn(`Voxtral: Failed to list voices (${response.status})`);
+      return [];
+    }
+    const data = response.json;
+    const arr = Array.isArray(data) ? data : (_d = (_c = (_b = (_a = data == null ? void 0 : data.data) != null ? _a : data == null ? void 0 : data.voices) != null ? _b : data == null ? void 0 : data.items) != null ? _c : data == null ? void 0 : data.results) != null ? _d : [];
+    return arr.map((v) => {
+      var _a2, _b2, _c2, _d2;
+      const voice = v;
+      const id = (_b2 = (_a2 = voice.id) != null ? _a2 : voice.slug) != null ? _b2 : voice.name;
+      return id ? { id, name: (_d2 = (_c2 = voice.name) != null ? _c2 : voice.slug) != null ? _d2 : id } : null;
+    }).filter((v) => v !== null);
+  } catch (e) {
+    console.warn("Voxtral: Could not fetch voices", e);
     return [];
   }
 }
@@ -2049,6 +2097,53 @@ ${settings.language}\r
 }
 async function transcribeBatch(audioBlob, settings, httpRequest, diarize = false) {
   return (await transcribeBatchRaw(audioBlob, settings, httpRequest, diarize)).text;
+}
+async function synthesizeSpeech(text, settings, httpRequest) {
+  var _a, _b, _c, _d, _e;
+  const base = settings.apiBaseUrl || DEFAULT_BASE_URL;
+  const response = await httpRequest({
+    url: `${base}/v1/audio/speech`,
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${settings.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: TTS_MODEL,
+      input: text,
+      voice: settings.ttsVoice,
+      response_format: TTS_RESPONSE_FORMAT
+    })
+  });
+  if (response.status !== 200) {
+    throw new Error(
+      `Speech synthesis failed: ${sanitizeApiError(response.status, response.text)}`
+    );
+  }
+  const json = response.json;
+  if (json && typeof json === "object" && !Array.isArray(json)) {
+    const candidate = (_e = (_d = (_c = (_b = (_a = json.audio_data) != null ? _a : (
+      // confirmed field name returned by Mistral TTS
+      json.audio
+    )) != null ? _b : json.audio_base64) != null ? _c : json.b64_audio) != null ? _d : json.audio_content) != null ? _e : typeof json.data === "string" ? json.data : void 0;
+    if (typeof candidate === "string" && candidate.length > 0) {
+      return base64ToArrayBuffer(candidate);
+    }
+    throw new Error(
+      `Speech synthesis returned JSON, not audio (fields: ${Object.keys(json).join(", ")})`
+    );
+  }
+  if (!response.arrayBuffer || response.arrayBuffer.byteLength === 0) {
+    throw new Error("Speech synthesis returned no audio.");
+  }
+  return response.arrayBuffer;
+}
+function base64ToArrayBuffer(b64) {
+  const clean = b64.replace(/^data:[^;,]*;base64,/, "");
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
 }
 function buildCustomCommandGuard2(settings) {
   var _a;
@@ -2259,6 +2354,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.cachedModels = null;
+    this.cachedVoices = null;
     this.plugin = plugin;
   }
   display() {
@@ -2283,6 +2379,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       (text) => text.setPlaceholder("https://api.mistral.ai").setValue(this.plugin.settings.apiBaseUrl).onChange(async (value) => {
         this.plugin.settings.apiBaseUrl = value.trim();
         this.cachedModels = null;
+        this.cachedVoices = null;
         await this.plugin.saveSettings();
       })
     );
@@ -2500,6 +2597,68 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       (toggle) => toggle.setValue(this.plugin.settings.fileTranscriptDiarize).onChange(async (value) => {
         this.plugin.settings.fileTranscriptDiarize = value;
         await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Listen back (experimental)").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Read text aloud").setDesc(
+      "Add commands to read the selected text or current paragraph aloud using Voxtral text-to-speech. Experimental and off by default; each listen makes an API call."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.ttsEnabled).onChange(async (value) => {
+        this.plugin.settings.ttsEnabled = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Voice").setDesc(
+      "Which voice to use when reading text aloud. The list is fetched from your account (presets and any cloned voices); voices are multilingual, so an English voice still reads Dutch text in its own accent."
+    ).addDropdown((drop) => {
+      const current = this.plugin.settings.ttsVoice;
+      for (const voice of TTS_VOICES) {
+        drop.addOption(voice.id, voice.label);
+      }
+      if (current && !TTS_VOICES.some((v) => v.id === current)) {
+        drop.addOption(current, current);
+      }
+      drop.setValue(current);
+      drop.onChange(async (value) => {
+        this.plugin.settings.ttsVoice = value;
+        await this.plugin.saveSettings();
+      });
+      this.getVoices().then((voices) => {
+        if (voices.length === 0) return;
+        drop.selectEl.empty();
+        const ids = voices.map((v) => v.id);
+        if (current && !ids.includes(current)) {
+          drop.addOption(current, `${current} (current)`);
+        }
+        for (const voice of voices) {
+          drop.addOption(voice.id, voice.name || voice.id);
+        }
+        drop.setValue(current);
+      }).catch((err) => {
+        console.error("Voxtral: Failed to fetch voices", err);
+      });
+    }).addExtraButton(
+      (btn) => btn.setIcon("refresh-cw").setTooltip("Refresh voices (pull newly cloned voices from your account)").onClick(async () => {
+        this.cachedVoices = null;
+        const voices = await this.getVoices();
+        if (voices.length > 0) {
+          new import_obsidian.Notice(`Voxtral: ${voices.length} voice(s) available`);
+          this.display();
+          return;
+        }
+        try {
+          const base = this.plugin.settings.apiBaseUrl || "https://api.mistral.ai";
+          const r = await this.plugin.httpRequest({
+            url: `${base}/v1/audio/voices?limit=100`,
+            method: "GET",
+            headers: { Authorization: `Bearer ${this.plugin.settings.apiKey}` }
+          });
+          const shape = r.json && typeof r.json === "object" ? `keys: ${Object.keys(r.json).join(", ") || "(none)"}` : `text: ${(r.text || "").slice(0, 80)}`;
+          new import_obsidian.Notice(`Voxtral voices: HTTP ${r.status}; ${shape}`, 1e4);
+        } catch (err) {
+          new import_obsidian.Notice(`Voxtral voices fetch error: ${String(err)}`, 1e4);
+        }
+        this.display();
       })
     );
     new import_obsidian.Setting(containerEl).setName("Help panel").setHeading();
@@ -2838,6 +2997,14 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       this.cachedModels = models;
     }
     return models;
+  }
+  async getVoices() {
+    if (this.cachedVoices) return this.cachedVoices;
+    const voices = await listVoices(this.plugin.settings.apiKey, this.plugin.httpRequest, this.plugin.settings.apiBaseUrl);
+    if (voices.length > 0) {
+      this.cachedVoices = voices;
+    }
+    return voices;
   }
 };
 
@@ -4199,6 +4366,29 @@ function confirmQualityWarnings(app, fileName, warnings) {
   });
 }
 
+// src/tts-text.ts
+function flattenForSpeech(markdown) {
+  let t = markdown;
+  t = t.replace(/```[\s\S]*?```/g, " ");
+  t = t.replace(/~~~[\s\S]*?~~~/g, " ");
+  t = t.replace(/!\[\[[^\]]*?\]\]/g, " ");
+  t = t.replace(/!\[[^\]]*?\]\([^)]*?\)/g, " ");
+  t = t.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2");
+  t = t.replace(/\[\[([^\]]+)\]\]/g, "$1");
+  t = t.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  t = t.replace(/`([^`]+)`/g, "$1");
+  t = t.split("\n").map(
+    (line) => line.replace(/^\s{0,3}#{1,6}\s+/, "").replace(/^\s*>+\s?/, "").replace(/^\s*[-*+]\s+\[[ xX]\]\s+/, "").replace(/^\s*[-*+]\s+/, "").replace(/^\s*\d+[.)]\s+/, "")
+    // ordered list items
+  ).join("\n");
+  t = t.replace(/\*\*([^*]+)\*\*/g, "$1");
+  t = t.replace(/\*([^*]+)\*/g, "$1");
+  t = t.replace(/__([^_]+)__/g, "$1");
+  t = t.replace(/~~([^~]+)~~/g, "$1");
+  t = t.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return t;
+}
+
 // src/templates.ts
 var import_obsidian4 = require("obsidian");
 var templateCommands = [];
@@ -5407,6 +5597,12 @@ var _VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
     this.sendRibbonEl = null;
     this.mobileActionEl = null;
     this.chunkIndex = 0;
+    // "Listen back" playback (E26): play decoded audio via the Web Audio API. A
+    // blob: URL in an HTMLAudioElement fails on the mobile WebView ("no supported
+    // source"), so we decode the bytes and play a buffer source instead — a single
+    // context/source so Stop and a new read just replace the current one.
+    this.ttsCtx = null;
+    this.ttsSource = null;
     this.consecutiveFailures = 0;
     this.maxConsecutiveFailures = 5;
     this.currentEditor = null;
@@ -5428,7 +5624,9 @@ var _VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
       return {
         status: response.status,
         json,
-        text: response.text
+        text: response.text,
+        // Binary endpoints (TTS audio, E26) read this instead of json/text.
+        arrayBuffer: response.arrayBuffer
       };
     };
   }
@@ -5544,6 +5742,40 @@ var _VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
         void this.transcribeEmbeddedAudio(editor);
       }
     });
+    this.addCommand({
+      id: "read-selection-aloud",
+      name: "Read selection aloud",
+      icon: "volume-2",
+      editorCallback: (editor) => {
+        void this.readSelectionAloud(editor);
+      }
+    });
+    this.addCommand({
+      id: "read-paragraph-aloud",
+      name: "Read current paragraph aloud",
+      icon: "volume-2",
+      editorCallback: (editor) => {
+        void this.readParagraphAloud(editor);
+      }
+    });
+    this.addCommand({
+      id: "stop-playback",
+      name: "Stop playback",
+      icon: "square",
+      callback: () => {
+        this.stopPlayback();
+      }
+    });
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu, editor) => {
+        if (!this.settings.ttsEnabled || !editor.getSelection()) return;
+        menu.addItem(
+          (item) => item.setTitle("Read selection aloud").setIcon("volume-2").onClick(() => {
+            void this.readSelectionAloud(editor);
+          })
+        );
+      })
+    );
     this.addSettingTab(new VoxtralSettingTab(this.app, this));
     this.registerDomEvent(activeDocument, "visibilitychange", () => {
       this.handleVisibilityChange();
@@ -5559,6 +5791,7 @@ var _VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
     if (this.isRecording) {
       void this.stopRecording();
     }
+    this.stopPlayback();
     this.removeSendButton();
   }
   async loadSettings() {
@@ -6067,6 +6300,108 @@ var _VoxtralPlugin = class _VoxtralPlugin extends import_obsidian5.Plugin {
       new import_obsidian5.Notice("Dictated text corrected");
     } catch (e) {
       new import_obsidian5.Notice(`Correction failed: ${String(e)}`);
+    }
+  }
+  // ── Listen back (TTS, E26 — experimental) ──
+  async readSelectionAloud(editor) {
+    const selection = editor.getSelection();
+    if (!selection) {
+      new import_obsidian5.Notice("Select some text to read aloud.");
+      return;
+    }
+    await this.readTextAloud(selection);
+  }
+  async readParagraphAloud(editor) {
+    const paragraph = this.getCurrentParagraph(editor);
+    if (!paragraph.trim()) {
+      new import_obsidian5.Notice("No paragraph on the current line to read aloud.");
+      return;
+    }
+    await this.readTextAloud(paragraph);
+  }
+  /** The contiguous block of non-blank lines containing the cursor. */
+  getCurrentParagraph(editor) {
+    const cur = editor.getCursor().line;
+    if (editor.getLine(cur).trim() === "") return "";
+    const last = editor.lastLine();
+    let start = cur;
+    while (start > 0 && editor.getLine(start - 1).trim() !== "") start--;
+    let end = cur;
+    while (end < last && editor.getLine(end + 1).trim() !== "") end++;
+    const lines = [];
+    for (let i = start; i <= end; i++) lines.push(editor.getLine(i));
+    return lines.join("\n");
+  }
+  /** Synthesize `rawText` (markdown flattened to prose) and play it. */
+  async readTextAloud(rawText) {
+    if (!this.settings.ttsEnabled) {
+      new import_obsidian5.Notice("Listen back is off \u2014 enable it in the plugin settings.");
+      return;
+    }
+    if (!this.settings.apiKey) {
+      new import_obsidian5.Notice("Please set your API key in the plugin settings.");
+      return;
+    }
+    const text = flattenForSpeech(rawText);
+    if (!text) {
+      new import_obsidian5.Notice("Nothing to read aloud.");
+      return;
+    }
+    const progress = new import_obsidian5.Notice("Generating audio\u2026", 0);
+    try {
+      const audio = await synthesizeSpeech(text, this.settings, this.httpRequest);
+      await this.playAudioBytes(audio);
+    } catch (e) {
+      vlog.error("Voxtral: speech synthesis failed", e);
+      new import_obsidian5.Notice(`Listen back failed: ${String(e)}`);
+    } finally {
+      progress.hide();
+    }
+  }
+  /**
+   * Decode and play raw audio bytes via the Web Audio API, replacing any current
+   * playback. Used instead of an HTMLAudioElement + blob URL, which the mobile
+   * WebView refuses to load.
+   */
+  async playAudioBytes(bytes) {
+    this.stopPlayback();
+    const ctx = new AudioContext();
+    this.ttsCtx = ctx;
+    try {
+      const buffer = await ctx.decodeAudioData(bytes.slice(0));
+      if (this.ttsCtx !== ctx) {
+        void ctx.close();
+        return;
+      }
+      if (ctx.state === "suspended") await ctx.resume();
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.addEventListener("ended", () => {
+        if (this.ttsSource === source) this.stopPlayback();
+      });
+      this.ttsSource = source;
+      source.start();
+    } catch (e) {
+      vlog.error("Voxtral: audio playback failed", e);
+      const head = Array.from(new Uint8Array(bytes.slice(0, 8))).map((b) => b.toString(16).padStart(2, "0")).join(" ");
+      new import_obsidian5.Notice(`Could not play audio: ${String(e)} [${bytes.byteLength}B head=${head}]`);
+      this.stopPlayback();
+    }
+  }
+  /** Stop "listen back" playback and release the audio context. */
+  stopPlayback() {
+    if (this.ttsSource) {
+      try {
+        this.ttsSource.stop();
+      } catch (e) {
+      }
+      this.ttsSource.disconnect();
+      this.ttsSource = null;
+    }
+    if (this.ttsCtx) {
+      void this.ttsCtx.close();
+      this.ttsCtx = null;
     }
   }
   // ── Logs ──
