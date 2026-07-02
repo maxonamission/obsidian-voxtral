@@ -4,6 +4,24 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.7.1] - 2026-07-02
+
+- **Smarter vault vocabulary sources.** The optional vault-aware correction
+  (introduced in 1.7.0) now draws its "known terms" from what is actually
+  connected to the note you're dictating in — the note's own headings, links
+  and aliases, notes it links to, notes linking back to it, and its tags —
+  instead of recently modified notes. Recency turned out to be a poor
+  relevance signal: jargon from an unrelated project you edited yesterday
+  could nudge corrections in today's note. Context-anchored terms make the
+  correction hints more precise.
+- As a side effect, the plugin no longer enumerates vault files at all: the
+  "Vault Enumeration" disclosure on the community plugin page disappears
+  with this release. As before, term *names* (never note contents) are only
+  sent to the Mistral API when the opt-in toggle is enabled.
+- Internal: added an evaluation harness for the correction layer (golden
+  prompt tests in CI plus an owner-run live check, including
+  prompt-injection and sensitive-content cases). No user-facing changes.
+
 ## [1.7.0] - 2026-07-02
 
 This release follows up on a full code review: several new quality-of-life

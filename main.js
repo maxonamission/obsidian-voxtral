@@ -3025,7 +3025,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       isTextChatModel
     );
     new import_obsidian.Setting(containerEl).setName("Vault vocabulary").setDesc(
-      "When enabled, vault term names (note titles, aliases, and tags \u2014 never note contents) from the active note's links, recent notes, and its own tags are sent to the Mistral API together with the dictated text, so a misheard or misspelled vault term can be corrected toward its exact spelling. Off by default: this shares vault term names with an external API on every correction call."
+      "When enabled, vault term names (headings, link texts, note titles, aliases, and tags \u2014 never note contents) from the active note's own headings and links, notes it links to, notes linking back to it, and its own tags are sent to the Mistral API together with the dictated text, so a misheard or misspelled vault term can be corrected toward its exact spelling. Off by default: this shares vault term names with an external API on every correction call."
     ).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.vaultVocabulary).onChange(async (value) => {
         this.plugin.settings.vaultVocabulary = value;
@@ -4424,7 +4424,6 @@ var import_obsidian3 = require("obsidian");
 var MAX_TERMS = 50;
 var MAX_CHARS = 1500;
 var MIN_TERM_LENGTH = 3;
-var DEFAULT_MAX_RECENT_FILES = 20;
 function isLikelyCommonWord(term) {
   if (term.includes(" ")) return false;
   if (/[0-9]/.test(term)) return false;
@@ -4442,9 +4441,8 @@ function capByChars(terms, maxChars) {
   }
   return result;
 }
-function collectVaultVocabulary(app, activeFile, opts = {}) {
-  var _a, _b;
-  const maxRecentFiles = (_a = opts.maxRecentFiles) != null ? _a : DEFAULT_MAX_RECENT_FILES;
+function collectVaultVocabulary(app, activeFile) {
+  var _a, _b, _c;
   const terms = [];
   const seen = /* @__PURE__ */ new Set();
   const addTerm = (raw) => {
@@ -4466,24 +4464,44 @@ function collectVaultVocabulary(app, activeFile, opts = {}) {
       for (const alias of aliases) addTerm(alias);
     }
   };
+  const activeCache = activeFile ? app.metadataCache.getFileCache(activeFile) : null;
+  if (activeCache && terms.length < MAX_TERMS) {
+    for (const heading of (_a = activeCache.headings) != null ? _a : []) {
+      if (terms.length >= MAX_TERMS) break;
+      addTerm(heading.heading);
+    }
+    for (const link of (_b = activeCache.links) != null ? _b : []) {
+      if (terms.length >= MAX_TERMS) break;
+      addTerm(link.displayText);
+    }
+    const ownAliases = activeCache.frontmatter ? (0, import_obsidian3.parseFrontMatterAliases)(activeCache.frontmatter) : null;
+    if (ownAliases) {
+      for (const alias of ownAliases) {
+        if (terms.length >= MAX_TERMS) break;
+        addTerm(alias);
+      }
+    }
+  }
   if (activeFile && terms.length < MAX_TERMS) {
-    const resolved = (_b = app.metadataCache.resolvedLinks[activeFile.path]) != null ? _b : {};
+    const resolved = (_c = app.metadataCache.resolvedLinks[activeFile.path]) != null ? _c : {};
     for (const linkedPath of Object.keys(resolved)) {
       if (terms.length >= MAX_TERMS) break;
       const linked = app.vault.getAbstractFileByPath(linkedPath);
       if (linked instanceof import_obsidian3.TFile) addFileTerms(linked);
     }
   }
-  if (terms.length < MAX_TERMS) {
-    const recent = app.vault.getMarkdownFiles().slice().sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, maxRecentFiles);
-    for (const file of recent) {
+  if (activeFile && terms.length < MAX_TERMS) {
+    const allLinks = app.metadataCache.resolvedLinks;
+    for (const sourcePath of Object.keys(allLinks)) {
       if (terms.length >= MAX_TERMS) break;
-      addFileTerms(file);
+      if (sourcePath === activeFile.path) continue;
+      if (!(activeFile.path in allLinks[sourcePath])) continue;
+      const source = app.vault.getAbstractFileByPath(sourcePath);
+      if (source instanceof import_obsidian3.TFile) addFileTerms(source);
     }
   }
-  if (activeFile && terms.length < MAX_TERMS) {
-    const cache = app.metadataCache.getFileCache(activeFile);
-    const tags = cache ? (0, import_obsidian3.getAllTags)(cache) : null;
+  if (activeCache && terms.length < MAX_TERMS) {
+    const tags = (0, import_obsidian3.getAllTags)(activeCache);
     if (tags) {
       for (const tag of tags) {
         if (terms.length >= MAX_TERMS) break;
