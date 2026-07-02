@@ -9,6 +9,12 @@
 	color: var(--text-warning);
 }
 
+/* .voxtral-reconnecting is intentionally unstyled here: no current call
+   site ever sets that status-bar state (see main.ts's INDICATOR_STATE_MAP
+   comment) — the story keeps "Desktop keeps the status bar as-is", so
+   styling for an unreachable state is left for whenever it becomes
+   reachable rather than speculatively added now. */
+
 /* ── Help panel (side view) ── */
 
 .voxtral-help-view {
@@ -114,11 +120,82 @@
 	color: var(--text-accent);
 }
 
+/* ── Mobile recording indicator (view-header dot, VX_E27_S9) ──
+   On mobile there's no status bar, so this dot — living next to the send
+   action in the view header — is the only always-visible recording cue.
+   Three states, matching main.ts's RecordingIndicatorState: recording
+   (pulsing red-ish), paused (static muted — focus-loss or typing-mute),
+   reconnecting (pulsing warning color; realtime-only, desktop-only today,
+   kept for when the state mapping becomes reachable there too). */
+
+.voxtral-rec-indicator {
+	display: inline-block;
+	flex-shrink: 0;
+	width: 8px;
+	height: 8px;
+	margin: 0 6px;
+	border-radius: 50%;
+	align-self: center;
+}
+
+.voxtral-rec-indicator--recording {
+	background-color: var(--color-red, var(--text-error));
+	animation: voxtral-rec-pulse 1.4s ease-in-out infinite;
+}
+
+.voxtral-rec-indicator--paused {
+	background-color: var(--text-muted);
+}
+
+.voxtral-rec-indicator--reconnecting {
+	background-color: var(--text-warning);
+	animation: voxtral-rec-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes voxtral-rec-pulse {
+	0%,
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+	50% {
+		opacity: 0.35;
+		transform: scale(0.75);
+	}
+}
+
+/* Static fallback: a steady dot still communicates state without motion. */
+@media (prefers-reduced-motion: reduce) {
+	.voxtral-rec-indicator--recording,
+	.voxtral-rec-indicator--reconnecting {
+		animation: none;
+	}
+}
+
 /* ── Notice dismiss link ── */
 
 .voxtral-dismiss-link {
 	opacity: 0.7;
 	font-size: 0.85em;
+}
+
+/* ── API key "Test connection" status (VX_E27_S5) ── */
+
+.voxtral-keytest-status {
+	margin-left: 8px;
+	font-size: 0.85em;
+}
+
+.voxtral-keytest-ok {
+	color: var(--text-success);
+}
+
+.voxtral-keytest-fail {
+	color: var(--text-error);
+}
+
+.voxtral-keytest-pending {
+	color: var(--text-muted);
 }
 
 /* ── Settings textarea ── */
@@ -196,4 +273,44 @@
 
 .is-mobile .voxtral-cmd-editor-modal {
 	max-height: calc(100dvh - 2rem);
+}
+
+/* ── Transcript review modal (VX_E27_S6, mobile scroll fix as above) ── */
+
+.voxtral-review-overlay {
+	align-items: safe center;
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+.voxtral-review-modal {
+	max-height: calc(100dvh - 2rem);
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+.is-mobile .voxtral-review-overlay {
+	align-items: flex-start;
+	padding-top: 1rem;
+}
+
+.is-mobile .voxtral-review-modal {
+	max-height: calc(100dvh - 2rem);
+}
+
+.voxtral-review-preview {
+	max-height: 40vh;
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 8px 12px;
+	margin-bottom: 12px;
+}
+
+.voxtral-review-preview-text {
+	white-space: pre-wrap;
+	word-break: break-word;
+	font-family: var(--font-text);
+	margin: 0;
 }

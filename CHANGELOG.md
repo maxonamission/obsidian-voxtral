@@ -4,6 +4,54 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.7.0] - 2026-07-02
+
+This release follows up on a full code review: several new quality-of-life
+features, two dictation-reliability fixes you may actually have hit, and a
+large invisible layer of hardening and tests.
+
+- **See which voice command just ran.** When a command executes, its name
+  flashes briefly in the status bar (desktop) or as a short notice (mobile),
+  so a false trigger is caught in a second instead of discovered later in
+  your text. Toggleable under **Settings → Voice commands** (on by default).
+- **Undo the last voice command — by voice.** Say "undo last command" (or run
+  "Undo last voice action" from the command palette) to revert exactly what
+  the last command changed. It refuses safely if you've dictated past it, so
+  your text is never touched.
+- **Test your API key from settings.** A "Test connection" button next to the
+  key field tells you within seconds whether the key works, is invalid, hits
+  a quota/billing issue, or the endpoint is unreachable — no more failed
+  first recordings to find out.
+- **Review a file transcript before it lands (optional).** With
+  **Settings → File transcription → Review before inserting** enabled, the
+  finished transcript opens in a preview where you can rename speakers
+  (per part, applied cleanly to the labels — never to spoken text) and then
+  insert or discard. Off by default; the direct flow is unchanged.
+- **Vault-aware correction (optional, off by default).** The correction pass
+  can be given the names of notes you link to, recent notes, and tags as
+  "known terms", so your own jargon survives transcription with your exact
+  spelling. A second toggle turns exact matches into `[[wikilinks]]` after
+  correction. Privacy note: when enabled, those term names (titles, aliases,
+  tags — never note contents) are sent to the Mistral API; both toggles are
+  therefore opt-in.
+- **Per-note language.** Add `voxtral-language: en` (any of the 13 supported
+  codes) to a note's frontmatter and recording, voice commands and the help
+  panel switch to that language for that note — no more flipping the global
+  setting for multilingual vaults.
+- **A recording indicator on mobile.** A small pulsing dot in the note header
+  shows recording/paused state at a glance — no more "is the mic still on?"
+  after switching apps or typing.
+- **Dictation reliability fixes.** Fixed text occasionally duplicating after
+  the fast preview stream reconnected in dual-delay mode; fixed a half-open
+  session lingering when a recording failed to start; fixed two socket-state
+  bugs that could leave a dead connection looking alive. Network calls now
+  have proper timeouts and retry politely on rate limits, and a stalled
+  recorder recovers instead of silently failing the next send.
+- Internal: the codebase was restructured (npm workspaces, extracted
+  file-transcription and playback modules) and the automated test suite grew
+  from 486 to 724 tests. No behavior changes from the restructuring — the
+  release build was verified byte-identical across the migration.
+
 ## [1.6.0] - 2026-06-28
 
 - **Listen back to a selection (experimental).** A new, opt-in option reads the

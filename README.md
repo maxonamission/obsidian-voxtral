@@ -51,6 +51,7 @@ Transcription quality follows recording quality — and with a file you only fin
 - **Quality heads-up before transcribing a file** — an optional pre-flight check warns about likely problems (very short, silent, or low-bitrate audio) before spending an API call
 - **Voice commands** — insert headings, bullet points, to-do items, numbered lists, and more by voice
 - **13 languages** — voice commands automatically adapt to the selected language; English always works as fallback (Dutch, English, French, German, Spanish, Portuguese, Italian, Russian, Chinese, Hindi, Arabic, Japanese, Korean)
+- **Per-note language override** — set `voxtral-language` in a note's frontmatter to record that note in a different language than your global setting
 - **Voice command help panel** — shows available commands and trigger phrases for the active language
 - **Auto-correction** — spelling, capitalization, and punctuation are automatically corrected after recording
 - **Inline correction instructions** — say "for the correction: ..." and the corrector will follow your instructions
@@ -129,6 +130,22 @@ Voice commands are recognized at the end of a sentence. Commands automatically a
 | Undo | "undo" | Undo last action |
 | Stop recording | "stop recording" | Stops the recording |
 
+### Per-note language override
+
+Add a `voxtral-language` key to a note's frontmatter to record that note in a different language than your global **Language** setting, without changing the setting itself:
+
+```yaml
+---
+voxtral-language: en
+---
+```
+
+Supported codes: `nl`, `en`, `fr`, `de`, `es`, `pt`, `it`, `ru`, `zh`, `hi`, `ar`, `ja`, `ko` (the same 13 languages as the Language setting).
+
+- The override is resolved once, when you start recording — it applies to transcription, voice-command matching, and the help panel for the whole session. Editing the frontmatter mid-recording has no effect until the next time you start recording.
+- Removing the key (or leaving it out) falls back to your global Language setting.
+- An unrecognized value (e.g. a typo) also falls back to the global setting, with a one-time notice telling you what happened.
+
 ### Text correction
 
 - **Correct selection**: Select text > Command palette > "Correct selected text"
@@ -152,7 +169,7 @@ When switching apps on mobile, you can configure what happens to an active recor
 | Enter = tap-to-send | Use Enter to send audio chunks when mic is live (batch mode, default: on) |
 | Typing cooldown | Delay before mic resumes after typing (default: 800 ms) |
 | On focus loss | Pause immediately / after delay / keep recording |
-| Language | Language for transcription and voice commands (13 languages, default: Nederlands) |
+| Language | Language for transcription and voice commands (13 languages, default: Nederlands). Override per note — see [Per-note language override](#per-note-language-override) |
 | Auto-correct | Enable/disable automatic correction |
 | Streaming delay | Latency vs accuracy tradeoff for realtime mode |
 

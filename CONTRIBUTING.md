@@ -43,7 +43,7 @@ From `obsidian-plugin/`:
 
 ```bash
 npm test                              # vitest
-npx eslint src/
+npm run lint                          # eslint with warning budget
 npx tsc -noEmit -skipLibCheck
 ```
 
