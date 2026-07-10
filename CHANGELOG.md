@@ -4,6 +4,16 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.7.2] - 2026-07-10
+
+- **Docs: clarified why real-time streaming is desktop-only.** The README now
+  explains the actual limitation — the streaming connection must send an
+  authentication header during the WebSocket handshake, which needs Node.js,
+  and Obsidian only has Node.js on desktop — and points mobile users to batch
+  mode with tap-to-send as the alternative. Prompted by
+  [obsidian-voxtral#13](https://github.com/maxonamission/obsidian-voxtral/issues/13).
+  No code changes.
+
 ## [1.7.1] - 2026-07-02
 
 - **Smarter vault vocabulary sources.** The optional vault-aware correction
