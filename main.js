@@ -2602,22 +2602,107 @@ async function testApiKey(apiKey, baseUrl, httpRequest) {
   }
 }
 
+// src/settings-sections.ts
+function connectionAttention(settings) {
+  if (!settings.apiKey.trim()) return "API key missing";
+  return null;
+}
+
 // src/settings-tab.ts
 var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.cachedModels = null;
     this.cachedVoices = null;
+    /** Session-scoped open/collapsed state: survives in-tab re-renders, reset in display(). */
+    this.openState = /* @__PURE__ */ new Map();
+    /** Rebuilt per render; lets predicate-input fields refresh badges without a re-render. */
+    this.badgeRefreshers = [];
     this.plugin = plugin;
   }
   display() {
+    this.openState.clear();
+    this.render();
+  }
+  // Full (re)render of the tab. Extracted from display() so in-tab refreshes can
+  // re-render without calling the deprecated-typed display() entrypoint (Obsidian
+  // 1.13 marks it deprecated in favour of the declarative settings API; Obsidian
+  // itself still invokes display() when opening the tab).
+  render() {
     const { containerEl } = this;
     containerEl.empty();
-    ;
+    this.badgeRefreshers = [];
+    const sections = [
+      {
+        id: "connection",
+        title: "Connection",
+        tier: 1,
+        needsAttention: () => connectionAttention(this.plugin.settings),
+        render: (body) => this.renderConnection(body)
+      },
+      { id: "recording", title: "Recording & dictation", tier: 2, render: (body) => this.renderRecording(body) },
+      {
+        id: "file-transcription",
+        title: "File transcription",
+        tier: 2,
+        render: (body) => this.renderFileTranscription(body)
+      },
+      { id: "listen-back", title: "Listen back (experimental)", tier: 2, render: (body) => this.renderListenBack(body) },
+      {
+        id: "voice-commands",
+        title: "Voice commands",
+        tier: 2,
+        render: (body) => {
+          this.renderCommandFeedback(body);
+          this.renderTemplates(body);
+          new import_obsidian.Setting(body).setName("Custom voice commands").setHeading();
+          this.renderCustomCommands(body);
+        }
+      },
+      {
+        id: "help-shortcuts",
+        title: "Help & shortcuts",
+        tier: 2,
+        render: (body) => {
+          this.renderHelpPanel(body);
+          this.renderHotkeys(body);
+        }
+      },
+      { id: "advanced", title: "Advanced", tier: 3, render: (body) => this.renderAdvancedSection(body) },
+      { id: "support", title: "Support this project", tier: 3, render: (body) => this.renderSupport(body) }
+    ];
+    for (const section of sections) this.renderSection(containerEl, section);
+  }
+  /** Render one collapsible section per the shared settings-accordion pattern. */
+  renderSection(containerEl, section) {
+    var _a, _b, _c;
+    const details = containerEl.createEl("details", { cls: "voxtral-settings-section" });
+    const reason = (_b = (_a = section.needsAttention) == null ? void 0 : _a.call(section)) != null ? _b : null;
+    details.open = (_c = this.openState.get(section.id)) != null ? _c : section.tier !== 3 && reason !== null;
+    const summary = details.createEl("summary", { cls: "voxtral-settings-summary" });
+    summary.createSpan({ text: section.title });
+    const badge = summary.createSpan({ cls: "voxtral-settings-badge" });
+    const refreshBadge = () => {
+      var _a2, _b2;
+      const r = (_b2 = (_a2 = section.needsAttention) == null ? void 0 : _a2.call(section)) != null ? _b2 : null;
+      badge.setText(r ? `\u26A0 ${r}` : "");
+      badge.hidden = r === null;
+    };
+    refreshBadge();
+    this.badgeRefreshers.push(refreshBadge);
+    summary.addEventListener("click", () => this.openState.set(section.id, !details.open));
+    section.render(details);
+  }
+  /** Recompute the summary badges; called from fields the needsAttention predicates read. */
+  refreshBadges() {
+    for (const refresh of this.badgeRefreshers) refresh();
+  }
+  renderConnection(containerEl) {
     new import_obsidian.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai. Stored in Obsidian\u2019s plugin data folder (data.json), unencrypted. Do not share your data.json file.").addText(
       (text) => text.setPlaceholder("Enter your API key").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value.trim();
         await this.plugin.saveSettings();
+        this.refreshBadges();
       })
     ).then((setting) => {
       const input = setting.controlEl.querySelector("input");
@@ -2637,6 +2722,8 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+  }
+  renderRecording(containerEl) {
     const micSetting = new import_obsidian.Setting(containerEl).setName("Microphone").setDesc("Select which microphone to use");
     micSetting.addDropdown((drop) => {
       drop.addOption("", "System default");
@@ -2665,7 +2752,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         (drop) => drop.addOption("realtime", "Realtime (streaming)").addOption("batch", "Batch (after recording)").setValue(this.plugin.settings.mode).onChange(async (value) => {
           this.plugin.settings.mode = value;
           await this.plugin.saveSettings();
-          this.display();
+          this.render();
         })
       );
     }
@@ -2712,7 +2799,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         async (value) => {
           this.plugin.settings.focusBehavior = value;
           await this.plugin.saveSettings();
-          this.display();
+          this.render();
         }
       );
     });
@@ -2771,7 +2858,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       toggle.setValue(this.plugin.settings.dualDelay).setDisabled(!isRealtime).onChange(async (value) => {
         this.plugin.settings.dualDelay = value;
         await this.plugin.saveSettings();
-        this.display();
+        this.render();
       });
     });
     if (isRealtime && !this.plugin.settings.dualDelay) {
@@ -2798,7 +2885,8 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         });
       });
     }
-    new import_obsidian.Setting(containerEl).setName("File transcription").setHeading();
+  }
+  renderFileTranscription(containerEl) {
     new import_obsidian.Setting(containerEl).setName("Transcript destination").setDesc(
       "Where the text goes when you transcribe an audio file (right-click the file)."
     ).addDropdown((drop) => {
@@ -2861,7 +2949,9 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Listen back (experimental)").setHeading();
+  }
+  // Listen back (E26, experimental)
+  renderListenBack(containerEl) {
     new import_obsidian.Setting(containerEl).setName("Read text aloud").setDesc(
       "Add commands to read the selected text or current paragraph aloud using Voxtral text-to-speech. Experimental and off by default; each listen makes an API call."
     ).addToggle(
@@ -2905,7 +2995,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         const voices = await this.getVoices();
         if (voices.length > 0) {
           new import_obsidian.Notice(`Voxtral: ${voices.length} voice(s) available`);
-          this.display();
+          this.render();
           return;
         }
         try {
@@ -2920,10 +3010,11 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         } catch (err) {
           new import_obsidian.Notice(`Voxtral voices fetch error: ${String(err)}`, 1e4);
         }
-        this.display();
+        this.render();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Command feedback").setHeading();
+  }
+  renderCommandFeedback(containerEl) {
     new import_obsidian.Setting(containerEl).setName("Show voice command feedback").setDesc(
       "Briefly show which command just ran (status-bar flash on desktop, a short notice on mobile). Helps catch a false-positive command before it's buried in the text."
     ).addToggle(
@@ -2932,7 +3023,8 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Help panel").setHeading();
+  }
+  renderHelpPanel(containerEl) {
     new import_obsidian.Setting(containerEl).setName("Auto-open on desktop").setDesc(
       "Open the voice help panel in the right sidebar when recording starts on desktop."
     ).addToggle(
@@ -2949,7 +3041,9 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Keyboard shortcuts").setHeading();
+  }
+  // Hotkeys hint
+  renderHotkeys(containerEl) {
     new import_obsidian.Setting(containerEl).setName("Customize hotkeys").setDesc(
       `You can assign keyboard shortcuts to all Voxtral commands (start/stop recording, correct selection, correct note, etc.) via Obsidian's Settings \u2192 Hotkeys. Search for "Voxtral".`
     ).addButton(
@@ -2964,13 +3058,15 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         }
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Support this project").setHeading();
+  }
+  renderSupport(containerEl) {
     new import_obsidian.Setting(containerEl).setName("Buy me a coffee").setDesc("Find this plugin useful? Consider a donation!").addButton(
       (btn) => btn.setButtonText("Buy me a coffee").onClick(() => {
         window.open("https://buymeacoffee.com/maxonamission");
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Templates").setHeading();
+  }
+  renderTemplates(containerEl) {
     new import_obsidian.Setting(containerEl).setName("Templates folder").setDesc(
       'Path to your templates folder (e.g. "Templates"). Say "template {name}" or "sjabloon {name}" to insert. Leave empty to disable.'
     ).addText(
@@ -2979,9 +3075,9 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Custom voice commands").setHeading();
-    this.renderCustomCommands(containerEl);
-    new import_obsidian.Setting(containerEl).setName("Advanced").setHeading();
+  }
+  // Advanced: models, vault-aware correction, prompt override and diagnostics.
+  renderAdvancedSection(containerEl) {
     const isRealtimeModel = (m) => m.id.includes("realtime");
     const isBatchModel = (m) => {
       var _a;
@@ -3148,7 +3244,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         btn.setButtonText("Delete").onClick(async () => {
           commands.splice(i, 1);
           await this.plugin.saveSettings();
-          this.display();
+          this.render();
         });
         btn.buttonEl.addClass("mod-warning");
       });
@@ -3175,13 +3271,13 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
           ...userCommands
         ];
         await this.plugin.saveSettings();
-        this.display();
+        this.render();
       })
     );
   }
   openCommandEditor(cmd, index) {
     const { plugin } = this;
-    const redisplay = () => this.display();
+    const redisplay = () => this.render();
     const lang = this.plugin.settings.language;
     let removeVVListener;
     const editorModal = new class extends import_obsidian.Modal {

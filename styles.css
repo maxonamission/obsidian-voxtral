@@ -314,3 +314,22 @@
 	font-family: var(--font-text);
 	margin: 0;
 }
+
+/* Accordion settings sections (VX_E18_S3; shared pattern:
+   codebase-standards/docs/obsidian-settings-patroon.md). */
+.voxtral-settings-section {
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.voxtral-settings-summary {
+	cursor: pointer;
+	padding: 0.6em 0;
+	font-weight: var(--font-semibold);
+}
+
+.voxtral-settings-badge {
+	margin-left: 0.6em;
+	color: var(--text-warning);
+	font-size: var(--font-smaller);
+	font-weight: var(--font-normal);
+}

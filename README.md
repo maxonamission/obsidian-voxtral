@@ -41,7 +41,7 @@ Transcription quality follows recording quality — and with a file you only fin
 
 ## Features
 
-- **Real-time streaming** (desktop) — text appears as you speak
+- **Real-time streaming** (desktop only) — text appears as you speak ([why not on mobile?](#mobile-batch-mode))
 - **Batch mode with tap-to-send** (desktop + mobile) — send audio chunks while you keep talking
 - **Transcribe existing audio files** (desktop + mobile) — right-click any audio file in your vault → "Transcribe audio file" to turn a meeting, lecture, or voice memo into text. Choose where it lands (the active note, or a new note linked to the audio file) and optionally run it through the correction pass
 - **Transcribe an audio embed at your cursor** — a command that transcribes the `![[recording]]` on the current line and inserts the text right below it
@@ -97,7 +97,9 @@ Need coffee to process all this? Me too. [☕ Buy Me a Coffee](https://buymeacof
 
 ### Mobile (batch mode)
 
-On mobile, only batch mode is available (real-time streaming requires Node.js).
+On mobile, only batch mode is available. This is a platform limitation, not a plugin choice: the real-time connection has to send an authentication header during the WebSocket handshake, which needs Node.js — and Obsidian only has Node.js on desktop. The mobile app runs in a webview without it, so a live streaming connection can't authenticate there. If that ever changes (on Obsidian's or Mistral's side), real-time on mobile is high on the wish list.
+
+In the meantime, batch mode with tap-to-send comes close to a dictation flow: keep talking and send a chunk whenever you want it transcribed.
 
 1. Open a note
 2. Tap the microphone icon to start recording
@@ -192,6 +194,40 @@ What the plugin accesses and why. The Obsidian review page lists some of these w
 - **Vault access** — The plugin reads and writes the **active note** to insert transcribed text and to run "Correct dictated text" on what you dictated. If you enable Templates, it reads template files from the folder you configure. It does not scan or upload your vault.
 - **Clipboard** — Not used. The plugin neither reads nor writes the clipboard. ("Export logs" writes a new note in your vault, not the clipboard.)
 - **API key storage** — Your Mistral API key is stored in the plugin's `data.json` (Obsidian's plugin data folder), unencrypted, like most Obsidian plugins. Don't share that file.
+
+## Works well with
+
+**[Parallax](https://github.com/maxonamission/obsidian-parallax)** — from the same workshop. A
+transcript is raw thinking; Parallax turns it into structured research. Speak a messy problem
+statement or a research question, let Voxtral put it in your note, then select the transcript
+and run Parallax's **Explore the problem**: assumptions and counter-assumptions, reformulations,
+theoretical lenses, and graded multi-source literature research (free via OpenAlex). The two
+plugins share the same principles (your keys, local where possible, no telemetry) but stay
+deliberately separate tools: Voxtral owns capturing speech, Parallax owns the reasoning.
+
+**[Quadro](https://github.com/chrisgrieser/obsidian-quadro)** — qualitative data analysis
+(coding and extraction, a MAXQDA/atlas.ti alternative) in plain markdown. Voxtral's file
+transcription is a natural intake for Quadro's `Data/` folder: record the interview,
+right-click the audio → **Transcribe audio file** (with speaker labels on), move the transcript
+note into `Data/`, and code it.
+
+### Preparing transcripts for Quadro
+
+Quadro's conventions, confirmed by its maintainer (July 2026) — Voxtral's file transcripts fit
+them out of the box, and a light edit pass makes them ideal:
+
+- **One paragraph per speaker turn** is the recommended layout — each paragraph is the unit
+  Quadro codes. Voxtral already splits file transcripts into paragraphs; with **Speaker
+  labels** on, turns are labelled `**Speaker 1:** …`. Split up very long turns into several
+  paragraphs if you want to code them at a finer grain.
+- **Speaker prefixes don't interfere.** Quadro works entirely on a paragraph's *suffix*
+  (wikilinks plus a trailing block id) and is agnostic to the paragraph's content.
+- **Existing block ids are reused, not duplicated.** Quadro only needs unique ids for
+  Obsidian's embedded links, so ids already present in a transcript are kept.
+- **Front-matter is yours.** Data files reserve a single key — `read` (used by Quadro's *Mark
+  current Data File as read*), so don't set that one yourself. Anything else (interview date,
+  participant, a link to the source audio) is free to add and aggregates nicely with Obsidian
+  Bases.
 
 ## Development
 
