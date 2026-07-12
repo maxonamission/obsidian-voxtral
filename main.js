@@ -137,9 +137,12 @@ function isTableLine(line) {
 
 // ../shared/src/correction.ts
 var DEFAULT_CORRECT_PROMPT = "You are a precise text corrector for dictated text. The input language may vary (commonly Dutch, but follow whatever language the text is in).\n\nCORRECT ONLY:\n- Capitalization (sentence starts, proper nouns)\n- Clearly misspelled or garbled words (from speech recognition)\n- Missing or wrong punctuation\n\nDO NOT CHANGE:\n- Sentence structure or word order\n- Style or tone\n- Markdown formatting (# headings, - lists, - [ ] to-do items)\n- Special prefix markers at the start of lines (e.g. >>, >, > [!note], etc.)\n- Text inserted by custom commands \u2014 these are intentional formatting elements\n\nINLINE CORRECTION INSTRUCTIONS:\nThe text was dictated via speech recognition. The speaker sometimes gives inline instructions meant for you. Recognize these patterns:\n- Explicit markers: 'voor de correctie', 'voor de correctie achteraf', 'for the correction', 'correction note'\n- Spelled-out words: 'V-O-X-T-R-A-L' or 'with an x' \u2192 merge into the intended word\n- Self-corrections: 'no not X but Y', 'nee niet X maar Y', 'I mean Y', 'ik bedoel Y'\n- Meta-commentary: 'that's a Dutch word', 'with a capital letter', 'met een hoofdletter'\n\nWhen you encounter such instructions:\n1. Apply the instruction to the REST of the text\n2. Remove the instruction/meta-commentary itself from the output\n3. Keep all content text \u2014 NEVER remove normal sentences\n\nCRITICAL RULES:\n- Your output must be SHORTER than or equal to the input (after removing meta-instructions)\n- NEVER add your own text, commentary, explanations, or notes\n- NEVER add parenthesized text like '(text missing)' or '(no corrections needed)'\n- NEVER continue, elaborate, or expand on the content\n- NEVER invent or hallucinate text that wasn't in the input\n- If the input is short (even one word), just return it corrected\n- Your output must contain ONLY the corrected version of the input text, NOTHING else";
-function buildCustomCommandGuard(commands) {
+function buildCustomCommandGuard(commands, lang) {
+  var _a, _b, _c;
   const markers = [];
   for (const cmd of commands) {
+    const localized = (_c = (_a = cmd.insertTextByLang) == null ? void 0 : _a[lang != null ? lang : "en"]) != null ? _c : (_b = cmd.insertTextByLang) == null ? void 0 : _b.en;
+    if (localized) markers.push(localized.trim());
     if (cmd.insertText) markers.push(cmd.insertText.trim());
     if (cmd.slotPrefix) markers.push(cmd.slotPrefix.trim());
     if (cmd.slotSuffix) markers.push(cmd.slotSuffix.trim());
@@ -1514,6 +1517,14 @@ async function retryWithBackoff(fn, options = {}) {
 }
 
 // src/default-commands.ts
+function tableInsert(column) {
+  return `
+
+| ${column} 1 | ${column} 2 | ${column} 3 |
+| --- | --- | --- |
+| | | |
+`;
+}
 function getDefaultBuiltInCommands() {
   return [
     {
@@ -1535,7 +1546,23 @@ function getDefaultBuiltInCommands() {
         ar: "\u062C\u062F\u0648\u0644"
       },
       type: "insert",
-      insertText: "\n\n| Kolom 1 | Kolom 2 | Kolom 3 |\n| --- | --- | --- |\n| | | |\n",
+      // Fallback for languages without an insertTextByLang entry.
+      insertText: tableInsert("Column"),
+      insertTextByLang: {
+        nl: tableInsert("Kolom"),
+        en: tableInsert("Column"),
+        fr: tableInsert("Colonne"),
+        de: tableInsert("Spalte"),
+        es: tableInsert("Columna"),
+        pt: tableInsert("Coluna"),
+        it: tableInsert("Colonna"),
+        ru: tableInsert("\u0421\u0442\u043E\u043B\u0431\u0435\u0446"),
+        zh: tableInsert("\u5217"),
+        ja: tableInsert("\u5217"),
+        ko: tableInsert("\uC5F4"),
+        hi: tableInsert("\u0915\u0949\u0932\u092E"),
+        ar: tableInsert("\u0639\u0645\u0648\u062F")
+      },
       triggers: {
         nl: ["tabel", "nieuwe tabel"],
         en: ["table", "new table"],
@@ -1734,6 +1761,10 @@ var migrations = {
     }
     return data;
   }
+  // NB: the localized insert text for built-ins (obsidian-voxtral#14) needs
+  // no migration — loadSettings() refreshes every stored built-in's content
+  // fields (labels, triggers, insertText, insertTextByLang, slot fields)
+  // from getDefaultBuiltInCommands() on each load.
 };
 function migrateSettings(data) {
   if (!data) {
@@ -2327,7 +2358,7 @@ function base64ToArrayBuffer(b64) {
 }
 function buildCustomCommandGuard2(settings) {
   var _a;
-  return buildCustomCommandGuard((_a = settings.customCommands) != null ? _a : []);
+  return buildCustomCommandGuard((_a = settings.customCommands) != null ? _a : [], settings.language);
 }
 function buildVocabularyGuard2(settings) {
   var _a;
@@ -3226,15 +3257,15 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
     }
   }
   renderCustomCommands(containerEl) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
     const commands = this.plugin.settings.customCommands;
     const lang = this.plugin.settings.language;
     for (let i = 0; i < commands.length; i++) {
       const cmd = commands[i];
       const triggers = (_b = (_a = cmd.triggers[lang]) != null ? _a : cmd.triggers["en"]) != null ? _b : [];
-      const typeLabel = cmd.type === "slot" ? `${(_c = cmd.slotPrefix) != null ? _c : ""}\u2026${(_d = cmd.slotSuffix) != null ? _d : ""}` : ((_e = cmd.insertText) != null ? _e : "").replace(/\n/g, "\u21B5").slice(0, 30);
+      const typeLabel = cmd.type === "slot" ? `${(_c = cmd.slotPrefix) != null ? _c : ""}\u2026${(_d = cmd.slotSuffix) != null ? _d : ""}` : ((_g = (_f = (_e = cmd.insertTextByLang) == null ? void 0 : _e[lang]) != null ? _f : cmd.insertText) != null ? _g : "").replace(/\n/g, "\u21B5").slice(0, 30);
       const namePrefix = cmd.builtIn ? "\u2699 " : "";
-      const displayLabel = (_i = (_h = (_f = cmd.labels) == null ? void 0 : _f[lang]) != null ? _h : (_g = cmd.labels) == null ? void 0 : _g["en"]) != null ? _i : "";
+      const displayLabel = (_k = (_j = (_h = cmd.labels) == null ? void 0 : _h[lang]) != null ? _j : (_i = cmd.labels) == null ? void 0 : _i["en"]) != null ? _k : "";
       const displayName = displayLabel || triggers.join(", ") || cmd.id;
       new import_obsidian.Setting(containerEl).setName(namePrefix + displayName).setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`).addButton(
         (btn) => btn.setButtonText("Edit").onClick(() => {
@@ -3326,9 +3357,10 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         const insertContainer = contentEl.createDiv();
         let insertInput;
         new import_obsidian.Setting(insertContainer).setName("Text to insert").setDesc("Use \\n for newline").addText((text) => {
-          var _a2;
+          var _a2, _b, _c;
           insertInput = text.inputEl;
-          text.setValue(((_a2 = cmd.insertText) != null ? _a2 : "").replace(/\n/g, "\\n"));
+          const effective = (_c = (_b = (_a2 = cmd.insertTextByLang) == null ? void 0 : _a2[lang]) != null ? _b : cmd.insertText) != null ? _c : "";
+          text.setValue(effective.replace(/\n/g, "\\n"));
         });
         const slotContainer = contentEl.createDiv();
         let prefixInput;
@@ -3368,6 +3400,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
           })
         ).addButton(
           (btn) => btn.setButtonText("Save").setCta().onClick(() => {
+            var _a2, _b, _c;
             const triggers = triggerInput.value.split(",").map((t) => t.trim()).filter((t) => t.length > 0);
             if (triggers.length === 0) {
               triggerInput.classList.add("voxtral-cmd-error");
@@ -3383,7 +3416,12 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
             }
             cmd.type = typeValue;
             if (cmd.type === "insert") {
-              cmd.insertText = insertInput.value.replace(/\\n/g, "\n");
+              const newInsertText = insertInput.value.replace(/\\n/g, "\n");
+              const effective = (_c = (_b = (_a2 = cmd.insertTextByLang) == null ? void 0 : _a2[lang]) != null ? _b : cmd.insertText) != null ? _c : "";
+              if (newInsertText !== effective) {
+                cmd.insertText = newInsertText;
+                cmd.insertTextByLang = void 0;
+              }
               cmd.slotPrefix = void 0;
               cmd.slotSuffix = void 0;
               cmd.slotExit = void 0;
@@ -3392,6 +3430,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
               cmd.slotSuffix = suffixInput.value;
               cmd.slotExit = exitValue;
               cmd.insertText = void 0;
+              cmd.insertTextByLang = void 0;
             }
             plugin.settings.customCommands[index] = cmd;
             void plugin.saveSettings();
@@ -3868,15 +3907,17 @@ function resetCommandUndo() {
 }
 var customCommandDefs = [];
 function loadCustomCommands(commands) {
-  customCommandLabels.clear();
+  customCommandLabelSources.clear();
   customCommandDefs = commands.map((cmd) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
+    var _a, _b, _c;
     if (cmd.type === "slot" && cmd.slotPrefix !== void 0) {
       const prefix = cmd.slotPrefix;
       const suffix = (_a = cmd.slotSuffix) != null ? _a : "";
       const exit = (_b = cmd.slotExit) != null ? _b : "enter";
-      const slotLabel = (_f = (_e = (_c = cmd.labels) == null ? void 0 : _c[activeLang]) != null ? _e : (_d = cmd.labels) == null ? void 0 : _d.en) != null ? _f : `${prefix}\u2026${suffix}`;
-      customCommandLabels.set(cmd.id, slotLabel);
+      customCommandLabelSources.set(cmd.id, {
+        labels: cmd.labels,
+        fallback: `${prefix}\u2026${suffix}`
+      });
       return {
         id: cmd.id,
         slot: { prefix, suffix, exitTrigger: exit },
@@ -3892,15 +3933,20 @@ function loadCustomCommands(commands) {
         }
       };
     }
-    const text = (_g = cmd.insertText) != null ? _g : "";
-    const fallbackLabel = text.replace(/\n/g, "\u21B5").slice(0, 30);
-    const insertLabel = (_k = (_j = (_h = cmd.labels) == null ? void 0 : _h[activeLang]) != null ? _j : (_i = cmd.labels) == null ? void 0 : _i.en) != null ? _k : fallbackLabel || cmd.id;
-    customCommandLabels.set(cmd.id, insertLabel);
+    const fallbackLabel = ((_c = cmd.insertText) != null ? _c : "").replace(/\n/g, "\u21B5").slice(0, 30);
+    customCommandLabelSources.set(cmd.id, {
+      labels: cmd.labels,
+      fallback: fallbackLabel || cmd.id
+    });
     return {
       id: cmd.id,
-      action: (editor) => insertAtCursor(editor, text)
+      action: (editor) => insertAtCursor(editor, resolveInsertText(cmd))
     };
   });
+}
+function resolveInsertText(cmd) {
+  var _a, _b, _c, _d, _e;
+  return (_e = (_d = (_c = (_a = cmd.insertTextByLang) == null ? void 0 : _a[activeLang]) != null ? _c : (_b = cmd.insertTextByLang) == null ? void 0 : _b.en) != null ? _d : cmd.insertText) != null ? _e : "";
 }
 function getAllCommands() {
   return [...COMMAND_DEFS, ...customCommandDefs];
@@ -3910,7 +3956,13 @@ function getCustomPatterns(cmdId, lang) {
   return (_d = (_c = (_a = customCommandTriggers.get(cmdId)) == null ? void 0 : _a.get(lang)) != null ? _c : (_b = customCommandTriggers.get(cmdId)) == null ? void 0 : _b.get("en")) != null ? _d : [];
 }
 var customCommandTriggers = /* @__PURE__ */ new Map();
-var customCommandLabels = /* @__PURE__ */ new Map();
+var customCommandLabelSources = /* @__PURE__ */ new Map();
+function getCustomLabel(cmdId) {
+  var _a, _b, _c, _d;
+  const src = customCommandLabelSources.get(cmdId);
+  if (!src) return cmdId;
+  return (_d = (_c = (_a = src.labels) == null ? void 0 : _a[activeLang]) != null ? _c : (_b = src.labels) == null ? void 0 : _b.en) != null ? _d : src.fallback;
+}
 function loadCustomCommandTriggers(commands) {
   customCommandTriggers.clear();
   for (const cmd of commands) {
@@ -4116,13 +4168,10 @@ function getCommandList() {
       });
     }
   }
-  const custom = customCommandDefs.map((c) => {
-    var _a;
-    return {
-      label: (_a = customCommandLabels.get(c.id)) != null ? _a : c.id,
-      patterns: getPatternsForAnyCommand(c.id, activeLang)
-    };
-  });
+  const custom = customCommandDefs.map((c) => ({
+    label: getCustomLabel(c.id),
+    patterns: getPatternsForAnyCommand(c.id, activeLang)
+  }));
   return [...builtIn, ...custom];
 }
 
@@ -4390,7 +4439,14 @@ function getAutoOpenStrings(lang) {
 var VoxtralHelpView = class extends import_obsidian2.ItemView {
   constructor(leaf, host) {
     super(leaf);
-    this.lang = "nl";
+    /**
+     * Explicit language override, set via setLanguage(). While null (a fresh
+     * or workspace-restored view that nothing refreshed yet), render pulls
+     * the live language from the host instead of assuming a default —
+     * a hardcoded "nl" here left half the panel Dutch for non-Dutch users
+     * until the next language-affecting event (issue obsidian-voxtral#14).
+     */
+    this.lang = null;
     this.host = host;
   }
   getViewType() {
@@ -4411,11 +4467,13 @@ var VoxtralHelpView = class extends import_obsidian2.ItemView {
     this.render();
   }
   render() {
+    var _a, _b;
     const container = this.contentEl;
     container.empty();
     const host = this.host;
     const control = host ? { enabled: host.getAutoOpen(), onChange: (enabled) => host.setAutoOpen(enabled) } : void 0;
-    renderHelpContent(container, this.lang, control);
+    const lang = (_b = (_a = this.lang) != null ? _a : host == null ? void 0 : host.getLanguage()) != null ? _b : "en";
+    renderHelpContent(container, lang, control);
   }
   async onClose() {
     this.contentEl.empty();
@@ -7332,6 +7390,7 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
         cmd.labels = def.labels;
         cmd.triggers = def.triggers;
         cmd.insertText = def.insertText;
+        cmd.insertTextByLang = def.insertTextByLang;
         cmd.slotPrefix = def.slotPrefix;
         cmd.slotSuffix = def.slotSuffix;
       }
@@ -8046,6 +8105,11 @@ ${text}`);
     });
   }
   // ── Help panel host (read/write the per-platform auto-open setting) ──
+  /** HelpPanelHost: effective language — per-note override during recording, else the global setting. */
+  getLanguage() {
+    var _a;
+    return (_a = this.activeLanguage) != null ? _a : this.settings.language;
+  }
   /** HelpPanelHost: current auto-open value for the active platform. */
   getAutoOpen() {
     return import_obsidian9.Platform.isMobile ? this.settings.autoOpenHelpMobile : this.settings.autoOpenHelpDesktop;

@@ -4,6 +4,21 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.7.3] - 2026-07-12
+
+- **The plugin now speaks your language everywhere.** With the language set to
+  anything other than Dutch, two spots still showed Dutch (thanks to the report
+  in [#14](https://github.com/maxonamission/obsidian-voxtral/issues/14)): the
+  "new table" voice command inserted `| Kolom 1 | Kolom 2 | … |` headers, and
+  part of the voice-commands panel (title, tips, privacy, and command names)
+  stayed Dutch until something re-rendered it. Table headers now come localized
+  in all 13 languages, the help panel renders in your configured language from
+  the moment it opens, and command names follow a language switch immediately.
+- Under the hood: the auto-correction pass now knows to preserve the localized
+  table it just inserted (previously it only protected the English variant),
+  and the settings screen previews the text a command will actually insert in
+  your language.
+
 ## [1.7.2] - 2026-07-10
 
 - **Docs: clarified why real-time streaming is desktop-only.** The README now
