@@ -2176,13 +2176,18 @@ async function listModels(apiKey, httpRequest, baseUrl) {
       return [];
     }
     const data = response.json;
+    const seen = /* @__PURE__ */ new Set();
     const models = (data.data || []).map(
       (m) => ({
         id: m.id,
         type: m.type,
         capabilities: m.capabilities
       })
-    );
+    ).filter((m) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
     models.sort((a, b) => a.id.localeCompare(b.id));
     return models;
   } catch (e) {
@@ -2210,12 +2215,17 @@ async function listVoices(apiKey, httpRequest, baseUrl) {
     }
     const data = response.json;
     const arr = Array.isArray(data) ? data : (_d = (_c = (_b = (_a = data == null ? void 0 : data.data) != null ? _a : data == null ? void 0 : data.voices) != null ? _b : data == null ? void 0 : data.items) != null ? _c : data == null ? void 0 : data.results) != null ? _d : [];
+    const seenIds = /* @__PURE__ */ new Set();
     return arr.map((v) => {
       var _a2, _b2, _c2, _d2;
       const voice = v;
       const id = (_b2 = (_a2 = voice.id) != null ? _a2 : voice.slug) != null ? _b2 : voice.name;
       return id ? { id, name: (_d2 = (_c2 = voice.name) != null ? _c2 : voice.slug) != null ? _d2 : id } : null;
-    }).filter((v) => v !== null);
+    }).filter((v) => {
+      if (v === null || seenIds.has(v.id)) return false;
+      seenIds.add(v.id);
+      return true;
+    });
   } catch (e) {
     console.warn("Voxtral: Could not fetch voices", e);
     return [];
