@@ -1,0 +1,141 @@
+name: Forward issue to voxtral-transcribe
+
+# obsidian-voxtral is distribution-only (no source here); all development happens
+# in voxtral-transcribe. This workflow mirrors newly opened issues over there so
+# they enter the normal assess/handle flow, and acknowledges the reporter here.
+#
+# See stories/doing/VX_E20_S3_auto-forward-issues-triage-flow.md (in
+# voxtral-transcribe) for the design and the CROSS_REPO_TOKEN setup steps.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  forward:
+    runs-on: ubuntu-latest
+    steps:
+      # Safety net: if this issue was itself created by the mirror flow (it
+      # already carries a "Mirrors <owner>/<repo>#<n>" marker), don't forward
+      # it again — that would create a mirror-of-mirror loop.
+      - name: Guard against mirror-of-mirror loop
+        id: loop-guard
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          if [[ "$ISSUE_BODY" =~ Mirrors\ [A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[0-9]+ ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Issue body already contains a 'Mirrors ...' marker — this looks like a mirror issue, not an original report. Skipping to avoid a mirror-of-mirror loop."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify CROSS_REPO_TOKEN secret is configured
+        if: steps.loop-guard.outputs.skip == 'false'
+        env:
+          CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          if [ -z "$CROSS_REPO_TOKEN" ]; then
+            echo "::error::CROSS_REPO_TOKEN secret is not configured on obsidian-voxtral, so this issue can't be forwarded to voxtral-transcribe. Create a fine-grained PAT with 'Issues' Read/Write access on BOTH maxonamission/obsidian-voxtral and maxonamission/voxtral-transcribe, then add it as a repo secret named CROSS_REPO_TOKEN under Settings > Secrets and variables > Actions on BOTH repos. See stories/doing/VX_E20_S3_auto-forward-issues-triage-flow.md in voxtral-transcribe for the full setup steps."
+            exit 1
+          fi
+
+      # Combines design steps 1 (dedupe-guard) and 2 (create mirror): search
+      # voxtral-transcribe for an existing mirror of this issue first, and only
+      # create a new one if none is found, so re-runs/edits don't duplicate it.
+      - name: Dedupe-guard and create mirror issue
+        id: mirror
+        if: steps.loop-guard.outputs.skip == 'false'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8.0.0
+        with:
+          github-token: ${{ secrets.CROSS_REPO_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const targetOwner = 'maxonamission';
+            const targetRepo = 'voxtral-transcribe';
+            const marker = `Mirrors maxonamission/obsidian-voxtral#${issue.number}`;
+
+            // Dedupe-guard: skip if a mirror for this issue already exists.
+            const searchQuery = `repo:${targetOwner}/${targetRepo} is:issue in:body "${marker}"`;
+            const existing = await github.rest.search.issuesAndPullRequests({ q: searchQuery });
+            if (existing.data.total_count > 0) {
+              const found = existing.data.items[0];
+              core.info(`Mirror already exists: ${found.html_url} — skipping duplicate creation.`);
+              core.setOutput('mirrored', 'false');
+              core.setOutput('mirror_url', found.html_url);
+              return;
+            }
+
+            const quotedBody = (issue.body || '(no description provided)')
+              .split('\n')
+              .map((line) => `> ${line}`)
+              .join('\n');
+
+            const body = [
+              marker,
+              '',
+              `Original: ${issue.html_url}`,
+              '',
+              quotedBody,
+              '',
+              `— Reported by @${issue.user.login} on obsidian-voxtral.`,
+            ].join('\n');
+
+            const created = await github.rest.issues.create({
+              owner: targetOwner,
+              repo: targetRepo,
+              title: `[obsidian-voxtral#${issue.number}] ${issue.title}`,
+              body,
+            });
+
+            core.info(`Created mirror issue: ${created.data.html_url}`);
+            core.setOutput('mirrored', 'true');
+            core.setOutput('mirror_url', created.data.html_url);
+
+            // Apply the "triage" label if it exists on voxtral-transcribe;
+            // tolerate its absence (no create-if-missing needed).
+            try {
+              await github.rest.issues.addLabels({
+                owner: targetOwner,
+                repo: targetRepo,
+                issue_number: created.data.number,
+                labels: ['triage'],
+              });
+            } catch (err) {
+              core.warning(`Could not apply "triage" label to ${created.data.html_url} (label may not exist): ${err.message}`);
+            }
+
+      # Design step 3: acknowledge on the original issue, using the default
+      # GITHUB_TOKEN (only needs write access to this repo, not the PAT).
+      - name: Acknowledge on the original issue
+        if: steps.mirror.outputs.mirrored == 'true'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8.0.0
+        env:
+          # Via env in plaats van template-interpolatie in de scriptstring —
+          # defense-in-depth tegen injectie, ook al is dit een GitHub-URL.
+          MIRROR_URL: ${{ steps.mirror.outputs.mirror_url }}
+        with:
+          script: |
+            const mirrorUrl = process.env.MIRROR_URL;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Thanks! This is tracked in ${mirrorUrl} — development happens in voxtral-transcribe; we'll update here when it's resolved.`,
+            });
+
+            // Tolerate a missing "forwarded" label (no create-if-missing needed).
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: ['forwarded'],
+              });
+            } catch (err) {
+              core.warning(`Could not apply "forwarded" label: ${err.message}`);
+            }
