@@ -4,6 +4,23 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+- **Open the voice help panel straight from the status bar.** The status-bar
+  indicator (bottom right on desktop) now always shows a small microphone and is
+  clickable — click it any time to open, or reveal, the voice help panel. No
+  need for the command palette or ribbon.
+- **Your API key now lives in Obsidian's secret storage, not in a plain file.**
+  The Mistral API key used to sit unencrypted in the plugin's `data.json`; it
+  now goes into Obsidian's built-in secret storage (the OS keychain on desktop),
+  shown with a masked field and a change/clear button. Your existing key is moved
+  across automatically the first time you open the plugin after updating.
+  - **The key no longer syncs between devices.** It is stored per device, so
+    enter it once on each device you use. If your vault previously synced the
+    plaintext key, consider rotating it — old copies can linger in sync history
+    and file-recovery snapshots.
+  - Requires Obsidian 1.11.4 or newer (for the secret-storage API).
+
 ## [1.7.3] - 2026-07-12
 
 - **The plugin now speaks your language everywhere.** With the language set to

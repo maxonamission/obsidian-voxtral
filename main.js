@@ -26,8 +26,9 @@ var import_obsidian9 = require("obsidian");
 
 // ../shared/src/types.ts
 var DEFAULT_SETTINGS = {
-  settingsVersion: 9,
+  settingsVersion: 10,
   apiKey: "",
+  apiKeySecretId: "",
   apiBaseUrl: "https://api.mistral.ai",
   language: "nl",
   realtimeModel: "voxtral-mini-transcribe-realtime-2602",
@@ -1691,7 +1692,7 @@ function getDefaultBuiltInCommands() {
 }
 
 // src/settings-migration.ts
-var CURRENT_VERSION = 9;
+var CURRENT_VERSION = 10;
 var migrations = {
   // v1 → v2: add file-transcription output placement + correction toggle (E23_S3).
   1: (data) => {
@@ -1760,6 +1761,16 @@ var migrations = {
       data.vaultWikilinks = false;
     }
     return data;
+  },
+  // v9 → v10: add the secret-storage id reference (VX_E28_S1). The plaintext
+  // `apiKey` stays in the object here; the actual move into `app.secretStorage`
+  // is a separate, Obsidian-only step in main.ts (migrateApiKeyToSecret), since
+  // this pure migration has no access to the secret store.
+  9: (data) => {
+    if (typeof data.apiKeySecretId !== "string") {
+      data.apiKeySecretId = "";
+    }
+    return data;
   }
   // NB: the localized insert text for built-ins (obsidian-voxtral#14) needs
   // no migration — loadSettings() refreshes every stored built-in's content
@@ -1777,6 +1788,38 @@ function migrateSettings(data) {
   }
   data.settingsVersion = CURRENT_VERSION;
   return { ...DEFAULT_SETTINGS, ...data };
+}
+
+// src/secrets.ts
+var MISTRAL_SECRET_ID = "voxtral-transcribe-mistral-api";
+function allocateSecretId(base, store) {
+  if (store.getSecret(base) === null) return base;
+  for (let n = 2; ; n++) {
+    const candidate = `${base}-${n}`;
+    if (store.getSecret(candidate) === null) return candidate;
+  }
+}
+function migrateApiKeyToSecret(settings, store) {
+  var _a;
+  const plaintext = ((_a = settings.apiKey) == null ? void 0 : _a.trim()) ? settings.apiKey : "";
+  if (!plaintext) return { changed: false };
+  const id = settings.apiKeySecretId || allocateSecretId(MISTRAL_SECRET_ID, store);
+  try {
+    store.setSecret(id, plaintext);
+    if (store.getSecret(id) !== plaintext) return { changed: false };
+  } catch (e) {
+    return { changed: false };
+  }
+  settings.apiKeySecretId = id;
+  settings.apiKey = "";
+  return { changed: true };
+}
+function readApiKey(settings, store) {
+  var _a;
+  return settings.apiKeySecretId ? (_a = store.getSecret(settings.apiKeySecretId)) != null ? _a : "" : "";
+}
+function stripApiKeyValue(settings) {
+  return { ...settings, apiKey: "" };
 }
 
 // src/resolve-language.ts
@@ -2654,11 +2697,21 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.cachedModels = null;
+    /** Separate from cachedModels so an empty (but real) result is memoized too — VX_E18_S4 §3. */
+    this.fetchedModels = false;
     this.cachedVoices = null;
+    this.fetchedVoices = false;
     /** Session-scoped open/collapsed state: survives in-tab re-renders, reset in display(). */
     this.openState = /* @__PURE__ */ new Map();
     /** Rebuilt per render; lets predicate-input fields refresh badges without a re-render. */
     this.badgeRefreshers = [];
+    /**
+     * Rebuilt per render (VX_E18_S4 §1-2); one entry per section holding its body
+     * element and render function, so (a) a collapsed section's body can be
+     * rendered lazily on first open and (b) a single section can be rebuilt in
+     * place (rerenderSection) without tearing down the other 7.
+     */
+    this.sectionRuntimes = /* @__PURE__ */ new Map();
     this.plugin = plugin;
   }
   display() {
@@ -2673,6 +2726,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     this.badgeRefreshers = [];
+    this.sectionRuntimes = /* @__PURE__ */ new Map();
     const sections = [
       {
         id: "connection",
@@ -2714,12 +2768,19 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
     ];
     for (const section of sections) this.renderSection(containerEl, section);
   }
-  /** Render one collapsible section per the shared settings-accordion pattern. */
+  /**
+   * Render one collapsible section per the shared settings-accordion pattern.
+   * The body (everything section.render() adds) is lazy (VX_E18_S4 §1): a
+   * section that starts collapsed doesn't render its body — and doesn't fire
+   * whatever fetches/enumerations that body's controls trigger — until it's
+   * opened for the first time. A section that starts open renders immediately.
+   */
   renderSection(containerEl, section) {
     var _a, _b, _c;
     const details = containerEl.createEl("details", { cls: "voxtral-settings-section" });
     const reason = (_b = (_a = section.needsAttention) == null ? void 0 : _a.call(section)) != null ? _b : null;
-    details.open = (_c = this.openState.get(section.id)) != null ? _c : section.tier !== 3 && reason !== null;
+    const initialOpen = (_c = this.openState.get(section.id)) != null ? _c : section.tier !== 3 && reason !== null;
+    details.open = initialOpen;
     const summary = details.createEl("summary", { cls: "voxtral-settings-summary" });
     summary.createSpan({ text: section.title });
     const badge = summary.createSpan({ cls: "voxtral-settings-badge" });
@@ -2731,24 +2792,53 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
     };
     refreshBadge();
     this.badgeRefreshers.push(refreshBadge);
-    summary.addEventListener("click", () => this.openState.set(section.id, !details.open));
-    section.render(details);
+    const body = details.createDiv({ cls: "voxtral-settings-section-body" });
+    this.sectionRuntimes.set(section.id, { bodyEl: body, renderFn: section.render });
+    let rendered = false;
+    const renderBody = () => {
+      if (rendered) return;
+      rendered = true;
+      section.render(body);
+    };
+    if (initialOpen) renderBody();
+    summary.addEventListener("click", () => {
+      const opening = !details.open;
+      this.openState.set(section.id, opening);
+      if (opening) renderBody();
+    });
   }
   /** Recompute the summary badges; called from fields the needsAttention predicates read. */
   refreshBadges() {
     for (const refresh of this.badgeRefreshers) refresh();
   }
+  /**
+   * Rebuild a single section's body in place (VX_E18_S4 §2): empties just that
+   * section's body element and re-invokes its render function, instead of
+   * `this.render()` tearing down and re-rendering all 8 sections (which also
+   * resets scroll position and re-fires every other open section's fetches).
+   * Used by the "recording" section's mode/focus-behavior/dual-delay rows,
+   * whose show/hide-dependent siblings all live in that same section.
+   */
+  rerenderSection(id) {
+    const runtime = this.sectionRuntimes.get(id);
+    if (!runtime) return;
+    runtime.bodyEl.empty();
+    runtime.renderFn(runtime.bodyEl);
+  }
   renderConnection(containerEl) {
-    new import_obsidian.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai. Stored in Obsidian\u2019s plugin data folder (data.json), unencrypted. Do not share your data.json file.").addText(
-      (text) => text.setPlaceholder("Enter your API key").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
-        this.plugin.settings.apiKey = value.trim();
+    new import_obsidian.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai. Stored in Obsidian\u2019s secret storage on this device (kept by your operating system), not in your vault, so it does not sync between devices; enter it once per device. Rotate the key if it was previously synced.").addComponent(
+      (el) => new import_obsidian.SecretComponent(this.app, el).setValue(this.plugin.settings.apiKeySecretId).onChange(async (id) => {
+        this.plugin.settings.apiKeySecretId = id != null ? id : "";
+        this.plugin.settings.apiKey = readApiKey(
+          this.plugin.settings,
+          this.app.secretStorage
+        );
+        this.invalidateModelCache();
+        this.invalidateVoiceCache();
         await this.plugin.saveSettings();
         this.refreshBadges();
       })
-    ).then((setting) => {
-      const input = setting.controlEl.querySelector("input");
-      if (input) input.type = "password";
-    });
+    );
     this.renderApiKeyTest(containerEl);
     new import_obsidian.Setting(containerEl).setName("API base URL").setDesc(createFragment((frag) => {
       const exampleUrl = "http://localhost:8000";
@@ -2758,8 +2848,8 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
     })).addText(
       (text) => text.setPlaceholder("https://api.mistral.ai").setValue(this.plugin.settings.apiBaseUrl).onChange(async (value) => {
         this.plugin.settings.apiBaseUrl = value.trim();
-        this.cachedModels = null;
-        this.cachedVoices = null;
+        this.invalidateModelCache();
+        this.invalidateVoiceCache();
         await this.plugin.saveSettings();
       })
     );
@@ -2793,7 +2883,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         (drop) => drop.addOption("realtime", "Realtime (streaming)").addOption("batch", "Batch (after recording)").setValue(this.plugin.settings.mode).onChange(async (value) => {
           this.plugin.settings.mode = value;
           await this.plugin.saveSettings();
-          this.render();
+          this.rerenderSection("recording");
         })
       );
     }
@@ -2840,7 +2930,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         async (value) => {
           this.plugin.settings.focusBehavior = value;
           await this.plugin.saveSettings();
-          this.render();
+          this.rerenderSection("recording");
         }
       );
     });
@@ -2899,7 +2989,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       toggle.setValue(this.plugin.settings.dualDelay).setDisabled(!isRealtime).onChange(async (value) => {
         this.plugin.settings.dualDelay = value;
         await this.plugin.saveSettings();
-        this.render();
+        this.rerenderSection("recording");
       });
     });
     if (isRealtime && !this.plugin.settings.dualDelay) {
@@ -3019,20 +3109,21 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       this.getVoices().then((voices) => {
         if (voices.length === 0) return;
         drop.selectEl.empty();
+        const liveCurrent = this.plugin.settings.ttsVoice;
         const ids = voices.map((v) => v.id);
-        if (current && !ids.includes(current)) {
-          drop.addOption(current, `${current} (current)`);
+        if (liveCurrent && !ids.includes(liveCurrent)) {
+          drop.addOption(liveCurrent, `${liveCurrent} (current)`);
         }
         for (const voice of voices) {
           drop.addOption(voice.id, voice.name || voice.id);
         }
-        drop.setValue(current);
+        drop.setValue(liveCurrent);
       }).catch((err) => {
         console.error("Voxtral: Failed to fetch voices", err);
       });
     }).addExtraButton(
       (btn) => btn.setIcon("refresh-cw").setTooltip("Refresh voices (pull newly cloned voices from your account)").onClick(async () => {
-        this.cachedVoices = null;
+        this.invalidateVoiceCache();
         const voices = await this.getVoices();
         if (voices.length > 0) {
           new import_obsidian.Notice(`Voxtral: ${voices.length} voice(s) available`);
@@ -3137,7 +3228,8 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.settings.realtimeModel = value.trim();
         await this.plugin.saveSettings();
       },
-      isRealtimeModel
+      isRealtimeModel,
+      () => this.plugin.settings.realtimeModel
     );
     this.addModelDropdown(
       containerEl,
@@ -3148,7 +3240,8 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.settings.batchModel = value.trim();
         await this.plugin.saveSettings();
       },
-      isBatchModel
+      isBatchModel,
+      () => this.plugin.settings.batchModel
     );
     this.addModelDropdown(
       containerEl,
@@ -3159,7 +3252,8 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.settings.correctModel = value.trim();
         await this.plugin.saveSettings();
       },
-      isTextChatModel
+      isTextChatModel,
+      () => this.plugin.settings.correctModel
     );
     new import_obsidian.Setting(containerEl).setName("Vault vocabulary").setDesc(
       "When enabled, vault term names (headings, link texts, note titles, aliases, and tags \u2014 never note contents) from the active note's own headings and links, notes it links to, notes linking back to it, and its own tags are sent to the Mistral API together with the dictated text, so a misheard or misspelled vault term can be corrected toward its exact spelling. Off by default: this shares vault term names with an external API on every correction call."
@@ -3279,11 +3373,14 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       const displayName = displayLabel || triggers.join(", ") || cmd.id;
       new import_obsidian.Setting(containerEl).setName(namePrefix + displayName).setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`).addButton(
         (btn) => btn.setButtonText("Edit").onClick(() => {
-          this.openCommandEditor(cmd, i);
+          if (commands.indexOf(cmd) === -1) return;
+          this.openCommandEditor(cmd, false);
         })
       ).addButton((btn) => {
         btn.setButtonText("Delete").onClick(async () => {
-          commands.splice(i, 1);
+          const liveIndex = commands.indexOf(cmd);
+          if (liveIndex === -1) return;
+          commands.splice(liveIndex, 1);
           await this.plugin.saveSettings();
           this.render();
         });
@@ -3298,8 +3395,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
           type: "insert",
           insertText: ""
         };
-        commands.push(newCmd);
-        this.openCommandEditor(newCmd, commands.length - 1);
+        this.openCommandEditor(newCmd, true);
       })
     );
     new import_obsidian.Setting(containerEl).setDesc(
@@ -3316,7 +3412,14 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
   }
-  openCommandEditor(cmd, index) {
+  /**
+   * @param isNew Whether `cmd` has not yet been pushed into
+   * `plugin.settings.customCommands` (VX_E18_S4 §5) — the "Add command" flow
+   * builds the object and opens this editor before it exists in settings, so
+   * Cancel can leave settings untouched. Save either pushes it (isNew) or
+   * re-locates its live index by identity and assigns in place (existing).
+   */
+  openCommandEditor(cmd, isNew) {
     const { plugin } = this;
     const redisplay = () => this.render();
     const lang = this.plugin.settings.language;
@@ -3416,6 +3519,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
               triggerInput.classList.add("voxtral-cmd-error");
               return;
             }
+            triggerInput.classList.remove("voxtral-cmd-error");
             cmd.triggers[lang] = triggers;
             const labelVal = labelInput.value.trim();
             if (labelVal) {
@@ -3442,7 +3546,14 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
               cmd.insertText = void 0;
               cmd.insertTextByLang = void 0;
             }
-            plugin.settings.customCommands[index] = cmd;
+            if (isNew) {
+              plugin.settings.customCommands.push(cmd);
+            } else {
+              const liveIndex = plugin.settings.customCommands.indexOf(cmd);
+              if (liveIndex !== -1) {
+                plugin.settings.customCommands[liveIndex] = cmd;
+              }
+            }
             void plugin.saveSettings();
             this.close();
             redisplay();
@@ -3460,9 +3571,17 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
    * Add a model dropdown that fetches options from the Mistral API.
    * Falls back to a text field if no API key is set or the fetch fails.
    * The current value is always shown, even if not in the fetched list.
+   *
+   * @param getCurrentValue Reads the live settings value at fetch-resolve time
+   * (VX_E18_S4 §7) — the repopulation below must augment/select against
+   * whatever is *currently* selected, not the value captured when this row
+   * was first rendered, otherwise a selection made while the fetch was in
+   * flight gets visibly reverted. Defaults to the render-time `currentValue`
+   * for callers that don't have a live source to read from.
    */
-  addModelDropdown(containerEl, name, desc, currentValue, onChange, filter) {
+  addModelDropdown(containerEl, name, desc, currentValue, onChange, filter, getCurrentValue) {
     const setting = new import_obsidian.Setting(containerEl).setName(name).setDesc(desc);
+    const readCurrent = getCurrentValue != null ? getCurrentValue : (() => currentValue);
     setting.addDropdown((drop) => {
       if (currentValue) {
         drop.addOption(currentValue, currentValue);
@@ -3476,33 +3595,44 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         const filtered = filter ? models.filter(filter) : models;
         const selectEl = drop.selectEl;
         selectEl.empty();
+        const liveValue = readCurrent();
         const ids = filtered.map((m) => m.id);
-        if (currentValue && !ids.includes(currentValue)) {
-          drop.addOption(currentValue, `${currentValue} (current)`);
+        if (liveValue && !ids.includes(liveValue)) {
+          drop.addOption(liveValue, `${liveValue} (current)`);
         }
         for (const model of filtered) {
           drop.addOption(model.id, model.id);
         }
-        drop.setValue(currentValue);
+        drop.setValue(liveValue);
       }).catch((err) => {
         console.error("Voxtral: Failed to fetch models", err);
       });
     });
   }
+  /** Drops the model cache (VX_E18_S4 §3): called on apiKey/apiBaseUrl change. */
+  invalidateModelCache() {
+    this.cachedModels = null;
+    this.fetchedModels = false;
+  }
+  /** Drops the voice cache (VX_E18_S4 §3): called on apiKey/apiBaseUrl change and manual refresh. */
+  invalidateVoiceCache() {
+    this.cachedVoices = null;
+    this.fetchedVoices = false;
+  }
   async getModels() {
-    if (this.cachedModels) return this.cachedModels;
+    var _a;
+    if (this.fetchedModels) return (_a = this.cachedModels) != null ? _a : [];
     const models = await listModels(this.plugin.settings.apiKey, this.plugin.httpRequest, this.plugin.settings.apiBaseUrl);
-    if (models.length > 0) {
-      this.cachedModels = models;
-    }
+    this.cachedModels = models;
+    this.fetchedModels = true;
     return models;
   }
   async getVoices() {
-    if (this.cachedVoices) return this.cachedVoices;
+    var _a;
+    if (this.fetchedVoices) return (_a = this.cachedVoices) != null ? _a : [];
     const voices = await listVoices(this.plugin.settings.apiKey, this.plugin.httpRequest, this.plugin.settings.apiBaseUrl);
-    if (voices.length > 0) {
-      this.cachedVoices = voices;
-    }
+    this.cachedVoices = voices;
+    this.fetchedVoices = true;
     return voices;
   }
 };
@@ -7255,6 +7385,11 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
     });
     if (!import_obsidian9.Platform.isMobile) {
       this.statusBarEl = this.addStatusBarItem();
+      this.statusBarEl.addClass("mod-clickable");
+      this.statusBarEl.setAttribute("aria-label", "Voxtral \u2014 open the voice help panel");
+      this.registerDomEvent(this.statusBarEl, "click", () => {
+        void this.openHelpPanel({ keepEditorFocus: true });
+      });
       this.updateStatusBar("idle");
     }
     this.addCommand({
@@ -7391,6 +7526,12 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
   }
   async loadSettings() {
     this.settings = migrateSettings(await this.loadData());
+    let apiKeyMigrated = false;
+    const store = this.app.secretStorage;
+    if (store && typeof store.setSecret === "function") {
+      apiKeyMigrated = migrateApiKeyToSecret(this.settings, store).changed;
+      this.settings.apiKey = readApiKey(this.settings, store);
+    }
     const defaults = getDefaultBuiltInCommands();
     const defaultMap = new Map(defaults.map((d) => [d.id, d]));
     const existingIds = new Set(this.settings.customCommands.map((c) => c.id));
@@ -7416,9 +7557,16 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
     loadCustomCommands(this.settings.customCommands);
     loadCustomCommandTriggers(this.settings.customCommands);
     this.setupTemplates();
+    if (apiKeyMigrated) {
+      await this.saveSettings();
+      new import_obsidian9.Notice(
+        "Voxtral moved your API key into Obsidian's secret storage. It's now stored per device and no longer syncs \u2014 enter it once on each other device you use.",
+        12e3
+      );
+    }
   }
   async saveSettings() {
-    await this.saveData(this.settings);
+    await this.saveData(stripApiKeyValue(this.settings));
     setLanguage(this.settings.language);
     loadCustomCommands(this.settings.customCommands);
     loadCustomCommandTriggers(this.settings.customCommands);
@@ -8135,13 +8283,15 @@ ${text}`);
   }
   // ── Help panel ──
   async openHelpPanel(opts = {}) {
-    var _a;
+    var _a, _b;
     const existing = this.app.workspace.getLeavesOfType(
       VIEW_TYPE_VOXTRAL_HELP
     );
     if (existing.length > 0) {
       if (opts.skipIfOpen) return;
-      void this.app.workspace.revealLeaf(existing[0]);
+      const editor2 = opts.keepEditorFocus && !import_obsidian9.Platform.isMobile ? (_a = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView)) == null ? void 0 : _a.editor : void 0;
+      await this.app.workspace.revealLeaf(existing[0]);
+      editor2 == null ? void 0 : editor2.focus();
       return;
     }
     const leaf = this.app.workspace.getRightLeaf(false);
@@ -8151,7 +8301,7 @@ ${text}`);
       active: !opts.keepEditorFocus
     });
     if (import_obsidian9.Platform.isMobile) return;
-    const editor = opts.keepEditorFocus ? (_a = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView)) == null ? void 0 : _a.editor : void 0;
+    const editor = opts.keepEditorFocus ? (_b = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView)) == null ? void 0 : _b.editor : void 0;
     await this.app.workspace.revealLeaf(leaf);
     editor == null ? void 0 : editor.focus();
   }
@@ -8219,7 +8369,8 @@ ${text}`);
     if (!this.statusBarEl) return;
     switch (state) {
       case "idle":
-        this.statusBarEl.setText("");
+        this.statusBarEl.empty();
+        (0, import_obsidian9.setIcon)(this.statusBarEl, "mic");
         this.statusBarEl.removeClass(
           "voxtral-recording",
           "voxtral-processing",

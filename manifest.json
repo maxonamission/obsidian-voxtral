@@ -1,8 +1,8 @@
 {
 	"id": "voxtral-transcribe",
 	"name": "Voxtral Transcribe",
-	"version": "1.8.0",
-	"minAppVersion": "1.7.2",
+	"version": "1.8.1",
+	"minAppVersion": "1.11.4",
 	"description": "Speech-to-text with Mistral Voxtral: real-time dictation with voice commands and automatic correction, plus transcription of audio files in your vault.",
 	"author": "Max Kloosterman",
 	"authorUrl": "https://github.com/maxonamission",
