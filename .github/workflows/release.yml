@@ -38,6 +38,10 @@ jobs:
         with:
           body_path: RELEASE_NOTES.md
           generate_release_notes: true
+          # A tag with a -suffix (e.g. 1.9.0-beta.1) is a BRAT beta: marked as
+          # prerelease so Obsidian's stable updater (releases/latest) never
+          # sees it, while BRAT testers can opt in explicitly.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             main.js
             manifest.json

@@ -2,88 +2,57 @@
 
 **Thoughts move fast. Your transcription should keep up.**
 
-Voxtral Transcribe lets you talk and type in the same breath: dictate straight into your notes, add structure by voice — headings, lists, to-dos — and grab the keyboard mid-sentence whenever you want. The mic waits while you type and picks back up when you stop, so editing happens along the way, not after.
+Voxtral Transcribe lets you talk and type in the same breath: dictate straight into your notes, add structure by voice — headings, lists, to-dos, tables — and grab the keyboard mid-sentence whenever you want. The mic waits while you type and picks back up when you stop, so editing happens along the way, not after. Already have a recording — a lecture, a meeting, a voice memo? Right-click it in your vault and Voxtral transcribes it into a note you can search, link, and build on.
 
-And it's not only for what you say next. Already have a recording — a lecture, a meeting, a voice memo? Right-click it in your vault and Voxtral transcribes it into a note you can search, link, and build on.
-
-Powered by [Mistral's Voxtral](https://mistral.ai/), a speech-to-text engine built for transcription from the ground up. Real-time streaming, tap-to-send batch, and now file transcription. 13+ languages, all inside your vault.
+Powered by [Mistral's Voxtral](https://mistral.ai/), a speech-to-text engine built for transcription from the ground up. Real-time streaming on desktop, tap-to-send on mobile, file transcription everywhere. Voice commands come localized in 13 languages — and the engine itself understands even more. All inside your vault.
 
 ### Get going in under a minute
+
 1. Install and paste your [Mistral API key](https://console.mistral.ai/)
 2. Press `Ctrl+Space` (desktop) or tap the mic icon (mobile)
 3. Start talking — say *"heading 2"*, *"new bullet"*, *"for the correction: ..."* as you go
 4. Like it? [☕ Buy Me a Coffee](https://buymeacoffee.com/maxonamission)
 
-## Why Voxtral?
+## Why Voxtral Transcribe?
 
-Voxtral is purpose-built for transcription, not retrofitted from a general audio model. Three things that matter for dictation:
+**Talk, type and structure — in one flow.** Dictation tools give you a wall of text to clean up later. Here, structure happens while you speak: headings, lists, to-dos and tables by voice, self-corrections ("no, not X but Y") understood, and the keyboard always one grab away — the mic simply waits its turn. With voice commands localized in 13 languages — and transcription in even more.
 
-- **Low word error rate on hard audio** — handles background noise, accents, and technical jargon well, including on continuous speech
-- **Streaming-first** — designed for low-latency partial results, which is what makes "text appears as you speak" feel real-time instead of stuttery
-- **Multilingual by design** — 13+ languages with consistent quality, not English-first with the rest bolted on
+**Quality that gives you your time back.** Every misheard word is a correction you make later; every structure you add afterwards is a second editing pass. We deliberately run the best transcription model available for this job — purpose-built for speech, strong on background noise, accents and jargon, streaming-first so live text feels live, and multilingual by design rather than English-first — topped with an automatic correction layer. The goal: when you stop talking, the note is *done*. On your desktop and on your phone.
 
-If you're choosing a speech-to-text model for dictation — or for turning recordings you already have into text — this is a strong fit.
-
-## Same engine. More of what it can do.
-
-Voxtral was never just a dictation tool — it's a full transcription engine that happens to be fast enough to keep up with live speech. So we started there: real-time dictation. Then tap-to-send batch mode, so it worked on mobile too. That batch pipeline turned out to be the foundation for the obvious next step — pointing the same engine at recordings you already have.
-
-Right-click any audio file in your vault → **Transcribe audio file**. The lecture, the interview, the meeting — same Voxtral quality, now on your back catalogue, not just your next sentence.
-
-### Getting good results from a recording
-
-Transcription quality follows recording quality — and with a file you only find out *after* it's transcribed (live dictation lets you fix things as you go). The plugin runs a quick pre-flight check and warns about obvious problems first, but the basics still matter:
-
-- **Get the mic close to the speaker.** Distance and room echo (reverb) hurt accuracy more than the recording device does.
-- **A phone is often good enough.** Its built-in processing (auto-gain, noise reduction) handles most rooms — you don't need pro gear.
-- **Quieter is better.** Background chatter, music, and air-conditioning all cost accuracy.
-- **Long recordings are split automatically.** Files over the single-request limit (~90 MB) are decoded in the app and transcribed in parts, with each part appearing as it finishes and a Cancel button if you want to stop early. You can set the part length under **Settings → File transcription → Chunk length for long recordings**. Splitting decodes the whole file into memory, so very large files (especially on mobile, where memory is tighter) may fail to decode — if that happens you'll get a clear message; transcribe it on desktop or pre-convert to a smaller/compressed format such as 16 kHz mono.
+**A deliberate trade on privacy.** Your audio is processed by Mistral, a European company, using your own API key, directly — no middleman, nothing stored by the plugin, no telemetry. That is not 100% offline, and we say so honestly. Prefer fully local? An experimental **local server mode** (desktop) connects realtime dictation to your own [vLLM](https://docs.vllm.ai/) server running Voxtral's open-weight realtime model — see the [local server guide](https://github.com/maxonamission/voxtral-transcribe/blob/main/docs/local-server.md) — with two honest caveats: it needs a ~16 GB GPU (Windows: WSL), and today's local models can't fully match the cloud's quality, especially outside English. Details in [Privacy & permissions](#privacy--permissions).
 
 ## Features
 
+### Dictation
+
 - **Real-time streaming** (desktop only) — text appears as you speak ([why not on mobile?](#mobile-batch-mode))
 - **Batch mode with tap-to-send** (desktop + mobile) — send audio chunks while you keep talking
-- **Transcribe existing audio files** (desktop + mobile) — right-click any audio file in your vault → "Transcribe audio file" to turn a meeting, lecture, or voice memo into text. Choose where it lands (the active note, or a new note linked to the audio file) and optionally run it through the correction pass
-- **Transcribe an audio embed at your cursor** — a command that transcribes the `![[recording]]` on the current line and inserts the text right below it
-- **Long recordings, handled** — files over the single-request limit are split and transcribed in parts automatically, each part appearing as it finishes (with a Cancel button); part length is configurable
-- **Readable layout** — file transcripts are broken into paragraphs rather than one long block, with parts clearly separated
-- **Speaker labels (optional)** — turn on diarization to label who said what in a file transcript (`**Speaker 1:** …`). Off by default; for long files split into parts, labels are detected per part and a note at the top explains they don't carry across the whole transcript
-- **Quality heads-up before transcribing a file** — an optional pre-flight check warns about likely problems (very short, silent, or low-bitrate audio) before spending an API call
-- **Voice commands** — insert headings, bullet points, to-do items, numbered lists, and more by voice
-- **13 languages** — voice commands automatically adapt to the selected language; English always works as fallback (Dutch, English, French, German, Spanish, Portuguese, Italian, Russian, Chinese, Hindi, Arabic, Japanese, Korean)
-- **Per-note language override** — set `voxtral-language` in a note's frontmatter to record that note in a different language than your global setting
-- **Voice command help panel** — shows available commands and trigger phrases for the active language
-- **Auto-correction** — spelling, capitalization, and punctuation are automatically corrected after recording
-- **Inline correction instructions** — say "for the correction: ..." and the corrector will follow your instructions
+- **Voice commands** — headings, bullet points, to-do items, numbered lists and more by voice, localized to all 13 supported languages (Dutch, English, French, German, Spanish, Portuguese, Italian, Russian, Chinese, Hindi, Arabic, Japanese, Korean); a help panel shows the trigger phrases for your active language
+- **Per-note language override** — set `voxtral-language` in a note's frontmatter to dictate that note in a different language
+- **Typing-friendly mic** — configurable cooldown before the mic resumes after typing, optional Enter-to-send while the mic is live, microphone selection, and configurable behavior when you switch apps on mobile
+
+### Correction
+
+- **Auto-correction** — spelling, capitalization, and punctuation are corrected automatically after recording
+- **Inline correction instructions** — say "for the correction: ..." and the corrector follows your instructions
 - **Self-correction recognition** — "no not X but Y" is handled automatically
 - **Mishearing correction** — common speech recognition errors are fixed automatically per language
-- **Microphone selection** — choose which microphone to use
-- **Auto-pause on focus loss** — configurable behavior when switching apps on mobile
-- **Configurable Enter-to-send** — optionally use Enter as tap-to-send when the mic is live (batch mode)
-- **Typing cooldown** — adjustable delay before the mic resumes after typing
 
-Need coffee to process all this? Me too. [☕ Buy Me a Coffee](https://buymeacoffee.com/maxonamission)
+### File transcription
 
-## Requirements
+- **Transcribe existing audio files** (desktop + mobile) — right-click any audio file → "Transcribe audio file"; choose where the text lands (active note or a new linked note), or transcribe the `![[recording]]` embed at your cursor
+- **Long recordings, handled** — files over the single-request limit are split and transcribed in parts automatically, each part appearing as it finishes (with a Cancel button); part length is configurable
+- **Readable layout** — transcripts are broken into paragraphs rather than one long block
+- **Speaker labels (optional)** — turn on diarization to label who said what (`**Speaker 1:** …`)
+- **Quality heads-up** — an optional pre-flight check warns about likely problems (very short, silent, or low-bitrate audio) before spending an API call
 
-- **Obsidian** v1.0.0 or newer
-- **Mistral API key** — free to create at [console.mistral.ai](https://console.mistral.ai/)
+## Requirements & installation
 
-## Installation
+You need **Obsidian v1.11.4 or newer** and a **Mistral API key** (free to create at [console.mistral.ai](https://console.mistral.ai/)).
 
-### From Community Plugins (recommended)
+**From Community Plugins (recommended):** Settings → Community plugins → Browse → search "Voxtral Transcribe" → Install, Enable, then enter your API key under Settings → Voxtral Transcribe.
 
-1. Open **Settings** > **Community plugins** > **Browse**
-2. Search for "Voxtral Transcribe"
-3. Click **Install**, then **Enable**
-4. Go to **Settings** > **Voxtral Transcribe** and enter your Mistral API key
-
-### Manual installation
-
-1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/maxonamission/obsidian-voxtral/releases/latest)
-2. Create a folder `.obsidian/plugins/voxtral-transcribe/` in your vault
-3. Copy the three files into that folder
-4. Restart Obsidian and enable the plugin in **Settings** > **Community plugins**
+**Manual:** download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/maxonamission/obsidian-voxtral/releases/latest) into `.obsidian/plugins/voxtral-transcribe/` in your vault, restart Obsidian, and enable the plugin under Settings → Community plugins.
 
 ## Usage
 
@@ -97,27 +66,34 @@ Need coffee to process all this? Me too. [☕ Buy Me a Coffee](https://buymeacof
 
 ### Mobile (batch mode)
 
-On mobile, only batch mode is available. This is a platform limitation, not a plugin choice: the real-time connection has to send an authentication header during the WebSocket handshake, which needs Node.js — and Obsidian only has Node.js on desktop. The mobile app runs in a webview without it, so a live streaming connection can't authenticate there. If that ever changes (on Obsidian's or Mistral's side), real-time on mobile is high on the wish list.
+On mobile, only batch mode is available. This is a platform limitation, not a plugin choice: the real-time connection has to send an authentication header during the WebSocket handshake, which needs Node.js — and Obsidian only has Node.js on desktop. If that ever changes (on Obsidian's or Mistral's side), real-time on mobile is high on the wish list.
 
-In the meantime, batch mode with tap-to-send comes close to a dictation flow: keep talking and send a chunk whenever you want it transcribed.
+Batch mode keeps the same flow — keep talking, tap send whenever you want a chunk transcribed, and keep going:
 
-1. Open a note
-2. Tap the microphone icon to start recording
-3. Tap the **send icon** in the view header to transcribe the current audio chunk — the recording keeps going
-4. On desktop, press **Enter** while the mic is live (not typing) to send a chunk (if *Enter = tap-to-send* is enabled)
-5. Keep talking and tap/press send again for the next chunk
-6. Tap the microphone to stop — the last chunk is processed automatically
+1. Open a note and tap the microphone icon to start recording
+2. Tap the **send icon** in the view header to transcribe the current audio chunk — the recording keeps going
+3. Keep talking and tap send again for the next chunk
+4. Tap the microphone to stop — the last chunk is processed automatically
+
+Batch mode works on desktop too: press **Enter** while the mic is live (and you're not typing) to send a chunk, if *Enter = tap-to-send* is enabled.
 
 ### Transcribe an audio file
 
 - **From the vault:** right-click any audio file → **Transcribe audio file**.
 - **From an embed:** put your cursor on a line with an `![[recording]]` embed and run **Transcribe the audio embed on the current line** — the text is inserted right below the embed.
 
-Long recordings are split and transcribed part by part. Turn on **Speaker labels (diarization)** in settings to label who said what (off by default).
+Turn on **Speaker labels (diarization)** in settings to label who said what (off by default; for long files split into parts, labels are detected per part and a note at the top explains they don't carry across the whole transcript).
+
+**Getting good results from a recording** — transcription quality follows recording quality, and with a file you only find out *after* it's transcribed. The pre-flight check warns about obvious problems, but the basics still matter:
+
+- **Get the mic close to the speaker.** Distance and room echo hurt accuracy more than the recording device does.
+- **A phone is often good enough.** Its built-in processing (auto-gain, noise reduction) handles most rooms.
+- **Quieter is better.** Background chatter, music, and air-conditioning all cost accuracy.
+- **Very large files need memory.** Files over the single-request limit (~90 MB) are decoded in the app and split into parts. Decoding loads the whole file into memory, so very large files (especially on mobile) may fail — you'll get a clear message; transcribe on desktop or pre-convert to a smaller format such as 16 kHz mono.
 
 ### Voice commands
 
-Voice commands are recognized at the end of a sentence. Commands automatically adapt to the language selected in settings — the table below shows examples in English, but equivalent phrases are available in all 13 supported languages. Open the **Voice Commands** help panel (ribbon icon or command palette) to see the exact phrases for your active language.
+Voice commands are recognized at the end of a sentence and automatically adapt to the selected language — the table shows English examples, but equivalent phrases exist in all 13 supported languages. Open the **Voice Commands** help panel (ribbon icon or command palette) for the exact phrases in your active language.
 
 | Command | Example (English) | Result |
 |---|---|---|
@@ -134,7 +110,7 @@ Voice commands are recognized at the end of a sentence. Commands automatically a
 
 ### Per-note language override
 
-Add a `voxtral-language` key to a note's frontmatter to record that note in a different language than your global **Language** setting, without changing the setting itself:
+Add a `voxtral-language` key to a note's frontmatter to dictate that note in a different language than your global **Language** setting, without changing the setting itself:
 
 ```yaml
 ---
@@ -144,14 +120,14 @@ voxtral-language: en
 
 Supported codes: `nl`, `en`, `fr`, `de`, `es`, `pt`, `it`, `ru`, `zh`, `hi`, `ar`, `ja`, `ko` (the same 13 languages as the Language setting).
 
-- The override is resolved once, when you start recording — it applies to transcription, voice-command matching, and the help panel for the whole session. Editing the frontmatter mid-recording has no effect until the next time you start recording.
+- The override is resolved once, when you start recording — it applies to transcription, voice-command matching, and the help panel for the whole session. Editing the frontmatter mid-recording has no effect until the next recording.
 - Removing the key (or leaving it out) falls back to your global Language setting.
 - An unrecognized value (e.g. a typo) also falls back to the global setting, with a one-time notice telling you what happened.
 
 ### Text correction
 
-- **Correct selection**: Select text > Command palette > "Correct selected text"
-- **Correct entire note**: Command palette > "Correct entire note"
+- **Correct selection**: select text → Command palette → "Correct selected text"
+- **Correct entire note**: Command palette → "Correct entire note"
 
 ### Focus loss behavior
 
@@ -189,11 +165,11 @@ When switching apps on mobile, you can configure what happens to an active recor
 
 What the plugin accesses and why. The Obsidian review page lists some of these without context.
 
-- **Network** — Your audio is sent to `api.mistral.ai` for transcription (and, if Auto-correct is on, dictated text for correction). That is the only place your content leaves your device. A custom **API base URL** can point this elsewhere — e.g. `http://localhost:8000` for a self-hosted/local model — so nothing leaves your machine. `buymeacoffee.com` is a support link only, opened in your browser when you click it in Settings; no data is sent.
+- **Network** — Your audio is sent to `api.mistral.ai` (Mistral, an EU company) for transcription — and, if Auto-correct is on, dictated text for correction. That is the only place your content leaves your device. A custom **API base URL** can point this elsewhere — e.g. `http://localhost:8000` for a self-hosted/local model — so nothing leaves your machine. `buymeacoffee.com` is a support link only, opened in your browser when you click it in Settings; no data is sent.
 - **Audio encoding** — Captured audio is base64-encoded (`btoa()`) to include it in the API request. This is transport encoding, not obfuscation.
 - **Vault access** — The plugin reads and writes the **active note** to insert transcribed text and to run "Correct dictated text" on what you dictated. If you enable Templates, it reads template files from the folder you configure. It does not scan or upload your vault.
 - **Clipboard** — Not used. The plugin neither reads nor writes the clipboard. ("Export logs" writes a new note in your vault, not the clipboard.)
-- **API key storage** — Your Mistral API key is stored in the plugin's `data.json` (Obsidian's plugin data folder), unencrypted, like most Obsidian plugins. Don't share that file.
+- **API key storage** — Your Mistral API key is stored in Obsidian's secret storage (backed by the OS keychain on desktop), not in the plugin's `data.json` — so it stays out of your synced vault. The key is per-device: enter it once on each device you use.
 
 ## Works well with
 

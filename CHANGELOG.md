@@ -6,6 +6,28 @@ plugin follows [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-07-21
+
+- **Experimental: local server mode (desktop).** A new *Local server mode
+  (experimental)* toggle under Settings → Connection connects realtime
+  dictation to a local [vLLM](https://docs.vllm.ai/) server running Mistral's
+  open `Voxtral-Mini-4B-Realtime-2602` model — your audio never leaves your
+  machine, and no API key is needed for dictating. Requires a GPU with
+  ~16 GB VRAM (Windows: via WSL); the
+  [local server guide](https://github.com/maxonamission/voxtral-transcribe/blob/main/docs/local-server.md)
+  gets you from zero to talking. This has had limited real-world testing so
+  far — feedback via [GitHub issues](https://github.com/maxonamission/obsidian-voxtral/issues)
+  is very welcome.
+  - A *Local server status* row in settings shows whether the server responds
+    and which model it has loaded.
+  - **Auto-correction is off in local mode** unless you configure a local
+    correction endpoint (e.g. Ollama with a small Ministral model) — either
+    way, nothing is sent to the cloud in local mode.
+  - Cloud behavior is unchanged when the toggle is off. File transcription and
+    listen back still use the cloud (and your API key) for now.
+
+## [1.8.1] - 2026-07-15
+
 - **Open the voice help panel straight from the status bar.** The status-bar
   indicator (bottom right on desktop) now always shows a small microphone and is
   clickable — click it any time to open, or reveal, the voice help panel. No
@@ -20,6 +42,16 @@ plugin follows [semantic versioning](https://semver.org/).
     plaintext key, consider rotating it — old copies can linger in sync history
     and file-recovery snapshots.
   - Requires Obsidian 1.11.4 or newer (for the secret-storage API).
+
+## [1.8.0] - 2026-07-14
+
+- **A faster, tidier settings screen.** Collapsed sections now render on first
+  open (no hidden work for sections you never look at), switching modes only
+  redraws its own section instead of the whole tab, and failed model/voice
+  lookups are no longer retried on every redraw.
+- **No more duplicate entries in the model dropdowns.** The model and voice
+  lists are de-duplicated; aliases and dated releases of the same model showed
+  up as identical-looking doubles.
 
 ## [1.7.3] - 2026-07-12
 

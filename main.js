@@ -30,6 +30,7 @@ var DEFAULT_SETTINGS = {
   apiKey: "",
   apiKeySecretId: "",
   apiBaseUrl: "https://api.mistral.ai",
+  realtimeProtocol: "auto",
   language: "nl",
   realtimeModel: "voxtral-mini-transcribe-realtime-2602",
   batchModel: "voxtral-mini-latest",
@@ -64,7 +65,9 @@ var DEFAULT_SETTINGS = {
   ttsVoice: "en_paul_neutral",
   // a confirmed preset id; the live list is fetched (shared/src/tts.ts)
   vaultVocabulary: false,
-  vaultWikilinks: false
+  vaultWikilinks: false,
+  localCorrectionUrl: "",
+  localCorrectionModel: "ministral-3:3b"
 };
 
 // ../shared/src/similarity.ts
@@ -1495,6 +1498,14 @@ function createAuthenticatedWebSocket(url, headers, callbacks) {
   return conn;
 }
 
+// ../shared/src/tts.ts
+var TTS_MODEL = "voxtral-mini-tts-2603";
+var TTS_RESPONSE_FORMAT = "wav";
+var TTS_VOICES = [
+  { id: "en_paul_neutral", label: "Paul \u2014 neutral (US English)" },
+  { id: "gb_jane_neutral", label: "Jane \u2014 neutral (UK English)" }
+];
+
 // ../shared/src/retry.ts
 var realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function retryWithBackoff(fn, options = {}) {
@@ -1515,6 +1526,631 @@ async function retryWithBackoff(fn, options = {}) {
     }
   }
   throw lastError;
+}
+
+// ../shared/src/mistral-api.ts
+var DEFAULT_BASE_URL = "https://api.mistral.ai";
+var HTTP_TIMEOUT_UPLOAD_MS = 6e4;
+var HTTP_TIMEOUT_DEFAULT_MS = 3e4;
+var HttpStatusError = class extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+    this.name = "HttpStatusError";
+  }
+};
+function isRateLimitError(error) {
+  return error instanceof HttpStatusError && error.status === 429;
+}
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1e3)}s`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    clearTimeout(timer);
+    promise.catch(() => {
+    });
+  });
+}
+function sanitizeApiError(status, rawBody) {
+  var _a;
+  try {
+    const parsed = JSON.parse(rawBody);
+    let msg = (parsed == null ? void 0 : parsed.message) || ((_a = parsed == null ? void 0 : parsed.error) == null ? void 0 : _a.message);
+    if (!msg && (parsed == null ? void 0 : parsed.detail)) {
+      const d = parsed.detail;
+      msg = typeof d === "string" ? d : Array.isArray(d) ? d.map((e) => {
+        var _a2;
+        return (_a2 = e == null ? void 0 : e.msg) != null ? _a2 : JSON.stringify(e);
+      }).join("; ") : void 0;
+    }
+    if (typeof msg === "string" && msg.length > 0 && msg.length < 300) {
+      return `HTTP ${status}: ${msg}`;
+    }
+  } catch (e) {
+  }
+  switch (status) {
+    case 401:
+      return "HTTP 401: Invalid or expired API key";
+    case 403:
+      return "HTTP 403: Access denied";
+    case 404:
+      return "HTTP 404: API endpoint not found (check model name)";
+    case 413:
+      return "HTTP 413: Audio file too large";
+    case 429:
+      return "HTTP 429: Rate limit exceeded \u2014 try again later";
+    case 500:
+    case 502:
+    case 503:
+      return `HTTP ${status}: Mistral API server error \u2014 try again later`;
+    default:
+      return `HTTP ${status}: Request failed`;
+  }
+}
+async function listModels(apiKey, httpRequest, baseUrl) {
+  if (!apiKey || !apiKey.trim()) return [];
+  const base = baseUrl || DEFAULT_BASE_URL;
+  try {
+    const response = await withTimeout(
+      httpRequest({
+        url: `${base}/v1/models`,
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`
+        }
+      }),
+      HTTP_TIMEOUT_DEFAULT_MS,
+      "List models request"
+    );
+    if (response.status !== 200) {
+      console.warn(
+        `Voxtral: Failed to list models (${response.status})`
+      );
+      return [];
+    }
+    const data = response.json;
+    const seen = /* @__PURE__ */ new Set();
+    const models = (data.data || []).map(
+      (m) => ({
+        id: m.id,
+        type: m.type,
+        capabilities: m.capabilities
+      })
+    ).filter((m) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+    models.sort((a, b) => a.id.localeCompare(b.id));
+    return models;
+  } catch (e) {
+    console.warn("Voxtral: Could not fetch models", e);
+    return [];
+  }
+}
+async function listVoices(apiKey, httpRequest, baseUrl) {
+  var _a, _b, _c, _d;
+  if (!apiKey || !apiKey.trim()) return [];
+  const base = baseUrl || DEFAULT_BASE_URL;
+  try {
+    const response = await withTimeout(
+      httpRequest({
+        url: `${base}/v1/audio/voices?limit=100`,
+        method: "GET",
+        headers: { Authorization: `Bearer ${apiKey}` }
+      }),
+      HTTP_TIMEOUT_DEFAULT_MS,
+      "List voices request"
+    );
+    if (response.status !== 200) {
+      console.warn(`Voxtral: Failed to list voices (${response.status})`);
+      return [];
+    }
+    const data = response.json;
+    const arr = Array.isArray(data) ? data : (_d = (_c = (_b = (_a = data == null ? void 0 : data.data) != null ? _a : data == null ? void 0 : data.voices) != null ? _b : data == null ? void 0 : data.items) != null ? _c : data == null ? void 0 : data.results) != null ? _d : [];
+    const seenIds = /* @__PURE__ */ new Set();
+    return arr.map((v) => {
+      var _a2, _b2, _c2, _d2;
+      const voice = v;
+      const id = (_b2 = (_a2 = voice.id) != null ? _a2 : voice.slug) != null ? _b2 : voice.name;
+      return id ? { id, name: (_d2 = (_c2 = voice.name) != null ? _c2 : voice.slug) != null ? _d2 : id } : null;
+    }).filter((v) => {
+      if (v === null || seenIds.has(v.id)) return false;
+      seenIds.add(v.id);
+      return true;
+    });
+  } catch (e) {
+    console.warn("Voxtral: Could not fetch voices", e);
+    return [];
+  }
+}
+async function transcribeBatchRaw(audioBlob, settings, httpRequest, diarize = false) {
+  var _a, _b, _c;
+  const t = audioBlob.type;
+  const ext = t.includes("mp4") ? "m4a" : t.includes("ogg") ? "ogg" : t.includes("mpeg") || t.includes("mp3") ? "mp3" : t.includes("wav") ? "wav" : t.includes("flac") ? "flac" : t.includes("aac") ? "aac" : "webm";
+  const mimeType = audioBlob.type || `audio/${ext}`;
+  const boundary = `----VoxtralBoundary${Date.now()}`;
+  const arrayBuf = await audioBlob.arrayBuffer();
+  const fileBytes = new Uint8Array(arrayBuf);
+  let textParts = "";
+  textParts += `--${boundary}\r
+`;
+  textParts += `Content-Disposition: form-data; name="file"; filename="recording.${ext}"\r
+`;
+  textParts += `Content-Type: ${mimeType}\r
+\r
+`;
+  const afterFile = `\r
+--${boundary}\r
+Content-Disposition: form-data; name="model"\r
+\r
+${settings.batchModel}\r
+`;
+  let extraFields = "";
+  if (diarize) {
+    extraFields += `--${boundary}\r
+Content-Disposition: form-data; name="diarize"\r
+\r
+true\r
+`;
+    extraFields += `--${boundary}\r
+Content-Disposition: form-data; name="timestamp_granularities"\r
+\r
+segment\r
+`;
+  } else if (settings.language) {
+    extraFields += `--${boundary}\r
+Content-Disposition: form-data; name="language"\r
+\r
+${settings.language}\r
+`;
+  }
+  extraFields += `--${boundary}--\r
+`;
+  const enc = new TextEncoder();
+  const headerBuf = enc.encode(textParts);
+  const tailBuf = enc.encode(afterFile + extraFields);
+  const body = new Uint8Array(headerBuf.length + fileBytes.length + tailBuf.length);
+  body.set(headerBuf, 0);
+  body.set(fileBytes, headerBuf.length);
+  body.set(tailBuf, headerBuf.length + fileBytes.length);
+  const base = settings.apiBaseUrl || DEFAULT_BASE_URL;
+  const response = await withTimeout(
+    httpRequest({
+      url: `${base}/v1/audio/transcriptions`,
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${settings.apiKey}`,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`
+      },
+      body: body.buffer
+    }),
+    HTTP_TIMEOUT_UPLOAD_MS,
+    "Transcription request"
+  );
+  if (response.status !== 200) {
+    throw new Error(
+      `Transcription failed: ${sanitizeApiError(response.status, response.text)}`
+    );
+  }
+  return {
+    text: ((_a = response.json) == null ? void 0 : _a.text) || "",
+    segments: (_c = (_b = response.json) == null ? void 0 : _b.segments) != null ? _c : []
+  };
+}
+async function transcribeBatch(audioBlob, settings, httpRequest, diarize = false) {
+  return (await transcribeBatchRaw(audioBlob, settings, httpRequest, diarize)).text;
+}
+async function synthesizeSpeech(text, settings, httpRequest) {
+  var _a, _b, _c, _d, _e;
+  const base = settings.apiBaseUrl || DEFAULT_BASE_URL;
+  const response = await retryWithBackoff(
+    async () => {
+      const resp = await withTimeout(
+        httpRequest({
+          url: `${base}/v1/audio/speech`,
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${settings.apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: TTS_MODEL,
+            input: text,
+            voice: settings.ttsVoice,
+            response_format: TTS_RESPONSE_FORMAT
+          })
+        }),
+        HTTP_TIMEOUT_DEFAULT_MS,
+        "Speech synthesis request"
+      );
+      if (resp.status !== 200) {
+        throw new HttpStatusError(
+          `Speech synthesis failed: ${sanitizeApiError(resp.status, resp.text)}`,
+          resp.status
+        );
+      }
+      return resp;
+    },
+    { shouldRetry: isRateLimitError }
+  );
+  const json = response.json;
+  if (json && typeof json === "object" && !Array.isArray(json)) {
+    const candidate = (_e = (_d = (_c = (_b = (_a = json.audio_data) != null ? _a : (
+      // confirmed field name returned by Mistral TTS
+      json.audio
+    )) != null ? _b : json.audio_base64) != null ? _c : json.b64_audio) != null ? _d : json.audio_content) != null ? _e : typeof json.data === "string" ? json.data : void 0;
+    if (typeof candidate === "string" && candidate.length > 0) {
+      return base64ToArrayBuffer(candidate);
+    }
+    throw new Error(
+      `Speech synthesis returned JSON, not audio (fields: ${Object.keys(json).join(", ")})`
+    );
+  }
+  if (!response.arrayBuffer || response.arrayBuffer.byteLength === 0) {
+    throw new Error("Speech synthesis returned no audio.");
+  }
+  return response.arrayBuffer;
+}
+function base64ToArrayBuffer(b64) {
+  const clean = b64.replace(/^data:[^;,]*;base64,/, "");
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+function buildCustomCommandGuard2(settings) {
+  var _a;
+  return buildCustomCommandGuard((_a = settings.customCommands) != null ? _a : [], settings.language);
+}
+function buildVocabularyGuard2(settings) {
+  var _a;
+  return buildVocabularyGuard((_a = settings.vocabularyTerms) != null ? _a : []);
+}
+async function correctText(text, settings, httpRequest) {
+  var _a, _b, _c, _d, _e, _f;
+  const local = isLocalMode(settings);
+  const localUrl = local ? (_a = settings.localCorrectionUrl) == null ? void 0 : _a.trim() : void 0;
+  if (local && !localUrl) {
+    console.debug(
+      "Voxtral: correction skipped in local mode \u2014 no local correction endpoint configured"
+    );
+    return text;
+  }
+  const basePrompt = settings.systemPrompt || DEFAULT_CORRECT_PROMPT;
+  const systemPrompt = basePrompt + buildCustomCommandGuard2(settings) + buildVocabularyGuard2(settings);
+  const base = local && localUrl ? localUrl : settings.apiBaseUrl || DEFAULT_BASE_URL;
+  const model = local ? ((_b = settings.localCorrectionModel) == null ? void 0 : _b.trim()) || "ministral-3:3b" : settings.correctModel;
+  const headers = local ? { "Content-Type": "application/json" } : { Authorization: `Bearer ${settings.apiKey}`, "Content-Type": "application/json" };
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: text }
+    ],
+    temperature: 0.1
+  };
+  const response = await retryWithBackoff(
+    async () => {
+      const resp = await withTimeout(
+        httpRequest({
+          url: `${base}/v1/chat/completions`,
+          method: "POST",
+          headers,
+          body: JSON.stringify(body)
+        }),
+        HTTP_TIMEOUT_DEFAULT_MS,
+        "Correction request"
+      );
+      if (resp.status !== 200) {
+        throw new HttpStatusError(
+          `Correction failed: ${sanitizeApiError(resp.status, resp.text)}`,
+          resp.status
+        );
+      }
+      return resp;
+    },
+    { shouldRetry: isRateLimitError }
+  );
+  const data = response.json;
+  let result = ((_f = (_e = (_d = (_c = data.choices) == null ? void 0 : _c[0]) == null ? void 0 : _d.message) == null ? void 0 : _e.content) == null ? void 0 : _f.trim()) || text;
+  result = stripLlmCommentary(result, text);
+  if (result.length > text.length * 1.5 + 50) {
+    console.warn(
+      "Voxtral: Correction rejected \u2014 output is suspiciously longer than input",
+      { inputLen: text.length, outputLen: result.length }
+    );
+    return text;
+  }
+  return result;
+}
+function resolveRealtimeProtocol(settings) {
+  if (settings.realtimeProtocol === "mistral" || settings.realtimeProtocol === "vllm") {
+    return settings.realtimeProtocol;
+  }
+  try {
+    const { hostname } = new URL(settings.apiBaseUrl || DEFAULT_BASE_URL);
+    const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+    return isLocalhost ? "vllm" : "mistral";
+  } catch (e) {
+    return "mistral";
+  }
+}
+function isLocalMode(settings) {
+  return resolveRealtimeProtocol(settings) === "vllm";
+}
+var RealtimeTranscriber = class {
+  constructor(settings, callbacks, delayOverrideMs) {
+    this.ws = null;
+    this.intentionallyClosed = false;
+    this.delayOverrideMs = null;
+    this.settings = settings;
+    this.callbacks = callbacks;
+    this.delayOverrideMs = delayOverrideMs != null ? delayOverrideMs : null;
+  }
+  async connect() {
+    if (resolveRealtimeProtocol(this.settings) === "vllm") return this.connectVllm();
+    this.intentionallyClosed = false;
+    const params = new URLSearchParams({
+      model: this.settings.realtimeModel
+    });
+    const httpBase = this.settings.apiBaseUrl || DEFAULT_BASE_URL;
+    const wsBase = httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
+    const url = `${wsBase}/v1/audio/transcriptions/realtime?${params}`;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        var _a;
+        (_a = this.ws) == null ? void 0 : _a.close();
+        reject(new Error("WebSocket connection timeout"));
+      }, 1e4);
+      this.ws = createAuthenticatedWebSocket(
+        url,
+        { Authorization: `Bearer ${this.settings.apiKey}` },
+        {
+          onOpen: () => {
+          },
+          onMessage: (data) => {
+            var _a, _b, _c;
+            try {
+              const msg = JSON.parse(data);
+              console.debug(
+                `Voxtral WS \u2190 ${msg.type}`,
+                msg.type === "transcription.text.delta" ? (_a = msg.text) == null ? void 0 : _a.slice(0, 50) : ""
+              );
+              switch (msg.type) {
+                case "session.created":
+                  clearTimeout(timeout);
+                  this.sendSessionUpdate();
+                  this.callbacks.onSessionCreated();
+                  resolve();
+                  break;
+                case "session.updated":
+                  console.debug(
+                    "Voxtral WS: session updated",
+                    JSON.stringify(msg.session || {})
+                  );
+                  break;
+                case "transcription.text.delta":
+                  this.callbacks.onDelta(msg.text || "");
+                  break;
+                case "transcription.done":
+                  console.debug(
+                    "Voxtral WS: transcription.done \u2014 full text:",
+                    (_b = msg.text) == null ? void 0 : _b.slice(0, 200)
+                  );
+                  this.callbacks.onDone(msg.text || "");
+                  break;
+                case "error":
+                  console.error(
+                    "Voxtral WS: server error:",
+                    JSON.stringify(msg.error)
+                  );
+                  this.callbacks.onError(
+                    ((_c = msg.error) == null ? void 0 : _c.message) || "Unknown error"
+                  );
+                  break;
+                default:
+                  console.debug(
+                    "Voxtral WS: unknown message type:",
+                    msg.type,
+                    data.slice(0, 300)
+                  );
+                  break;
+              }
+            } catch (e) {
+              console.error(
+                "Voxtral: failed to parse WS message",
+                data.slice(0, 200),
+                e
+              );
+            }
+          },
+          onError: (err) => {
+            clearTimeout(timeout);
+            console.error("Voxtral: WebSocket error", err);
+            reject(
+              new Error(
+                `WebSocket connection failed: ${err.message}`
+              )
+            );
+          },
+          onClose: () => {
+            console.debug(
+              `Voxtral WS: connection closed (intentional=${this.intentionallyClosed})`
+            );
+            this.ws = null;
+            if (!this.intentionallyClosed) {
+              this.callbacks.onDisconnect();
+            }
+          }
+        }
+      );
+    });
+  }
+  /**
+   * Connect to a local vLLM `/v1/realtime` endpoint. Unlike the Mistral cloud
+   * path, this is a plain (unauthenticated) WebSocket — no upgrade headers,
+   * no model query param — so it uses the platform-native `WebSocket`
+   * directly instead of authenticated-websocket.ts (which only speaks
+   * https/443 and exists purely to inject the cloud Authorization header).
+   * The native socket is wrapped in the same AuthenticatedWsConnection shape
+   * so sendAudio/flush/endAudio/close/isConnected keep working unchanged.
+   */
+  connectVllm() {
+    this.intentionallyClosed = false;
+    const httpBase = this.settings.apiBaseUrl || DEFAULT_BASE_URL;
+    const wsBase = httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
+    const url = `${wsBase}/v1/realtime`;
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      let opened = false;
+      let failedBeforeOpen = false;
+      const timeout = setTimeout(() => {
+        socket.close();
+        reject(new Error("WebSocket connection timeout"));
+      }, 1e4);
+      this.ws = {
+        send: (data) => socket.send(data),
+        close: () => socket.close(),
+        get readyState() {
+          return socket.readyState;
+        }
+      };
+      socket.onopen = () => {
+        opened = true;
+        clearTimeout(timeout);
+        this.sendSessionUpdate();
+        this.callbacks.onSessionCreated();
+        resolve();
+      };
+      socket.onmessage = (event) => {
+        var _a, _b, _c;
+        const data = String(event.data);
+        try {
+          const msg = JSON.parse(data);
+          console.debug(
+            `Voxtral WS (vLLM) \u2190 ${msg.type}`,
+            msg.type === "transcription.delta" || msg.type === "transcription.text.delta" ? (_a = msg.text) == null ? void 0 : _a.slice(0, 50) : ""
+          );
+          switch (msg.type) {
+            // The docs call this "transcription.delta"; the deployed
+            // adapter actually emits "transcription.text.delta" — accept both.
+            case "transcription.delta":
+            case "transcription.text.delta":
+              this.callbacks.onDelta(msg.text || "");
+              break;
+            case "transcription.done":
+              console.debug(
+                "Voxtral WS (vLLM): transcription.done \u2014 full text:",
+                (_b = msg.text) == null ? void 0 : _b.slice(0, 200)
+              );
+              this.callbacks.onDone(msg.text || "");
+              break;
+            case "error":
+              console.error(
+                "Voxtral WS (vLLM): server error:",
+                JSON.stringify(msg.error)
+              );
+              this.callbacks.onError(
+                ((_c = msg.error) == null ? void 0 : _c.message) || "Unknown error"
+              );
+              break;
+            case "session.created":
+            case "session.updated":
+              console.debug("Voxtral WS (vLLM): session event", msg.type);
+              break;
+            default:
+              console.debug(
+                "Voxtral WS (vLLM): unknown message type:",
+                msg.type,
+                data.slice(0, 300)
+              );
+              break;
+          }
+        } catch (e) {
+          console.error(
+            "Voxtral: failed to parse vLLM WS message",
+            data.slice(0, 200),
+            e
+          );
+        }
+      };
+      socket.onerror = () => {
+        if (!opened) {
+          failedBeforeOpen = true;
+          clearTimeout(timeout);
+          reject(new Error("WebSocket connection failed"));
+        } else {
+          console.error("Voxtral: vLLM WebSocket error");
+        }
+      };
+      socket.onclose = () => {
+        console.debug(
+          `Voxtral WS (vLLM): connection closed (intentional=${this.intentionallyClosed})`
+        );
+        this.ws = null;
+        if (!this.intentionallyClosed && !failedBeforeOpen) {
+          this.callbacks.onDisconnect();
+        }
+      };
+    });
+  }
+  sendSessionUpdate() {
+    var _a;
+    if (!this.ws) return;
+    const delayMs = (_a = this.delayOverrideMs) != null ? _a : this.settings.streamingDelayMs;
+    const msg = {
+      type: "session.update",
+      session: {
+        audio_format: {
+          encoding: "pcm_s16le",
+          sample_rate: 16e3
+        },
+        target_streaming_delay_ms: delayMs
+      }
+    };
+    this.ws.send(JSON.stringify(msg));
+  }
+  sendAudio(pcmBytes) {
+    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
+    const base64 = arrayBufferToBase64(pcmBytes);
+    const msg = {
+      type: "input_audio.append",
+      audio: base64
+    };
+    this.ws.send(JSON.stringify(msg));
+  }
+  flush() {
+    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
+    this.ws.send(JSON.stringify({ type: "input_audio.flush" }));
+  }
+  endAudio() {
+    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
+    this.ws.send(JSON.stringify({ type: "input_audio.end" }));
+  }
+  close() {
+    this.intentionallyClosed = true;
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+  get isConnected() {
+    var _a;
+    return ((_a = this.ws) == null ? void 0 : _a.readyState) === WS_OPEN;
+  }
+};
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 // src/default-commands.ts
@@ -2126,508 +2762,6 @@ var AudioRecorder = class {
   }
 };
 
-// ../shared/src/tts.ts
-var TTS_MODEL = "voxtral-mini-tts-2603";
-var TTS_RESPONSE_FORMAT = "wav";
-var TTS_VOICES = [
-  { id: "en_paul_neutral", label: "Paul \u2014 neutral (US English)" },
-  { id: "gb_jane_neutral", label: "Jane \u2014 neutral (UK English)" }
-];
-
-// ../shared/src/mistral-api.ts
-var DEFAULT_BASE_URL = "https://api.mistral.ai";
-var HTTP_TIMEOUT_UPLOAD_MS = 6e4;
-var HTTP_TIMEOUT_DEFAULT_MS = 3e4;
-var HttpStatusError = class extends Error {
-  constructor(message, status) {
-    super(message);
-    this.status = status;
-    this.name = "HttpStatusError";
-  }
-};
-function isRateLimitError(error) {
-  return error instanceof HttpStatusError && error.status === 429;
-}
-function withTimeout(promise, timeoutMs, label) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1e3)}s`));
-    }, timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    clearTimeout(timer);
-    promise.catch(() => {
-    });
-  });
-}
-function sanitizeApiError(status, rawBody) {
-  var _a;
-  try {
-    const parsed = JSON.parse(rawBody);
-    let msg = (parsed == null ? void 0 : parsed.message) || ((_a = parsed == null ? void 0 : parsed.error) == null ? void 0 : _a.message);
-    if (!msg && (parsed == null ? void 0 : parsed.detail)) {
-      const d = parsed.detail;
-      msg = typeof d === "string" ? d : Array.isArray(d) ? d.map((e) => {
-        var _a2;
-        return (_a2 = e == null ? void 0 : e.msg) != null ? _a2 : JSON.stringify(e);
-      }).join("; ") : void 0;
-    }
-    if (typeof msg === "string" && msg.length > 0 && msg.length < 300) {
-      return `HTTP ${status}: ${msg}`;
-    }
-  } catch (e) {
-  }
-  switch (status) {
-    case 401:
-      return "HTTP 401: Invalid or expired API key";
-    case 403:
-      return "HTTP 403: Access denied";
-    case 404:
-      return "HTTP 404: API endpoint not found (check model name)";
-    case 413:
-      return "HTTP 413: Audio file too large";
-    case 429:
-      return "HTTP 429: Rate limit exceeded \u2014 try again later";
-    case 500:
-    case 502:
-    case 503:
-      return `HTTP ${status}: Mistral API server error \u2014 try again later`;
-    default:
-      return `HTTP ${status}: Request failed`;
-  }
-}
-async function listModels(apiKey, httpRequest, baseUrl) {
-  if (!apiKey || !apiKey.trim()) return [];
-  const base = baseUrl || DEFAULT_BASE_URL;
-  try {
-    const response = await withTimeout(
-      httpRequest({
-        url: `${base}/v1/models`,
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiKey}`
-        }
-      }),
-      HTTP_TIMEOUT_DEFAULT_MS,
-      "List models request"
-    );
-    if (response.status !== 200) {
-      console.warn(
-        `Voxtral: Failed to list models (${response.status})`
-      );
-      return [];
-    }
-    const data = response.json;
-    const seen = /* @__PURE__ */ new Set();
-    const models = (data.data || []).map(
-      (m) => ({
-        id: m.id,
-        type: m.type,
-        capabilities: m.capabilities
-      })
-    ).filter((m) => {
-      if (seen.has(m.id)) return false;
-      seen.add(m.id);
-      return true;
-    });
-    models.sort((a, b) => a.id.localeCompare(b.id));
-    return models;
-  } catch (e) {
-    console.warn("Voxtral: Could not fetch models", e);
-    return [];
-  }
-}
-async function listVoices(apiKey, httpRequest, baseUrl) {
-  var _a, _b, _c, _d;
-  if (!apiKey || !apiKey.trim()) return [];
-  const base = baseUrl || DEFAULT_BASE_URL;
-  try {
-    const response = await withTimeout(
-      httpRequest({
-        url: `${base}/v1/audio/voices?limit=100`,
-        method: "GET",
-        headers: { Authorization: `Bearer ${apiKey}` }
-      }),
-      HTTP_TIMEOUT_DEFAULT_MS,
-      "List voices request"
-    );
-    if (response.status !== 200) {
-      console.warn(`Voxtral: Failed to list voices (${response.status})`);
-      return [];
-    }
-    const data = response.json;
-    const arr = Array.isArray(data) ? data : (_d = (_c = (_b = (_a = data == null ? void 0 : data.data) != null ? _a : data == null ? void 0 : data.voices) != null ? _b : data == null ? void 0 : data.items) != null ? _c : data == null ? void 0 : data.results) != null ? _d : [];
-    const seenIds = /* @__PURE__ */ new Set();
-    return arr.map((v) => {
-      var _a2, _b2, _c2, _d2;
-      const voice = v;
-      const id = (_b2 = (_a2 = voice.id) != null ? _a2 : voice.slug) != null ? _b2 : voice.name;
-      return id ? { id, name: (_d2 = (_c2 = voice.name) != null ? _c2 : voice.slug) != null ? _d2 : id } : null;
-    }).filter((v) => {
-      if (v === null || seenIds.has(v.id)) return false;
-      seenIds.add(v.id);
-      return true;
-    });
-  } catch (e) {
-    console.warn("Voxtral: Could not fetch voices", e);
-    return [];
-  }
-}
-async function transcribeBatchRaw(audioBlob, settings, httpRequest, diarize = false) {
-  var _a, _b, _c;
-  const t = audioBlob.type;
-  const ext = t.includes("mp4") ? "m4a" : t.includes("ogg") ? "ogg" : t.includes("mpeg") || t.includes("mp3") ? "mp3" : t.includes("wav") ? "wav" : t.includes("flac") ? "flac" : t.includes("aac") ? "aac" : "webm";
-  const mimeType = audioBlob.type || `audio/${ext}`;
-  const boundary = `----VoxtralBoundary${Date.now()}`;
-  const arrayBuf = await audioBlob.arrayBuffer();
-  const fileBytes = new Uint8Array(arrayBuf);
-  let textParts = "";
-  textParts += `--${boundary}\r
-`;
-  textParts += `Content-Disposition: form-data; name="file"; filename="recording.${ext}"\r
-`;
-  textParts += `Content-Type: ${mimeType}\r
-\r
-`;
-  const afterFile = `\r
---${boundary}\r
-Content-Disposition: form-data; name="model"\r
-\r
-${settings.batchModel}\r
-`;
-  let extraFields = "";
-  if (diarize) {
-    extraFields += `--${boundary}\r
-Content-Disposition: form-data; name="diarize"\r
-\r
-true\r
-`;
-    extraFields += `--${boundary}\r
-Content-Disposition: form-data; name="timestamp_granularities"\r
-\r
-segment\r
-`;
-  } else if (settings.language) {
-    extraFields += `--${boundary}\r
-Content-Disposition: form-data; name="language"\r
-\r
-${settings.language}\r
-`;
-  }
-  extraFields += `--${boundary}--\r
-`;
-  const enc = new TextEncoder();
-  const headerBuf = enc.encode(textParts);
-  const tailBuf = enc.encode(afterFile + extraFields);
-  const body = new Uint8Array(headerBuf.length + fileBytes.length + tailBuf.length);
-  body.set(headerBuf, 0);
-  body.set(fileBytes, headerBuf.length);
-  body.set(tailBuf, headerBuf.length + fileBytes.length);
-  const base = settings.apiBaseUrl || DEFAULT_BASE_URL;
-  const response = await withTimeout(
-    httpRequest({
-      url: `${base}/v1/audio/transcriptions`,
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${settings.apiKey}`,
-        "Content-Type": `multipart/form-data; boundary=${boundary}`
-      },
-      body: body.buffer
-    }),
-    HTTP_TIMEOUT_UPLOAD_MS,
-    "Transcription request"
-  );
-  if (response.status !== 200) {
-    throw new Error(
-      `Transcription failed: ${sanitizeApiError(response.status, response.text)}`
-    );
-  }
-  return {
-    text: ((_a = response.json) == null ? void 0 : _a.text) || "",
-    segments: (_c = (_b = response.json) == null ? void 0 : _b.segments) != null ? _c : []
-  };
-}
-async function transcribeBatch(audioBlob, settings, httpRequest, diarize = false) {
-  return (await transcribeBatchRaw(audioBlob, settings, httpRequest, diarize)).text;
-}
-async function synthesizeSpeech(text, settings, httpRequest) {
-  var _a, _b, _c, _d, _e;
-  const base = settings.apiBaseUrl || DEFAULT_BASE_URL;
-  const response = await retryWithBackoff(
-    async () => {
-      const resp = await withTimeout(
-        httpRequest({
-          url: `${base}/v1/audio/speech`,
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${settings.apiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: TTS_MODEL,
-            input: text,
-            voice: settings.ttsVoice,
-            response_format: TTS_RESPONSE_FORMAT
-          })
-        }),
-        HTTP_TIMEOUT_DEFAULT_MS,
-        "Speech synthesis request"
-      );
-      if (resp.status !== 200) {
-        throw new HttpStatusError(
-          `Speech synthesis failed: ${sanitizeApiError(resp.status, resp.text)}`,
-          resp.status
-        );
-      }
-      return resp;
-    },
-    { shouldRetry: isRateLimitError }
-  );
-  const json = response.json;
-  if (json && typeof json === "object" && !Array.isArray(json)) {
-    const candidate = (_e = (_d = (_c = (_b = (_a = json.audio_data) != null ? _a : (
-      // confirmed field name returned by Mistral TTS
-      json.audio
-    )) != null ? _b : json.audio_base64) != null ? _c : json.b64_audio) != null ? _d : json.audio_content) != null ? _e : typeof json.data === "string" ? json.data : void 0;
-    if (typeof candidate === "string" && candidate.length > 0) {
-      return base64ToArrayBuffer(candidate);
-    }
-    throw new Error(
-      `Speech synthesis returned JSON, not audio (fields: ${Object.keys(json).join(", ")})`
-    );
-  }
-  if (!response.arrayBuffer || response.arrayBuffer.byteLength === 0) {
-    throw new Error("Speech synthesis returned no audio.");
-  }
-  return response.arrayBuffer;
-}
-function base64ToArrayBuffer(b64) {
-  const clean = b64.replace(/^data:[^;,]*;base64,/, "");
-  const binary = atob(clean);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
-}
-function buildCustomCommandGuard2(settings) {
-  var _a;
-  return buildCustomCommandGuard((_a = settings.customCommands) != null ? _a : [], settings.language);
-}
-function buildVocabularyGuard2(settings) {
-  var _a;
-  return buildVocabularyGuard((_a = settings.vocabularyTerms) != null ? _a : []);
-}
-async function correctText(text, settings, httpRequest) {
-  var _a, _b, _c, _d;
-  const basePrompt = settings.systemPrompt || DEFAULT_CORRECT_PROMPT;
-  const systemPrompt = basePrompt + buildCustomCommandGuard2(settings) + buildVocabularyGuard2(settings);
-  const body = {
-    model: settings.correctModel,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: text }
-    ],
-    temperature: 0.1
-  };
-  const base = settings.apiBaseUrl || DEFAULT_BASE_URL;
-  const response = await retryWithBackoff(
-    async () => {
-      const resp = await withTimeout(
-        httpRequest({
-          url: `${base}/v1/chat/completions`,
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${settings.apiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(body)
-        }),
-        HTTP_TIMEOUT_DEFAULT_MS,
-        "Correction request"
-      );
-      if (resp.status !== 200) {
-        throw new HttpStatusError(
-          `Correction failed: ${sanitizeApiError(resp.status, resp.text)}`,
-          resp.status
-        );
-      }
-      return resp;
-    },
-    { shouldRetry: isRateLimitError }
-  );
-  const data = response.json;
-  let result = ((_d = (_c = (_b = (_a = data.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || text;
-  result = stripLlmCommentary(result, text);
-  if (result.length > text.length * 1.5 + 50) {
-    console.warn(
-      "Voxtral: Correction rejected \u2014 output is suspiciously longer than input",
-      { inputLen: text.length, outputLen: result.length }
-    );
-    return text;
-  }
-  return result;
-}
-var RealtimeTranscriber = class {
-  constructor(settings, callbacks, delayOverrideMs) {
-    this.ws = null;
-    this.intentionallyClosed = false;
-    this.delayOverrideMs = null;
-    this.settings = settings;
-    this.callbacks = callbacks;
-    this.delayOverrideMs = delayOverrideMs != null ? delayOverrideMs : null;
-  }
-  async connect() {
-    this.intentionallyClosed = false;
-    const params = new URLSearchParams({
-      model: this.settings.realtimeModel
-    });
-    const httpBase = this.settings.apiBaseUrl || DEFAULT_BASE_URL;
-    const wsBase = httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
-    const url = `${wsBase}/v1/audio/transcriptions/realtime?${params}`;
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        var _a;
-        (_a = this.ws) == null ? void 0 : _a.close();
-        reject(new Error("WebSocket connection timeout"));
-      }, 1e4);
-      this.ws = createAuthenticatedWebSocket(
-        url,
-        { Authorization: `Bearer ${this.settings.apiKey}` },
-        {
-          onOpen: () => {
-          },
-          onMessage: (data) => {
-            var _a, _b, _c;
-            try {
-              const msg = JSON.parse(data);
-              console.debug(
-                `Voxtral WS \u2190 ${msg.type}`,
-                msg.type === "transcription.text.delta" ? (_a = msg.text) == null ? void 0 : _a.slice(0, 50) : ""
-              );
-              switch (msg.type) {
-                case "session.created":
-                  clearTimeout(timeout);
-                  this.sendSessionUpdate();
-                  this.callbacks.onSessionCreated();
-                  resolve();
-                  break;
-                case "session.updated":
-                  console.debug(
-                    "Voxtral WS: session updated",
-                    JSON.stringify(msg.session || {})
-                  );
-                  break;
-                case "transcription.text.delta":
-                  this.callbacks.onDelta(msg.text || "");
-                  break;
-                case "transcription.done":
-                  console.debug(
-                    "Voxtral WS: transcription.done \u2014 full text:",
-                    (_b = msg.text) == null ? void 0 : _b.slice(0, 200)
-                  );
-                  this.callbacks.onDone(msg.text || "");
-                  break;
-                case "error":
-                  console.error(
-                    "Voxtral WS: server error:",
-                    JSON.stringify(msg.error)
-                  );
-                  this.callbacks.onError(
-                    ((_c = msg.error) == null ? void 0 : _c.message) || "Unknown error"
-                  );
-                  break;
-                default:
-                  console.debug(
-                    "Voxtral WS: unknown message type:",
-                    msg.type,
-                    data.slice(0, 300)
-                  );
-                  break;
-              }
-            } catch (e) {
-              console.error(
-                "Voxtral: failed to parse WS message",
-                data.slice(0, 200),
-                e
-              );
-            }
-          },
-          onError: (err) => {
-            clearTimeout(timeout);
-            console.error("Voxtral: WebSocket error", err);
-            reject(
-              new Error(
-                `WebSocket connection failed: ${err.message}`
-              )
-            );
-          },
-          onClose: () => {
-            console.debug(
-              `Voxtral WS: connection closed (intentional=${this.intentionallyClosed})`
-            );
-            this.ws = null;
-            if (!this.intentionallyClosed) {
-              this.callbacks.onDisconnect();
-            }
-          }
-        }
-      );
-    });
-  }
-  sendSessionUpdate() {
-    var _a;
-    if (!this.ws) return;
-    const delayMs = (_a = this.delayOverrideMs) != null ? _a : this.settings.streamingDelayMs;
-    const msg = {
-      type: "session.update",
-      session: {
-        audio_format: {
-          encoding: "pcm_s16le",
-          sample_rate: 16e3
-        },
-        target_streaming_delay_ms: delayMs
-      }
-    };
-    this.ws.send(JSON.stringify(msg));
-  }
-  sendAudio(pcmBytes) {
-    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
-    const base64 = arrayBufferToBase64(pcmBytes);
-    const msg = {
-      type: "input_audio.append",
-      audio: base64
-    };
-    this.ws.send(JSON.stringify(msg));
-  }
-  flush() {
-    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
-    this.ws.send(JSON.stringify({ type: "input_audio.flush" }));
-  }
-  endAudio() {
-    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
-    this.ws.send(JSON.stringify({ type: "input_audio.end" }));
-  }
-  close() {
-    this.intentionallyClosed = true;
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-  get isConnected() {
-    var _a;
-    return ((_a = this.ws) == null ? void 0 : _a.readyState) === WS_OPEN;
-  }
-};
-function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
 // src/api-key-test.ts
 var DEFAULT_BASE_URL2 = "https://api.mistral.ai";
 var API_KEY_TEST_TIMEOUT_MS = 15e3;
@@ -2688,11 +2822,13 @@ async function testApiKey(apiKey, baseUrl, httpRequest) {
 
 // src/settings-sections.ts
 function connectionAttention(settings) {
+  if (isLocalMode(settings)) return null;
   if (!settings.apiKey.trim()) return "API key missing";
   return null;
 }
 
 // src/settings-tab.ts
+var LOCAL_SERVER_CHECK_TIMEOUT_MS = 3e3;
 var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -2712,6 +2848,13 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
      * place (rerenderSection) without tearing down the other 7.
      */
     this.sectionRuntimes = /* @__PURE__ */ new Map();
+    /**
+     * Bumped every time the "Local server status" row is (re)rendered, so an
+     * in-flight healthcheck from a since-replaced row (e.g. the Connection
+     * section rerendered while a check was running) can tell it's stale and
+     * skip writing to its now-orphaned status element.
+     */
+    this.localServerCheckToken = 0;
     this.plugin = plugin;
   }
   display() {
@@ -2826,6 +2969,13 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
     runtime.renderFn(runtime.bodyEl);
   }
   renderConnection(containerEl) {
+    if (!import_obsidian.Platform.isMobile) {
+      this.renderLocalServerToggle(containerEl);
+      if (isLocalMode(this.plugin.settings)) {
+        this.renderLocalServerStatus(containerEl);
+        this.renderLocalCorrectionSettings(containerEl);
+      }
+    }
     new import_obsidian.Setting(containerEl).setName("Mistral API key").setDesc("Your API key from platform.mistral.ai. Stored in Obsidian\u2019s secret storage on this device (kept by your operating system), not in your vault, so it does not sync between devices; enter it once per device. Rotate the key if it was previously synced.").addComponent(
       (el) => new import_obsidian.SecretComponent(this.app, el).setValue(this.plugin.settings.apiKeySecretId).onChange(async (id) => {
         this.plugin.settings.apiKeySecretId = id != null ? id : "";
@@ -2850,6 +3000,91 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.settings.apiBaseUrl = value.trim();
         this.invalidateModelCache();
         this.invalidateVoiceCache();
+        await this.plugin.saveSettings();
+      })
+    );
+  }
+  /**
+   * "Local server mode" toggle (VX_E17_S5). Doesn't introduce its own mode
+   * field — the shown value and the write-back both go through
+   * realtimeProtocol/isLocalMode, the single source of truth for local
+   * mode, so an explicit OFF here always beats "auto" + a localhost base
+   * URL (otherwise the toggle couldn't be switched off in that case).
+   */
+  renderLocalServerToggle(containerEl) {
+    new import_obsidian.Setting(containerEl).setName("Local server mode (experimental)").setDesc(
+      "Connect to a local vLLM server at the API base URL below instead of Mistral's cloud. Realtime dictation only, no API key needed. Requires a GPU-class machine running vLLM \u2014 see the local server guide. Experimental."
+    ).addToggle(
+      (toggle) => toggle.setValue(isLocalMode(this.plugin.settings)).onChange(async (value) => {
+        this.plugin.settings.realtimeProtocol = value ? "vllm" : "mistral";
+        await this.plugin.saveSettings();
+        this.rerenderSection("connection");
+      })
+    );
+  }
+  /**
+   * "Local server status" row: an unauthenticated GET /v1/models against the
+   * configured base URL, so a local vLLM/Ollama-style server that's actually
+   * running is visibly distinguishable from a misconfigured base URL. Runs
+   * once on render and again on the refresh button.
+   */
+  renderLocalServerStatus(containerEl) {
+    const token = ++this.localServerCheckToken;
+    let checking = false;
+    let statusEl;
+    const setStatus = (text, kind) => {
+      if (token !== this.localServerCheckToken) return;
+      statusEl.classList.remove("voxtral-keytest-ok", "voxtral-keytest-fail", "voxtral-keytest-pending");
+      statusEl.classList.add(`voxtral-keytest-${kind}`);
+      statusEl.setText(text);
+    };
+    const runCheck = async () => {
+      var _a, _b, _c;
+      if (checking) return;
+      checking = true;
+      setStatus("Checking\u2026", "pending");
+      try {
+        const base = this.plugin.settings.apiBaseUrl || "https://api.mistral.ai";
+        const response = await withTimeout(
+          this.plugin.httpRequest({ url: `${base}/v1/models`, method: "GET", headers: {} }),
+          LOCAL_SERVER_CHECK_TIMEOUT_MS,
+          "Local server status check"
+        );
+        if (response.status === 200) {
+          const modelId = (_c = (_b = (_a = response.json) == null ? void 0 : _a.data) == null ? void 0 : _b[0]) == null ? void 0 : _c.id;
+          setStatus(modelId ? `Reachable \u2014 model: ${modelId}` : "Reachable", "ok");
+        } else {
+          setStatus("Not reachable \u2014 is the local server running?", "fail");
+        }
+      } catch (e) {
+        setStatus("Not reachable \u2014 is the local server running?", "fail");
+      } finally {
+        checking = false;
+      }
+    };
+    const setting = new import_obsidian.Setting(containerEl).setName("Local server status").setDesc("Checks whether the server at the API base URL above responds.").addExtraButton(
+      (btn) => btn.setIcon("refresh-cw").setTooltip("Check now").onClick(() => {
+        void runCheck();
+      })
+    );
+    statusEl = setting.controlEl.createSpan({ cls: "voxtral-keytest-status" });
+    void runCheck();
+  }
+  /** Local correction endpoint + model (VX_E17_S5) — only shown in local server mode. */
+  renderLocalCorrectionSettings(containerEl) {
+    const endpointPlaceholder = "http://localhost:11434";
+    new import_obsidian.Setting(containerEl).setName("Local correction endpoint (advanced)").setDesc(
+      "OpenAI-compatible server for the correction step (e.g. Ollama). Leave empty to skip correction in local mode \u2014 nothing is sent to the cloud either way."
+    ).addText(
+      (text) => text.setPlaceholder(endpointPlaceholder).setValue(this.plugin.settings.localCorrectionUrl).onChange(async (value) => {
+        this.plugin.settings.localCorrectionUrl = value.trim();
+        await this.plugin.saveSettings();
+      })
+    );
+    const modelPlaceholder = "ministral-3:3b";
+    new import_obsidian.Setting(containerEl).setName("Local correction model").setDesc("Model name sent to the local correction server above.").addText(
+      (text) => text.setPlaceholder(modelPlaceholder).setValue(this.plugin.settings.localCorrectionModel).onChange(async (value) => {
+        this.plugin.settings.localCorrectionModel = value.trim();
         await this.plugin.saveSettings();
       })
     );
@@ -7793,7 +8028,7 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
     editor.setCursor(from);
   }
   async startRecording() {
-    if (!this.settings.apiKey) {
+    if (!this.settings.apiKey && !isLocalMode(this.settings)) {
       new import_obsidian9.Notice("Please set your API key in the plugin settings.");
       return;
     }
@@ -8076,12 +8311,18 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
   }
   // ── Text correction ──
   async correctSelection(editor) {
+    var _a;
     const selection = editor.getSelection();
     if (!selection) {
       new import_obsidian9.Notice("Select text first to correct it");
       return;
     }
-    if (!this.settings.apiKey) {
+    if (isLocalMode(this.settings)) {
+      if (!((_a = this.settings.localCorrectionUrl) == null ? void 0 : _a.trim())) {
+        new import_obsidian9.Notice("Correction is off in local server mode \u2014 configure a local correction endpoint in settings.");
+        return;
+      }
+    } else if (!this.settings.apiKey) {
       new import_obsidian9.Notice("Please set your API key first");
       return;
     }
@@ -8097,11 +8338,17 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
     }
   }
   async correctAll(editor) {
+    var _a;
     if (!this.tracker.hasRanges()) {
       new import_obsidian9.Notice("No dictated text to correct");
       return;
     }
-    if (!this.settings.apiKey) {
+    if (isLocalMode(this.settings)) {
+      if (!((_a = this.settings.localCorrectionUrl) == null ? void 0 : _a.trim())) {
+        new import_obsidian9.Notice("Correction is off in local server mode \u2014 configure a local correction endpoint in settings.");
+        return;
+      }
+    } else if (!this.settings.apiKey) {
       new import_obsidian9.Notice("Please set your API key first");
       return;
     }
