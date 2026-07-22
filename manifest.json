@@ -1,7 +1,7 @@
 {
 	"id": "voxtral-transcribe",
 	"name": "Voxtral Transcribe",
-	"version": "1.9.0",
+	"version": "1.9.1",
 	"minAppVersion": "1.11.4",
 	"description": "Talk, type and structure in one flow: high-quality dictation with auto-correction, on desktop and mobile. Voice commands for headings, lists and to-dos in 13 languages. File transcription included.",
 	"author": "Max Kloosterman",

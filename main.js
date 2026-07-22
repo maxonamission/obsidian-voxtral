@@ -1530,6 +1530,11 @@ async function retryWithBackoff(fn, options = {}) {
 
 // ../shared/src/mistral-api.ts
 var DEFAULT_BASE_URL = "https://api.mistral.ai";
+function resolveBaseUrl(settings) {
+  var _a;
+  const trimmed = ((_a = settings.apiBaseUrl) != null ? _a : "").trim().replace(/\/+$/, "");
+  return trimmed || DEFAULT_BASE_URL;
+}
 var HTTP_TIMEOUT_UPLOAD_MS = 6e4;
 var HTTP_TIMEOUT_DEFAULT_MS = 3e4;
 var HttpStatusError = class extends Error {
@@ -1586,14 +1591,14 @@ function sanitizeApiError(status, rawBody) {
     case 500:
     case 502:
     case 503:
-      return `HTTP ${status}: Mistral API server error \u2014 try again later`;
+      return `HTTP ${status}: API server error \u2014 try again later`;
     default:
       return `HTTP ${status}: Request failed`;
   }
 }
 async function listModels(apiKey, httpRequest, baseUrl) {
   if (!apiKey || !apiKey.trim()) return [];
-  const base = baseUrl || DEFAULT_BASE_URL;
+  const base = resolveBaseUrl({ apiBaseUrl: baseUrl != null ? baseUrl : "" });
   try {
     const response = await withTimeout(
       httpRequest({
@@ -1635,7 +1640,7 @@ async function listModels(apiKey, httpRequest, baseUrl) {
 async function listVoices(apiKey, httpRequest, baseUrl) {
   var _a, _b, _c, _d;
   if (!apiKey || !apiKey.trim()) return [];
-  const base = baseUrl || DEFAULT_BASE_URL;
+  const base = resolveBaseUrl({ apiBaseUrl: baseUrl != null ? baseUrl : "" });
   try {
     const response = await withTimeout(
       httpRequest({
@@ -1718,7 +1723,7 @@ ${settings.language}\r
   body.set(headerBuf, 0);
   body.set(fileBytes, headerBuf.length);
   body.set(tailBuf, headerBuf.length + fileBytes.length);
-  const base = settings.apiBaseUrl || DEFAULT_BASE_URL;
+  const base = resolveBaseUrl(settings);
   const response = await withTimeout(
     httpRequest({
       url: `${base}/v1/audio/transcriptions`,
@@ -1747,7 +1752,7 @@ async function transcribeBatch(audioBlob, settings, httpRequest, diarize = false
 }
 async function synthesizeSpeech(text, settings, httpRequest) {
   var _a, _b, _c, _d, _e;
-  const base = settings.apiBaseUrl || DEFAULT_BASE_URL;
+  const base = resolveBaseUrl(settings);
   const response = await retryWithBackoff(
     async () => {
       const resp = await withTimeout(
@@ -1823,7 +1828,7 @@ async function correctText(text, settings, httpRequest) {
   }
   const basePrompt = settings.systemPrompt || DEFAULT_CORRECT_PROMPT;
   const systemPrompt = basePrompt + buildCustomCommandGuard2(settings) + buildVocabularyGuard2(settings);
-  const base = local && localUrl ? localUrl : settings.apiBaseUrl || DEFAULT_BASE_URL;
+  const base = local && localUrl ? localUrl : resolveBaseUrl(settings);
   const model = local ? ((_b = settings.localCorrectionModel) == null ? void 0 : _b.trim()) || "ministral-3:3b" : settings.correctModel;
   const headers = local ? { "Content-Type": "application/json" } : { Authorization: `Bearer ${settings.apiKey}`, "Content-Type": "application/json" };
   const body = {
@@ -1873,7 +1878,7 @@ function resolveRealtimeProtocol(settings) {
     return settings.realtimeProtocol;
   }
   try {
-    const { hostname } = new URL(settings.apiBaseUrl || DEFAULT_BASE_URL);
+    const { hostname } = new URL(resolveBaseUrl(settings));
     const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
     return isLocalhost ? "vllm" : "mistral";
   } catch (e) {
@@ -1898,7 +1903,7 @@ var RealtimeTranscriber = class {
     const params = new URLSearchParams({
       model: this.settings.realtimeModel
     });
-    const httpBase = this.settings.apiBaseUrl || DEFAULT_BASE_URL;
+    const httpBase = resolveBaseUrl(this.settings);
     const wsBase = httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
     const url = `${wsBase}/v1/audio/transcriptions/realtime?${params}`;
     return new Promise((resolve, reject) => {
@@ -2002,7 +2007,7 @@ var RealtimeTranscriber = class {
    */
   connectVllm() {
     this.intentionallyClosed = false;
-    const httpBase = this.settings.apiBaseUrl || DEFAULT_BASE_URL;
+    const httpBase = resolveBaseUrl(this.settings);
     const wsBase = httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
     const url = `${wsBase}/v1/realtime`;
     return new Promise((resolve, reject) => {
@@ -2763,8 +2768,8 @@ var AudioRecorder = class {
 };
 
 // src/api-key-test.ts
-var DEFAULT_BASE_URL2 = "https://api.mistral.ai";
 var API_KEY_TEST_TIMEOUT_MS = 15e3;
+var CUSTOM_BASE_URL_HINT = " (using custom API base URL \u2014 clear the field to return to Mistral's default)";
 var QUOTA_MESSAGE_MAX_LEN = 120;
 function extractQuotaMessage(json) {
   var _a, _b;
@@ -2804,7 +2809,7 @@ function withTimeout2(promise, timeoutMs) {
   });
 }
 async function testApiKey(apiKey, baseUrl, httpRequest) {
-  const base = baseUrl || DEFAULT_BASE_URL2;
+  const base = resolveBaseUrl({ apiBaseUrl: baseUrl });
   try {
     const response = await withTimeout2(
       httpRequest({
@@ -2990,19 +2995,49 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
     this.renderApiKeyTest(containerEl);
-    new import_obsidian.Setting(containerEl).setName("API base URL").setDesc(createFragment((frag) => {
+    this.renderApiBaseUrl(containerEl);
+  }
+  /**
+   * "API base URL" row (VX_E18_S5): the free-text field itself, a
+   * reset-to-default extra button, and an inline scheme warning shown when
+   * the current value isn't empty and doesn't start with http(s)://. The
+   * warning is re-evaluated on render and on every onChange without a full
+   * section re-render (mirrors the "Local server status"/keytest span
+   * pattern) — only Reset tears down and rebuilds the Connection section,
+   * so the field visibly returns to its placeholder-only empty state.
+   */
+  renderApiBaseUrl(containerEl) {
+    let schemeWarningEl;
+    const updateSchemeWarning = () => {
+      const value = this.plugin.settings.apiBaseUrl;
+      const looksValid = !value || /^https?:\/\//i.test(value);
+      schemeWarningEl.classList.toggle("voxtral-keytest-fail", !looksValid);
+      schemeWarningEl.setText(looksValid ? "" : "URL must start with http:// or https://");
+    };
+    const setting = new import_obsidian.Setting(containerEl).setName("API base URL").setDesc(createFragment((frag) => {
       const exampleUrl = "http://localhost:8000";
       frag.appendText("Base URL for Mistral-compatible API. Use ");
       frag.createEl("code", { text: exampleUrl });
-      frag.appendText(" for local vLLM.");
+      frag.appendText(" for local vLLM. Leave empty to use Mistral's cloud (default).");
     })).addText(
       (text) => text.setPlaceholder("https://api.mistral.ai").setValue(this.plugin.settings.apiBaseUrl).onChange(async (value) => {
         this.plugin.settings.apiBaseUrl = value.trim();
         this.invalidateModelCache();
         this.invalidateVoiceCache();
         await this.plugin.saveSettings();
+        updateSchemeWarning();
+      })
+    ).addExtraButton(
+      (btn) => btn.setIcon("rotate-ccw").setTooltip("Reset to default").onClick(async () => {
+        this.plugin.settings.apiBaseUrl = "";
+        this.invalidateModelCache();
+        this.invalidateVoiceCache();
+        await this.plugin.saveSettings();
+        this.rerenderSection("connection");
       })
     );
+    schemeWarningEl = setting.controlEl.createSpan({ cls: "voxtral-keytest-status" });
+    updateSchemeWarning();
   }
   /**
    * "Local server mode" toggle (VX_E17_S5). Doesn't introduce its own mode
@@ -3044,7 +3079,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       checking = true;
       setStatus("Checking\u2026", "pending");
       try {
-        const base = this.plugin.settings.apiBaseUrl || "https://api.mistral.ai";
+        const base = resolveBaseUrl(this.plugin.settings);
         const response = await withTimeout(
           this.plugin.httpRequest({ url: `${base}/v1/models`, method: "GET", headers: {} }),
           LOCAL_SERVER_CHECK_TIMEOUT_MS,
@@ -3366,7 +3401,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
           return;
         }
         try {
-          const base = this.plugin.settings.apiBaseUrl || "https://api.mistral.ai";
+          const base = resolveBaseUrl(this.plugin.settings);
           const r = await this.plugin.httpRequest({
             url: `${base}/v1/audio/voices?limit=100`,
             method: "GET",
@@ -3570,30 +3605,33 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
   /** Render the classified outcome of a connection test with per-kind copy and styling. */
   renderApiKeyTestResult(el, result) {
     el.classList.remove("voxtral-keytest-ok", "voxtral-keytest-fail", "voxtral-keytest-pending");
+    let text;
     switch (result.kind) {
       case "ok":
         el.classList.add("voxtral-keytest-ok");
-        el.setText(
-          `\u2713 Connected \u2014 ${result.modelCount} model${result.modelCount === 1 ? "" : "s"} available`
-        );
+        text = `\u2713 Connected \u2014 ${result.modelCount} model${result.modelCount === 1 ? "" : "s"} available`;
         break;
       case "invalid-key":
         el.classList.add("voxtral-keytest-fail");
-        el.setText("\u2717 invalid or revoked API key");
+        text = "\u2717 invalid or revoked API key";
         break;
       case "quota":
         el.classList.add("voxtral-keytest-fail");
-        el.setText(`\u2717 Quota or billing issue: ${result.message}`);
+        text = `\u2717 Quota or billing issue: ${result.message}`;
         break;
       case "unreachable":
         el.classList.add("voxtral-keytest-fail");
-        el.setText("\u2717 could not reach the API endpoint \u2014 check the base URL and your network");
+        text = "\u2717 could not reach the API endpoint \u2014 check the base URL and your network";
         break;
       case "error":
         el.classList.add("voxtral-keytest-fail");
-        el.setText(`\u2717 Request failed (HTTP ${result.status})`);
+        text = `\u2717 Request failed (HTTP ${result.status})`;
         break;
     }
+    if (result.kind !== "ok" && resolveBaseUrl(this.plugin.settings) !== DEFAULT_BASE_URL) {
+      text += CUSTOM_BASE_URL_HINT;
+    }
+    el.setText(text);
   }
   renderCustomCommands(containerEl) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
