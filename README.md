@@ -2,9 +2,9 @@
 
 **Thoughts move fast. Your transcription should keep up.**
 
-Voxtral Transcribe lets you talk and type in the same breath: dictate straight into your notes, add structure by voice — headings, lists, to-dos, tables — and grab the keyboard mid-sentence whenever you want. The mic waits while you type and picks back up when you stop, so editing happens along the way, not after. Already have a recording — a lecture, a meeting, a voice memo? Right-click it in your vault and Voxtral transcribes it into a note you can search, link, and build on.
+Voxtral Transcribe lets you talk and type in the same breath: dictate straight into your notes, add structure by voice — headings, lists, to-dos, tables — and grab the keyboard mid-sentence whenever you want. The mic waits while you type and picks back up when you stop, so editing happens along the way, not after. Already have a recording — a lecture, a meeting, a voice memo? Right-click it in your vault and the plugin transcribes it into a note you can search, link, and build on.
 
-Powered by [Mistral's Voxtral](https://mistral.ai/), a speech-to-text engine built for transcription from the ground up. Real-time streaming on desktop, tap-to-send on mobile, file transcription everywhere. Voice commands come localized in 13 languages — and the engine itself understands even more. All inside your vault.
+Powered by [Mistral's Voxtral](https://mistral.ai/), a speech-to-text engine built for transcription from the ground up. Real-time streaming on desktop and mobile, batch/tap-to-send everywhere, file transcription everywhere. Voice commands come localized in 13 languages — and the engine itself understands even more. All inside your vault.
 
 ### Get going in under a minute
 
@@ -25,8 +25,8 @@ Powered by [Mistral's Voxtral](https://mistral.ai/), a speech-to-text engine bui
 
 ### Dictation
 
-- **Real-time streaming** (desktop only) — text appears as you speak ([why not on mobile?](#mobile-batch-mode))
-- **Batch mode with tap-to-send** (desktop + mobile) — send audio chunks while you keep talking
+- **Real-time streaming** (desktop + mobile) — text appears as you speak; on mobile this runs via Mistral's ephemeral client tokens ([how it works](#mobile))
+- **Batch mode with tap-to-send** (desktop + mobile) — send audio chunks while you keep talking; also the automatic fallback if a real-time token mint ever fails
 - **Voice commands** — headings, bullet points, to-do items, numbered lists and more by voice, localized to all 13 supported languages (Dutch, English, French, German, Spanish, Portuguese, Italian, Russian, Chinese, Hindi, Arabic, Japanese, Korean); a help panel shows the trigger phrases for your active language
 - **Per-note language override** — set `voxtral-language` in a note's frontmatter to dictate that note in a different language
 - **Typing-friendly mic** — configurable cooldown before the mic resumes after typing, optional Enter-to-send while the mic is live, microphone selection, and configurable behavior when you switch apps on mobile
@@ -56,19 +56,19 @@ You need **Obsidian v1.11.4 or newer** and a **Mistral API key** (free to create
 
 ## Usage
 
-### Desktop (real-time mode)
+### Real-time mode (desktop and mobile)
 
 1. Open a note
-2. Click the microphone icon in the ribbon, or press **Ctrl+Space**
+2. Click the microphone icon in the ribbon (desktop) or tap it (mobile), or press **Ctrl+Space** on desktop
 3. Start speaking — text appears live in your note
-4. Click the microphone again or say **"stop recording"** to stop
+4. Click/tap the microphone again or say **"stop recording"** to stop
 5. Auto-correction runs automatically if enabled
 
-### Mobile (batch mode)
+### Mobile
 
-On mobile, only batch mode is available. This is a platform limitation, not a plugin choice: the real-time connection has to send an authentication header during the WebSocket handshake, which needs Node.js — and Obsidian only has Node.js on desktop. If that ever changes (on Obsidian's or Mistral's side), real-time on mobile is high on the wish list.
+Real-time dictation works on mobile: Obsidian's mobile webview can't set the `Authorization` header the desktop connection uses, so on mobile the plugin instead mints a short-lived token with your API key and passes it via the WebSocket subprotocol — [Mistral's ephemeral client tokens](https://docs.mistral.ai/studio-api/audio/speech_to_text/realtime_transcription/client_auth), added specifically to unblock this (see [obsidian-voxtral#13](https://github.com/maxonamission/obsidian-voxtral/issues/13)). Your API key itself only ever goes to `api.mistral.ai`; it's never part of the WebSocket handshake. If a token mint ever fails, the plugin falls back to batch mode for that session with a clear notice — dictation still works, it just isn't live.
 
-Batch mode keeps the same flow — keep talking, tap send whenever you want a chunk transcribed, and keep going:
+Batch mode with tap-to-send remains available on mobile too, as a deliberate choice or as that fallback:
 
 1. Open a note and tap the microphone icon to start recording
 2. Tap the **send icon** in the view header to transcribe the current audio chunk — the recording keeps going
@@ -143,7 +143,7 @@ When switching apps on mobile, you can configure what happens to an active recor
 |---|---|
 | Mistral API key | Your API key from console.mistral.ai |
 | Microphone | Which microphone to use |
-| Mode | Realtime (desktop only) or Batch |
+| Mode | Realtime or Batch (both available on desktop and mobile) |
 | Enter = tap-to-send | Use Enter to send audio chunks when mic is live (batch mode, default: on) |
 | Typing cooldown | Delay before mic resumes after typing (default: 800 ms) |
 | On focus loss | Pause immediately / after delay / keep recording |
@@ -175,25 +175,25 @@ What the plugin accesses and why. The Obsidian review page lists some of these w
 
 **[Parallax](https://github.com/maxonamission/obsidian-parallax)** — from the same workshop. A
 transcript is raw thinking; Parallax turns it into structured research. Speak a messy problem
-statement or a research question, let Voxtral put it in your note, then select the transcript
+statement or a research question, dictate it into your note, then select the transcript
 and run Parallax's **Explore the problem**: assumptions and counter-assumptions, reformulations,
 theoretical lenses, and graded multi-source literature research (free via OpenAlex). The two
 plugins share the same principles (your keys, local where possible, no telemetry) but stay
-deliberately separate tools: Voxtral owns capturing speech, Parallax owns the reasoning.
+deliberately separate tools: this plugin owns capturing speech, Parallax owns the reasoning.
 
 **[Quadro](https://github.com/chrisgrieser/obsidian-quadro)** — qualitative data analysis
-(coding and extraction, a MAXQDA/atlas.ti alternative) in plain markdown. Voxtral's file
+(coding and extraction, a MAXQDA/atlas.ti alternative) in plain markdown. the plugin's file
 transcription is a natural intake for Quadro's `Data/` folder: record the interview,
 right-click the audio → **Transcribe audio file** (with speaker labels on), move the transcript
 note into `Data/`, and code it.
 
 ### Preparing transcripts for Quadro
 
-Quadro's conventions, confirmed by its maintainer (July 2026) — Voxtral's file transcripts fit
+Quadro's conventions, confirmed by its maintainer (July 2026) — the plugin's file transcripts fit
 them out of the box, and a light edit pass makes them ideal:
 
 - **One paragraph per speaker turn** is the recommended layout — each paragraph is the unit
-  Quadro codes. Voxtral already splits file transcripts into paragraphs; with **Speaker
+  Quadro codes. The plugin already splits file transcripts into paragraphs; with **Speaker
   labels** on, turns are labelled `**Speaker 1:** …`. Split up very long turns into several
   paragraphs if you want to code them at a finer grain.
 - **Speaker prefixes don't interfere.** Quadro works entirely on a paragraph's *suffix*

@@ -1325,6 +1325,9 @@ function loadNodeModule(name) {
   if (!r) throw new Error(`Node.js require() not available (needed for ${name})`);
   return r(name);
 }
+function hasNodeWebSocketAuth() {
+  return typeof globalThis["require"] === "function";
+}
 function createAuthenticatedWebSocket(url, headers, callbacks) {
   const https = loadNodeModule("https");
   const crypto = loadNodeModule("crypto");
@@ -1889,16 +1892,19 @@ function isLocalMode(settings) {
   return resolveRealtimeProtocol(settings) === "vllm";
 }
 var RealtimeTranscriber = class {
-  constructor(settings, callbacks, delayOverrideMs) {
+  constructor(settings, callbacks, delayOverrideMs, opts) {
     this.ws = null;
     this.intentionallyClosed = false;
     this.delayOverrideMs = null;
     this.settings = settings;
     this.callbacks = callbacks;
     this.delayOverrideMs = delayOverrideMs != null ? delayOverrideMs : null;
+    this.opts = opts;
   }
   async connect() {
+    var _a;
     if (resolveRealtimeProtocol(this.settings) === "vllm") return this.connectVllm();
+    if (!hasNodeWebSocketAuth() && ((_a = this.opts) == null ? void 0 : _a.tokenManager)) return this.connectCloudSubprotocol();
     this.intentionallyClosed = false;
     const params = new URLSearchParams({
       model: this.settings.realtimeModel
@@ -1908,8 +1914,8 @@ var RealtimeTranscriber = class {
     const url = `${wsBase}/v1/audio/transcriptions/realtime?${params}`;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        var _a;
-        (_a = this.ws) == null ? void 0 : _a.close();
+        var _a2;
+        (_a2 = this.ws) == null ? void 0 : _a2.close();
         reject(new Error("WebSocket connection timeout"));
       }, 1e4);
       this.ws = createAuthenticatedWebSocket(
@@ -1919,12 +1925,12 @@ var RealtimeTranscriber = class {
           onOpen: () => {
           },
           onMessage: (data) => {
-            var _a, _b, _c;
+            var _a2, _b, _c;
             try {
               const msg = JSON.parse(data);
               console.debug(
                 `Voxtral WS \u2190 ${msg.type}`,
-                msg.type === "transcription.text.delta" ? (_a = msg.text) == null ? void 0 : _a.slice(0, 50) : ""
+                msg.type === "transcription.text.delta" ? (_a2 = msg.text) == null ? void 0 : _a2.slice(0, 50) : ""
               );
               switch (msg.type) {
                 case "session.created":
@@ -2104,6 +2110,125 @@ var RealtimeTranscriber = class {
       };
     });
   }
+  /**
+   * Connect to the Mistral cloud realtime endpoint using WebSocket-
+   * subprotocol auth (VX_E22_S8) instead of the manual-upgrade
+   * Authorization header: mints a short-lived token via
+   * `this.opts.tokenManager` and passes it as the second WebSocket
+   * subprotocol (`new WebSocket(url, ["realtime", token])`) — the route
+   * mobile/webview must take since the header route above needs Node's
+   * `require()` (see hasNodeWebSocketAuth()). Event semantics mirror the
+   * header path above (CLOUD, not vLLM): connect() only resolves once
+   * `session.created` arrives, not on bare `open`.
+   */
+  async connectCloudSubprotocol() {
+    var _a;
+    this.intentionallyClosed = false;
+    const tokenManager = (_a = this.opts) == null ? void 0 : _a.tokenManager;
+    if (!tokenManager) {
+      throw new Error("connectCloudSubprotocol() requires a token manager");
+    }
+    const token = await tokenManager.getToken();
+    const httpBase = resolveBaseUrl(this.settings);
+    const wsBase = httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
+    const params = new URLSearchParams({ model: this.settings.realtimeModel });
+    const url = `${wsBase}/v1/audio/transcriptions/realtime?${params}`;
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url, ["realtime", token]);
+      let opened = false;
+      let failedBeforeOpen = false;
+      const timeout = setTimeout(() => {
+        socket.close();
+        reject(new Error("WebSocket connection timeout"));
+      }, 1e4);
+      this.ws = {
+        send: (data) => socket.send(data),
+        close: () => socket.close(),
+        get readyState() {
+          return socket.readyState;
+        }
+      };
+      socket.onopen = () => {
+        opened = true;
+      };
+      socket.onmessage = (event) => {
+        var _a2, _b, _c;
+        const data = String(event.data);
+        try {
+          const msg = JSON.parse(data);
+          console.debug(
+            `Voxtral WS (token) \u2190 ${msg.type}`,
+            msg.type === "transcription.text.delta" ? (_a2 = msg.text) == null ? void 0 : _a2.slice(0, 50) : ""
+          );
+          switch (msg.type) {
+            case "session.created":
+              clearTimeout(timeout);
+              this.sendSessionUpdate();
+              this.callbacks.onSessionCreated();
+              resolve();
+              tokenManager.prefetch();
+              break;
+            case "session.updated":
+              console.debug(
+                "Voxtral WS (token): session updated",
+                JSON.stringify(msg.session || {})
+              );
+              break;
+            case "transcription.text.delta":
+              this.callbacks.onDelta(msg.text || "");
+              break;
+            case "transcription.done":
+              console.debug(
+                "Voxtral WS (token): transcription.done \u2014 full text:",
+                (_b = msg.text) == null ? void 0 : _b.slice(0, 200)
+              );
+              this.callbacks.onDone(msg.text || "");
+              break;
+            case "error":
+              console.error(
+                "Voxtral WS (token): server error:",
+                JSON.stringify(msg.error)
+              );
+              this.callbacks.onError(
+                ((_c = msg.error) == null ? void 0 : _c.message) || "Unknown error"
+              );
+              break;
+            default:
+              console.debug(
+                "Voxtral WS (token): unknown message type:",
+                msg.type,
+                data.slice(0, 300)
+              );
+              break;
+          }
+        } catch (e) {
+          console.error(
+            "Voxtral: failed to parse WS (token) message",
+            data.slice(0, 200),
+            e
+          );
+        }
+      };
+      socket.onerror = () => {
+        if (!opened) {
+          failedBeforeOpen = true;
+          clearTimeout(timeout);
+          reject(new Error("WebSocket connection failed"));
+        } else {
+          console.error("Voxtral: WS (token) error");
+        }
+      };
+      socket.onclose = () => {
+        console.debug(
+          `Voxtral WS (token): connection closed (intentional=${this.intentionallyClosed})`
+        );
+        this.ws = null;
+        if (!this.intentionallyClosed && !failedBeforeOpen) {
+          this.callbacks.onDisconnect();
+        }
+      };
+    });
+  }
   sendSessionUpdate() {
     var _a;
     if (!this.ws) return;
@@ -2157,6 +2282,101 @@ function arrayBufferToBase64(buffer) {
   }
   return btoa(binary);
 }
+
+// ../shared/src/realtime-token.ts
+var SAFETY_MARGIN_MS = 1e4;
+var PREFETCH_MARGIN_MS = 25e3;
+var RealtimeTokenError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "RealtimeTokenError";
+  }
+};
+var RealtimeTokenManager = class {
+  constructor(settings, httpRequest) {
+    this.settings = settings;
+    this.httpRequest = httpRequest;
+    this.cached = null;
+    // Dedupes concurrent mint requests (e.g. dual-delay's two near-simultaneous
+    // connects) onto a single in-flight POST.
+    this.minting = null;
+  }
+  /**
+   * Return a token valid for at least SAFETY_MARGIN_MS, minting one if the
+   * cache is empty, expiring soon, or scoped to a different model than the
+   * current settings. May throw RealtimeTokenError.
+   */
+  async getToken() {
+    const model = this.settings.realtimeModel;
+    if (this.cached && this.cached.model === model && this.hasMargin(this.cached, SAFETY_MARGIN_MS)) {
+      return this.cached.token;
+    }
+    return this.mintShared(model);
+  }
+  /**
+   * Fire-and-forget: mint the next token in the background once the cached
+   * one is within PREFETCH_MARGIN_MS of expiry, so a silent reconnect never
+   * blocks on the network. Errors are swallowed — the next getToken() call
+   * retries the mint and surfaces any failure there instead.
+   */
+  prefetch() {
+    const model = this.settings.realtimeModel;
+    if (this.minting) return;
+    if (this.cached && this.cached.model === model && this.hasMargin(this.cached, PREFETCH_MARGIN_MS)) {
+      return;
+    }
+    this.mintShared(model).catch(() => {
+    });
+  }
+  hasMargin(cached, marginMs) {
+    return cached.expiresAtMs - Date.now() > marginMs;
+  }
+  mintShared(model) {
+    if (this.minting) return this.minting;
+    const promise = this.mint(model).finally(() => {
+      this.minting = null;
+    });
+    this.minting = promise;
+    return promise;
+  }
+  async mint(model) {
+    var _a;
+    const base = resolveBaseUrl(this.settings);
+    const response = await withTimeout(
+      this.httpRequest({
+        url: `${base}/v1/client/sessions`,
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.settings.apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ purpose: "realtime", model })
+      }),
+      HTTP_TIMEOUT_DEFAULT_MS,
+      "Realtime token request"
+    );
+    if (response.status !== 201) {
+      throw new RealtimeTokenError(
+        `Realtime token request failed: ${sanitizeApiError(response.status, response.text)}`
+      );
+    }
+    const secret = (_a = response.json) == null ? void 0 : _a.client_secret;
+    const token = secret == null ? void 0 : secret.value;
+    if (typeof token !== "string" || !token.startsWith("rt_")) {
+      throw new RealtimeTokenError(
+        "Realtime token request failed: malformed client_secret.value in response"
+      );
+    }
+    const expiresAtMs = typeof (secret == null ? void 0 : secret.expires_at) === "string" ? Date.parse(secret.expires_at) : NaN;
+    if (Number.isNaN(expiresAtMs)) {
+      throw new RealtimeTokenError(
+        "Realtime token request failed: malformed client_secret.expires_at in response"
+      );
+    }
+    this.cached = { token, expiresAtMs, model };
+    return token;
+  }
+};
 
 // src/default-commands.ts
 function tableInsert(column) {
@@ -3142,22 +3362,15 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    const modeDesc = import_obsidian.Platform.isMobile ? "Only batch mode is available on mobile. Use tap-to-send to submit chunks while you keep talking." : "Realtime: text appears as you speak. Batch: audio is transcribed after you stop recording.";
-    const modeSetting = new import_obsidian.Setting(containerEl).setName("Mode").setDesc(modeDesc);
-    if (import_obsidian.Platform.isMobile) {
-      modeSetting.addDropdown(
-        (drop) => drop.addOption("batch", "Batch (after recording)").setValue("batch").setDisabled(true)
-      );
-    } else {
-      modeSetting.addDropdown(
-        (drop) => drop.addOption("realtime", "Realtime (streaming)").addOption("batch", "Batch (after recording)").setValue(this.plugin.settings.mode).onChange(async (value) => {
-          this.plugin.settings.mode = value;
-          await this.plugin.saveSettings();
-          this.rerenderSection("recording");
-        })
-      );
-    }
-    const isBatch = this.plugin.settings.mode === "batch" || import_obsidian.Platform.isMobile;
+    const modeDesc = import_obsidian.Platform.isMobile ? "Realtime (new on mobile): text appears as you speak. Batch: audio is transcribed after you stop recording, with tap-to-send to submit chunks while you keep talking." : "Realtime: text appears as you speak. Batch: audio is transcribed after you stop recording.";
+    new import_obsidian.Setting(containerEl).setName("Mode").setDesc(modeDesc).addDropdown(
+      (drop) => drop.addOption("realtime", "Realtime (streaming)").addOption("batch", "Batch (after recording)").setValue(this.plugin.settings.mode).onChange(async (value) => {
+        this.plugin.settings.mode = value;
+        await this.plugin.saveSettings();
+        this.rerenderSection("recording");
+      })
+    );
+    const isBatch = this.plugin.settings.mode === "batch";
     new import_obsidian.Setting(containerEl).setName("Enter = tap-to-send").setDesc(
       isBatch ? "In batch mode, pressing Enter sends the current audio chunk when the mic is live. While typing, Enter inserts a normal newline." : "Only available in batch mode. Switch to batch mode to change this setting."
     ).addToggle(
@@ -3252,9 +3465,9 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    const isRealtime = !isBatch && !import_obsidian.Platform.isMobile;
+    const isRealtime = !isBatch;
     new import_obsidian.Setting(containerEl).setName("Dual-delay mode (experimental)").setDesc(
-      import_obsidian.Platform.isMobile ? "Not available on mobile (requires realtime streaming)." : !isRealtime ? "Only available in realtime mode." : "Experimental: run two parallel streams (fast preview + slow accuracy). Uses 2x API bandwidth and may produce unexpected results. Overrides the streaming delay setting."
+      !isRealtime ? "Only available in realtime mode." : "Experimental: run two parallel streams (fast preview + slow accuracy). Uses 2x API bandwidth and may produce unexpected results. Overrides the streaming delay setting."
     ).addToggle((toggle) => {
       toggle.setValue(this.plugin.settings.dualDelay).setDisabled(!isRealtime).onChange(async (value) => {
         this.plugin.settings.dualDelay = value;
@@ -6575,10 +6788,11 @@ var TableInsertTracker = class {
 
 // ../shared/src/realtime-session.ts
 var _RealtimeSession = class _RealtimeSession {
-  constructor(settings, tracker, callbacks) {
+  constructor(settings, tracker, callbacks, httpRequest) {
     this.settings = settings;
     this.tracker = tracker;
     this.callbacks = callbacks;
+    this.httpRequest = httpRequest;
     this.transcriber = null;
     this.pendingText = "";
     this.prevRaw = "";
@@ -6610,6 +6824,13 @@ var _RealtimeSession = class _RealtimeSession {
     // against a fixed ceiling so it doesn't wait the full ceiling when the
     // API responds promptly (VX_E27_S1 item 6).
     this.pendingDoneResolve = null;
+    // One ephemeral-token manager per recording session (VX_E22_S8), shared
+    // across every (re)connect this session makes — the cache/prefetch/
+    // in-flight-dedupe it provides only pay off when it outlives a single
+    // connect(). Only created when the caller passes `httpRequest` (main.ts
+    // always does; tests that omit it get the pre-VX_E22_S8 header-only
+    // behavior unchanged).
+    this.tokenManager = null;
   }
   /** Connect the WebSocket and start receiving transcription. */
   async start(editor) {
@@ -6623,6 +6844,7 @@ var _RealtimeSession = class _RealtimeSession {
     this.audioBufferBytes = 0;
     this.disconnectedAudioWarned = false;
     this.tableInserter.reset();
+    this.tokenManager = this.httpRequest ? new RealtimeTokenManager(this.settings, this.httpRequest) : null;
     await this.connectWebSocket(editor);
   }
   /** Insert committed dictation text (table-aware; see TableInsertTracker). */
@@ -6711,24 +6933,29 @@ var _RealtimeSession = class _RealtimeSession {
   }
   // ── WebSocket lifecycle ──
   async connectWebSocket(editor) {
-    this.transcriber = new RealtimeTranscriber(this.settings, {
-      onSessionCreated: () => {
-        vlog.debug("Voxtral: Realtime session created");
+    this.transcriber = new RealtimeTranscriber(
+      this.settings,
+      {
+        onSessionCreated: () => {
+          vlog.debug("Voxtral: Realtime session created");
+        },
+        onDelta: (text) => {
+          this.handleDelta(editor, text);
+        },
+        onDone: (text) => {
+          this.handleDone(editor, text);
+        },
+        onError: (message) => {
+          vlog.error("Voxtral: Realtime error:", message);
+          this.callbacks.notify(`Streaming error: ${message}`);
+        },
+        onDisconnect: () => {
+          void this.handleDisconnect();
+        }
       },
-      onDelta: (text) => {
-        this.handleDelta(editor, text);
-      },
-      onDone: (text) => {
-        this.handleDone(editor, text);
-      },
-      onError: (message) => {
-        vlog.error("Voxtral: Realtime error:", message);
-        this.callbacks.notify(`Streaming error: ${message}`);
-      },
-      onDisconnect: () => {
-        void this.handleDisconnect();
-      }
-    });
+      void 0,
+      this.tokenManager ? { tokenManager: this.tokenManager } : void 0
+    );
     await this.transcriber.connect();
     this.flushAudioBuffer();
   }
@@ -6870,10 +7097,11 @@ var RealtimeSession = _RealtimeSession;
 
 // ../shared/src/dual-delay-session.ts
 var _DualDelaySession = class _DualDelaySession {
-  constructor(settings, tracker, callbacks) {
+  constructor(settings, tracker, callbacks, httpRequest) {
     this.settings = settings;
     this.tracker = tracker;
     this.callbacks = callbacks;
+    this.httpRequest = httpRequest;
     this.fastTranscriber = null;
     this.slowTranscriber = null;
     // Session state
@@ -6907,6 +7135,12 @@ var _DualDelaySession = class _DualDelaySession {
     // source of truth used for finalization. stop() races this against a
     // fixed ceiling (VX_E27_S1 item 6).
     this.pendingDoneResolve = null;
+    // One ephemeral-token manager shared by BOTH streams for the whole
+    // session (VX_E22_S8) — the fast and slow connects fire near-
+    // simultaneously on start()/reconnect, so getToken()'s in-flight dedupe
+    // turns what would otherwise be two mints into one. Only created when
+    // the caller passes `httpRequest` (see RealtimeSession's identical note).
+    this.tokenManager = null;
   }
   /** Resolve a pending stop() waiting on the slow stream's final done event. */
   signalDone() {
@@ -6941,6 +7175,7 @@ var _DualDelaySession = class _DualDelaySession {
       clearTimeout(this.remainderTimer);
       this.remainderTimer = null;
     }
+    this.tokenManager = this.httpRequest ? new RealtimeTokenManager(this.settings, this.httpRequest) : null;
     await this.connectWebSockets(editor);
     this.setState("streaming" /* Streaming */);
   }
@@ -7018,6 +7253,10 @@ var _DualDelaySession = class _DualDelaySession {
     this.setState("idle" /* Idle */);
   }
   // ── WebSocket lifecycle ──
+  /** RealtimeTranscriber's 4th-arg opts, or undefined without a token manager. */
+  get transcriberOpts() {
+    return this.tokenManager ? { tokenManager: this.tokenManager } : void 0;
+  }
   async connectWebSockets(editor) {
     const fastDelay = this.settings.dualDelayFastMs;
     const slowDelay = this.settings.dualDelaySlowMs;
@@ -7046,7 +7285,8 @@ var _DualDelaySession = class _DualDelaySession {
           void this.handleStreamDisconnect("fast");
         }
       },
-      fastDelay
+      fastDelay,
+      this.transcriberOpts
     );
     this.slowTranscriber = new RealtimeTranscriber(
       this.settings,
@@ -7076,7 +7316,8 @@ var _DualDelaySession = class _DualDelaySession {
           void this.handleStreamDisconnect("slow");
         }
       },
-      slowDelay
+      slowDelay,
+      this.transcriberOpts
     );
     await Promise.all([
       this.fastTranscriber.connect(),
@@ -7148,7 +7389,8 @@ var _DualDelaySession = class _DualDelaySession {
         ),
         onDisconnect: () => void this.handleStreamDisconnect("fast")
       },
-      fastDelay
+      fastDelay,
+      this.transcriberOpts
     );
     await this.fastTranscriber.connect();
   }
@@ -7200,7 +7442,8 @@ var _DualDelaySession = class _DualDelaySession {
         ),
         onDisconnect: () => void this.handleStreamDisconnect("slow")
       },
-      slowDelay
+      slowDelay,
+      this.transcriberOpts
     );
     await this.slowTranscriber.connect();
   }
@@ -7485,10 +7728,19 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
     super(...arguments);
     this.realtimeSession = null;
     this.dualDelaySession = null;
+    // Set when this session's realtime start fell back to batch after a
+    // token-mint failure (VX_E22_S8) — see startRecording()'s
+    // RealtimeTokenError handling. Makes effectiveMode() report "batch" for
+    // the rest of the session even though settings.mode is still "realtime",
+    // so stopRecording()/sendChunk() (which both key off effectiveMode) treat
+    // it as the batch session it actually is. Reset at the top of every
+    // startRecording() call.
+    this.sessionForcedBatch = false;
     this.tracker = new DictationTracker();
-    // Table-aware insertion for the batch/chunk path (used on mobile, where
-    // realtime streaming is unavailable). Keeps dictation appending in the
-    // right table cell despite Obsidian's async table-widget cursor reset.
+    // Table-aware insertion for the batch/chunk path (batch mode, on any
+    // platform — realtime mode uses RealtimeSession/DualDelaySession's own
+    // TableInsertTracker instead). Keeps dictation appending in the right
+    // table cell despite Obsidian's async table-widget cursor reset.
     this.batchInserter = new TableInsertTracker();
     this.isRecording = false;
     this.isPaused = false;
@@ -7556,12 +7808,26 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
       };
     };
   }
-  /** Whether realtime mode is available on this platform */
+  /**
+   * Whether realtime mode is available on this platform. Always true since
+   * VX_E22_S8: realtime now works on mobile too, via the ephemeral-token
+   * WebSocket-subprotocol route (RealtimeTokenManager +
+   * connectCloudSubprotocol() in shared/src/mistral-api.ts) — the desktop
+   * header route needs Node's `require()`, which mobile's webview never
+   * has, but the token route doesn't need it. Kept as a getter (rather
+   * than removed outright) since other code still reads it.
+   */
   get canRealtime() {
-    return !import_obsidian9.Platform.isMobile;
+    return true;
   }
-  /** Effective mode: fall back to batch on mobile */
+  /**
+   * Effective mode for the current/next recording session: the user's
+   * chosen mode, unless this session's realtime start already fell back to
+   * batch after a token-mint failure (see `sessionForcedBatch` and
+   * startRecording()'s RealtimeTokenError handling).
+   */
   get effectiveMode() {
+    if (this.sessionForcedBatch) return "batch";
     if (this.settings.mode === "realtime" && this.canRealtime) {
       return "realtime";
     }
@@ -8066,6 +8332,7 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
     editor.setCursor(from);
   }
   async startRecording() {
+    this.sessionForcedBatch = false;
     if (!this.settings.apiKey && !isLocalMode(this.settings)) {
       new import_obsidian9.Notice("Please set your API key in the plugin settings.");
       return;
@@ -8090,7 +8357,21 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
     this.sessionVocabularyTerms = this.settings.vaultVocabulary ? collectVaultVocabulary(this.app, view.file) : [];
     try {
       if (this.effectiveMode === "realtime") {
-        await this.startRealtimeRecording(editor);
+        try {
+          await this.startRealtimeRecording(editor);
+        } catch (e) {
+          if (!(e instanceof RealtimeTokenError)) throw e;
+          vlog.warn(
+            "Voxtral: realtime token mint failed \u2014 falling back to batch mode for this session",
+            e
+          );
+          new import_obsidian9.Notice(
+            `Realtime unavailable: ${e.message} \u2014 falling back to batch mode for this session.`
+          );
+          this.sessionForcedBatch = true;
+          await this.startBatchRecording();
+          this.addSendButton();
+        }
       } else {
         await this.startBatchRecording();
         this.addSendButton();
@@ -8242,14 +8523,16 @@ var VoxtralPlugin = class extends import_obsidian9.Plugin {
         this.dualDelaySession = new DualDelaySession(
           this.recordingSettings,
           this.tracker,
-          this.sessionCallbacks
+          this.sessionCallbacks,
+          this.httpRequest
         );
         await this.dualDelaySession.start(editor);
       } else {
         this.realtimeSession = new RealtimeSession(
           this.recordingSettings,
           this.tracker,
-          this.sessionCallbacks
+          this.sessionCallbacks,
+          this.httpRequest
         );
         await this.realtimeSession.start(editor);
       }

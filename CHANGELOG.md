@@ -6,6 +6,21 @@ plugin follows [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- **Real-time dictation on mobile.** Real-time streaming — text appearing as
+  you speak — now works on Obsidian mobile, not just desktop. Obsidian's
+  mobile webview can't set the `Authorization` header the desktop connection
+  uses during the WebSocket handshake, so on mobile the plugin instead mints
+  a short-lived token with your API key and authenticates the connection via
+  the WebSocket subprotocol, using
+  [Mistral's ephemeral client tokens](https://docs.mistral.ai/studio-api/audio/speech_to_text/realtime_transcription/client_auth)
+  — added specifically to unblock this, closing
+  [obsidian-voxtral#13](https://github.com/maxonamission/obsidian-voxtral/issues/13).
+  Your API key itself only ever goes to `api.mistral.ai`, never the WebSocket
+  handshake. Batch mode with tap-to-send remains available as a choice on
+  both platforms, and is now also the automatic fallback — with a clear
+  notice — if a token mint ever fails. Desktop keeps using the existing
+  header-based connection unchanged.
+
 ## [1.9.0] - 2026-07-21
 
 - **Experimental: local server mode (desktop).** A new *Local server mode
