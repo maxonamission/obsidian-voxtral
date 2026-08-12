@@ -4,7 +4,41 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.11.0] - 2026-08-12
+
+- **Auto-correction is now a choice: Off, Light, or Standard.** The Light
+  setting only fixes capitalization, misspellings and punctuation — it never
+  adds, removes or merges line breaks or rewrites your wording. Standard is
+  the existing behavior. If a correction ever goes wrong anyway, the new
+  **Undo auto-correction** command reverts the last dictation to the raw
+  transcription (and tells you if the text has changed since).
+- **Per-note style.** Set `voxtral-style` in a note's frontmatter to nudge
+  the tone of corrections for that note — casual for a journal, terse for
+  meeting notes. It only influences tone and register, never content.
+- **Per-note vocabulary and a global custom vocabulary.** Set
+  `voxtral-vocabulary` in a note's frontmatter, or fill the new *Custom
+  vocabulary* list in the settings, to spell out names and jargon. These
+  explicit terms are always used — even with vault vocabulary off — for both
+  the correction pass and, new in this release, **transcription context
+  bias**: vocabulary terms now ride along with every batch transcription
+  request so names and jargon are more likely to be spelled correctly from
+  the start (optimized for English; other languages experimental, though our
+  own Dutch tests showed clear improvements).
+- **Forgiving embed transcription.** "Transcribe the audio embed on the
+  current line" no longer requires the cursor to sit exactly on the embed's
+  line: it finds the nearest audio embed, falls back to the only one in the
+  note, asks which one you mean if there are several — and now also works in
+  reading view.
+- **A quieter kind of update notice.** After an update to a new minor or
+  major version (never a patch), a single small notice points to what's new —
+  and can be turned off entirely.
+- **Fixes.** A failed or timed-out correction pass no longer loses your file
+  transcript — the uncorrected text is inserted instead, with a clear notice;
+  correcting a long transcript now gets a proper timeout budget (a 30-minute
+  meeting's correction used to time out); and audio/attachment filenames can
+  no longer sneak into the vault vocabulary as "terms".
+
+## [1.10.0] - 2026-08-08
 
 - **Real-time dictation on mobile.** Real-time streaming — text appearing as
   you speak — now works on Obsidian mobile, not just desktop. Obsidian's
@@ -20,6 +54,13 @@ plugin follows [semantic versioning](https://semver.org/).
   both platforms, and is now also the automatic fallback — with a clear
   notice — if a token mint ever fails. Desktop keeps using the existing
   header-based connection unchanged.
+
+## [1.9.1] - 2026-07-22
+
+- **Sturdier custom API URL handling.** The Mistral API URL setting now
+  normalizes whitespace and trailing slashes, falls back to the default when
+  cleared, and warns about scheme-less or non-Mistral endpoints — so an
+  edited URL can always find its way back to a working default.
 
 ## [1.9.0] - 2026-07-21
 

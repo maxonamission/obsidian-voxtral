@@ -29,6 +29,8 @@ Powered by [Mistral's Voxtral](https://mistral.ai/), a speech-to-text engine bui
 - **Batch mode with tap-to-send** (desktop + mobile) — send audio chunks while you keep talking; also the automatic fallback if a real-time token mint ever fails
 - **Voice commands** — headings, bullet points, to-do items, numbered lists and more by voice, localized to all 13 supported languages (Dutch, English, French, German, Spanish, Portuguese, Italian, Russian, Chinese, Hindi, Arabic, Japanese, Korean); a help panel shows the trigger phrases for your active language
 - **Per-note language override** — set `voxtral-language` in a note's frontmatter to dictate that note in a different language
+- **Per-note style preference** — set `voxtral-style` in a note's frontmatter to nudge the tone of corrections (e.g. casual for a journal, terse for meeting notes)
+- **Per-note vocabulary** — set `voxtral-vocabulary` in a note's frontmatter to spell out names and jargon for that note
 - **Typing-friendly mic** — configurable cooldown before the mic resumes after typing, optional Enter-to-send while the mic is live, microphone selection, and configurable behavior when you switch apps on mobile
 
 ### Correction
@@ -37,10 +39,12 @@ Powered by [Mistral's Voxtral](https://mistral.ai/), a speech-to-text engine bui
 - **Inline correction instructions** — say "for the correction: ..." and the corrector follows your instructions
 - **Self-correction recognition** — "no not X but Y" is handled automatically
 - **Mishearing correction** — common speech recognition errors are fixed automatically per language
+- **Vault vocabulary (optional, off by default)** — send term names from the active note's own vault context (headings, links, aliases, and tags — never note contents) along with your dictated text, so a misheard or misspelled vault term is corrected toward its exact spelling; those same terms are also sent to the transcription API itself as context bias, so names and jargon are more likely to be spelled correctly from the start — optimized for English, with other languages experimental
+- **Custom vocabulary** — a global list of your own terms (names, jargon, abbreviations) in the settings, separated by commas or new lines; unlike vault vocabulary above, these are always sent along with corrections and as transcription context bias, even when vault vocabulary is off — the trade-off being that these terms are shared with the API on every call
 
 ### File transcription
 
-- **Transcribe existing audio files** (desktop + mobile) — right-click any audio file → "Transcribe audio file"; choose where the text lands (active note or a new linked note), or transcribe the `![[recording]]` embed at your cursor
+- **Transcribe existing audio files** (desktop + mobile) — right-click any audio file → "Transcribe audio file"; choose where the text lands (active note or a new linked note), or run "Transcribe the audio embed on the current line" to transcribe a `![[recording]]` embed — it finds the nearest or only audio embed in the note even if your cursor isn't right on it, and works in reading view too
 - **Long recordings, handled** — files over the single-request limit are split and transcribed in parts automatically, each part appearing as it finishes (with a Cancel button); part length is configurable
 - **Readable layout** — transcripts are broken into paragraphs rather than one long block
 - **Speaker labels (optional)** — turn on diarization to label who said what (`**Speaker 1:** …`)
@@ -80,7 +84,7 @@ Batch mode works on desktop too: press **Enter** while the mic is live (and you'
 ### Transcribe an audio file
 
 - **From the vault:** right-click any audio file → **Transcribe audio file**.
-- **From an embed:** put your cursor on a line with an `![[recording]]` embed and run **Transcribe the audio embed on the current line** — the text is inserted right below the embed.
+- **From an embed:** run **Transcribe the audio embed on the current line** — the text is inserted right below the embed. It's forgiving about where the cursor is: on the embed's line, near it, or anywhere at all if the note has only one audio embed; with several embeds and no clear nearby one, it asks which you mean. Works in reading view too.
 
 Turn on **Speaker labels (diarization)** in settings to label who said what (off by default; for long files split into parts, labels are detected per part and a note at the top explains they don't carry across the whole transcript).
 
@@ -123,6 +127,38 @@ Supported codes: `nl`, `en`, `fr`, `de`, `es`, `pt`, `it`, `ru`, `zh`, `hi`, `ar
 - The override is resolved once, when you start recording — it applies to transcription, voice-command matching, and the help panel for the whole session. Editing the frontmatter mid-recording has no effect until the next recording.
 - Removing the key (or leaving it out) falls back to your global Language setting.
 - An unrecognized value (e.g. a typo) also falls back to the global setting, with a one-time notice telling you what happened.
+
+### Per-note style preference
+
+Add a `voxtral-style` key to a note's frontmatter to nudge the correction step toward a particular tone — casual for a diary entry, tight and formal for meeting notes, flowing for a blog draft:
+
+```yaml
+---
+voxtral-style: casual, first person, contractions okay
+---
+```
+
+- Resolved the same way and at the same moment as `voxtral-language` — once, from the output-target note, and held for that recording session or file transcription.
+- Free text: there's no fixed list of styles and no validation notice, just whatever you write (capped at 300 characters).
+- Style guides tone of corrections only; it cannot add or remove content — it can never make the corrector invent sentences, drop text, or restructure your note, no matter what the style text says.
+- Removing the key (or leaving it out) leaves correction exactly as it is today.
+
+### Per-note vocabulary and the global custom vocabulary list
+
+Add a `voxtral-vocabulary` key to a note's frontmatter to spell out names and jargon for that note — either a YAML list or a single comma/newline-separated string:
+
+```yaml
+---
+voxtral-vocabulary:
+  - Voxtral
+  - Kloosterman
+---
+```
+
+- These terms are **always** sent — with corrections and as transcription context bias — regardless of the "Vault vocabulary" setting above, which only gates *automatic* collection from the vault. You typed them for exactly this purpose.
+- Resolved the same way and at the same moment as `voxtral-language`/`voxtral-style` — once, from the output-target note, and held for that recording session or file transcription.
+- There's also a global **Custom vocabulary** setting (Settings → Voxtral Transcribe) for terms you always want available, regardless of which note you're in — your own name, recurring jargon, project codenames. Same always-on rule applies, and the same privacy trade-off: these terms are shared with the API on every call.
+- Order when combined with the vault vocabulary's automatic collection: this note's `voxtral-vocabulary` terms first, then the global custom terms, then collected vault terms — deduped and capped like the rest of the vocabulary list.
 
 ### Text correction
 
