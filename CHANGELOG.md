@@ -4,6 +4,16 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.11.1] - 2026-08-12
+
+- **Fix: the correction timeout now scales with transcript length.** The
+  fixed budget introduced in 1.11.0 was tight for long recordings — a
+  30-minute transcript's correction already takes close to two minutes, and
+  a 2-hour recording needs around eight. The budget now grows with the
+  transcript (up to a 20-minute cap), so long corrections get the time they
+  need; if anything still fails, the uncorrected transcript is inserted as
+  before. Dictation corrections keep their fast timeout.
+
 ## [1.11.0] - 2026-08-12
 
 - **Auto-correction is now a choice: Off, Light, or Standard.** The Light

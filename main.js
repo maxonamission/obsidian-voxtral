@@ -1552,7 +1552,13 @@ function resolveBaseUrl(settings) {
 }
 var HTTP_TIMEOUT_UPLOAD_MS = 6e4;
 var HTTP_TIMEOUT_DEFAULT_MS = 3e4;
-var HTTP_TIMEOUT_CORRECTION_LONG_MS = 12e4;
+var CORRECTION_TIMEOUT_BASE_MS = 6e4;
+var CORRECTION_TIMEOUT_PER_CHAR_MS = 15;
+var CORRECTION_TIMEOUT_MAX_MS = 12e5;
+function correctionTimeoutMs(textLength) {
+  const scaled = CORRECTION_TIMEOUT_BASE_MS + textLength * CORRECTION_TIMEOUT_PER_CHAR_MS;
+  return Math.min(scaled, CORRECTION_TIMEOUT_MAX_MS);
+}
 var HttpStatusError = class extends Error {
   constructor(message, status) {
     super(message);
@@ -6079,7 +6085,7 @@ ${fallback}` }];
           await this.logStep(`single-call: correcting (${text2.length} chars)`);
           try {
             const corrected = (await correctText(text2, this.settings, this.httpRequest, {
-              timeoutMs: HTTP_TIMEOUT_CORRECTION_LONG_MS
+              timeoutMs: correctionTimeoutMs(text2.length)
             })).trim();
             await this.logStep(`single-call: correction done (${corrected.length} chars)`);
             if (corrected) text2 = corrected;
@@ -6442,7 +6448,7 @@ ${fallback}
         let corrected = "";
         try {
           corrected = (await correctText(raw, this.settings, this.httpRequest, {
-            timeoutMs: HTTP_TIMEOUT_CORRECTION_LONG_MS
+            timeoutMs: correctionTimeoutMs(raw.length)
           })).trim();
           await this.logStep(`chunked: correction done (${corrected.length} chars)`);
         } catch (e) {
