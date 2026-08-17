@@ -49,6 +49,7 @@ Powered by [Mistral's Voxtral](https://mistral.ai/), a speech-to-text engine bui
 - **Readable layout** — transcripts are broken into paragraphs rather than one long block
 - **Speaker labels (optional)** — turn on diarization to label who said what (`**Speaker 1:** …`)
 - **Quality heads-up** — an optional pre-flight check warns about likely problems (very short, silent, or low-bitrate audio) before spending an API call
+- **Watch folder (optional, off by default)** — point it at a vault folder (e.g. a phone auto-sync folder) and a new audio file there is offered for transcription with a notice, or transcribed automatically if you switch the mode — automatic sends every new recording in the folder to the API without asking, so each one costs an API call
 
 ## Requirements & installation
 
@@ -196,6 +197,8 @@ When switching apps on mobile, you can configure what happens to an active recor
 | Warn about low-quality or oversized files | Pre-flight check that warns before transcribing a likely-poor recording |
 | Chunk length for long recordings | Part length used when splitting recordings over the single-request limit |
 | Speaker labels (diarization) | Label different speakers in a transcribed file (off by default) |
+| Watch folder | Vault folder to watch for new audio recordings; empty (default) turns this off |
+| New audio in watch folder | Offer with a notice (default) or transcribe automatically — automatic costs an API call per new recording |
 
 ## Privacy & permissions
 

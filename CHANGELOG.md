@@ -4,6 +4,22 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+- **Watch folder.** Point the plugin at a vault folder — for example the
+  auto-sync folder your phone drops recordings into — and every new audio
+  file there is offered for transcription with a small notice, or transcribed
+  automatically into a linked note if you prefer. Off by default; the
+  automatic mode says honestly what it costs: every new recording in the
+  folder is sent to the API without asking.
+- **Snappier realtime dictation.** In single-stream realtime mode, text now
+  appears every few words — flushing at word boundaries and after commas —
+  instead of only at sentence ends or after roughly 120 characters. A
+  retained tail guarantees voice commands are never split by a partial
+  flush. The model's own punctuation and capitalization are preserved
+  across these new partial flushes, instead of being stripped as if every
+  fragment started mid-sentence.
+
 ## [1.11.1] - 2026-08-12
 
 - **Fix: the correction timeout now scales with transcript length.** The

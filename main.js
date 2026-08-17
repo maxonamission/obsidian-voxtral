@@ -71,7 +71,9 @@ var DEFAULT_SETTINGS = {
   localCorrectionUrl: "",
   localCorrectionModel: "ministral-3:3b",
   lastSeenVersion: "",
-  showUpdateNotice: true
+  showUpdateNotice: true,
+  watchFolderPath: "",
+  watchFolderMode: "ask"
 };
 
 // ../shared/src/similarity.ts
@@ -3656,6 +3658,25 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("Watch folder").setDesc(
+      "Vault folder to watch for new audio recordings \u2014 for example an auto-sync folder from your phone. Leave empty to turn this off."
+    ).addText(
+      (text) => text.setPlaceholder("Recordings").setValue(this.plugin.settings.watchFolderPath).onChange(async (value) => {
+        this.plugin.settings.watchFolderPath = value.trim();
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("New audio in watch folder").setDesc(
+      "What happens when a new recording shows up in the watch folder above. Automatic sends every new recording in the folder to the API without asking \u2014 each one costs an API call."
+    ).addDropdown((drop) => {
+      drop.addOption("ask", "Offer with a notice");
+      drop.addOption("auto", "Transcribe automatically");
+      drop.setValue(this.plugin.settings.watchFolderMode);
+      drop.onChange(async (value) => {
+        this.plugin.settings.watchFolderMode = value;
+        await this.plugin.saveSettings();
+      });
+    });
   }
   // Listen back (E26, experimental)
   renderListenBack(containerEl) {
@@ -4288,7 +4309,7 @@ function fixMishearings(text) {
   }
   return text;
 }
-function insertAtCursor(editor, text, posOverride) {
+function insertAtCursor(editor, text, posOverride, continuation) {
   const cursor = posOverride != null ? posOverride : editor.getCursor();
   const context = cursor.ch === 0 ? "new-line" : detectContext(editor.getRange({ line: cursor.line, ch: 0 }, cursor));
   if (cursor.ch === 0) {
@@ -4303,11 +4324,13 @@ function insertAtCursor(editor, text, posOverride) {
       text = " " + text;
     }
   }
-  if (shouldLowercase(context)) {
-    text = lowercaseFirstLetter(text);
-  }
-  if (shouldStripTrailingPunctuation(context)) {
-    text = stripTrailingPunctuation(text);
+  if (!continuation) {
+    if (shouldLowercase(context)) {
+      text = lowercaseFirstLetter(text);
+    }
+    if (shouldStripTrailingPunctuation(context)) {
+      text = stripTrailingPunctuation(text);
+    }
   }
   if (text.length > 0 && !/[\s\n]$/.test(text) && !isSlotActive()) {
     const charAfter = editor.getRange(cursor, {
@@ -4830,30 +4853,42 @@ var preMatchHook = null;
 function setPreMatchHook(hook) {
   preMatchHook = hook;
 }
-function processText(editor, text, posOverride, onCommand) {
+function processText(editor, text, posOverride, onCommand, continuation) {
   let stopRequested = false;
   const segments = text.match(/[^.!?]+[.!?]+\s*/g);
   if (!segments) {
-    stopRequested = processSegment(editor, text, posOverride, onCommand);
+    stopRequested = processSegment(editor, text, posOverride, onCommand, continuation);
     return stopRequested;
   }
   const joined = segments.join("");
   const remainder = text.slice(joined.length);
   let first = true;
   for (const segment of segments) {
-    if (processSegment(editor, segment, first ? posOverride : void 0, onCommand)) {
+    if (processSegment(
+      editor,
+      segment,
+      first ? posOverride : void 0,
+      onCommand,
+      first ? continuation : void 0
+    )) {
       stopRequested = true;
     }
     first = false;
   }
   if (remainder.trim()) {
-    if (processSegment(editor, remainder, first ? posOverride : void 0, onCommand)) {
+    if (processSegment(
+      editor,
+      remainder,
+      first ? posOverride : void 0,
+      onCommand,
+      first ? continuation : void 0
+    )) {
       stopRequested = true;
     }
   }
   return stopRequested;
 }
-function processSegment(editor, text, posOverride, onCommand) {
+function processSegment(editor, text, posOverride, onCommand, continuation) {
   if (preMatchHook) {
     const normalized = fixMishearings(normalizeCommand(text));
     if (preMatchHook(editor, normalized, text)) return false;
@@ -4865,13 +4900,13 @@ function processSegment(editor, text, posOverride, onCommand) {
       if (match.command.punctuation) {
         before = before.replace(/[,;.!?]+\s*$/, "");
       }
-      insertAtCursor(editor, before, posOverride);
+      insertAtCursor(editor, before, posOverride, continuation);
     }
     executeCommand(editor, match.command);
     onCommand == null ? void 0 : onCommand(match.command.id);
     return match.command.id === "stopRecording";
   } else {
-    insertAtCursor(editor, text, posOverride);
+    insertAtCursor(editor, text, posOverride, continuation);
   }
   return false;
 }
@@ -5360,6 +5395,23 @@ var EmbedPickerModal = class extends import_obsidian3.FuzzySuggestModal {
     this.onChoose(ref);
   }
 };
+
+// src/watch-folder.ts
+function shouldOfferTranscription(opts) {
+  const { candidate, watchFolderPath, isAudio, transcriptExists } = opts;
+  const folder = normalizeFolder(watchFolderPath);
+  if (folder === "") return false;
+  if (!isInsideFolder(candidate.path, folder)) return false;
+  if (!isAudio(candidate.extension)) return false;
+  if (transcriptExists(candidate.path)) return false;
+  return true;
+}
+function normalizeFolder(raw) {
+  return raw.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+}
+function isInsideFolder(path, folder) {
+  return path === folder || path.startsWith(`${folder}/`);
+}
 
 // src/vault-vocabulary.ts
 var import_obsidian4 = require("obsidian");
@@ -6684,13 +6736,17 @@ var DictationTracker = class _DictationTracker {
    *   the cell start after an async table re-render.
    * @param onCommand — optional callback invoked with the matched command's
    *   id whenever a voice command executes (drives command-feedback UI).
+   * @param continuation — when true, this text picks up exactly where our
+   *   own previous plain-text commit left off (no cursor move, no command
+   *   in between); only the first insertion processText makes for this
+   *   call honours it (VX_E22_S9).
    * @returns the resulting end offset (so a caller can keep tracking it across
    *   turns) and whether a stop-recording command was hit.
    */
-  trackProcessText(editor, text, onSlotActive, posOverride, onCommand) {
+  trackProcessText(editor, text, onSlotActive, posOverride, onCommand, continuation) {
     const offsetBefore = posOverride ? editor.posToOffset(posOverride) : editor.posToOffset(editor.getCursor());
     const lenBefore = posOverride ? editor.getValue().length : 0;
-    const stop = processText(editor, text, posOverride, onCommand);
+    const stop = processText(editor, text, posOverride, onCommand, continuation);
     if (isSlotActive() && onSlotActive) {
       onSlotActive();
     }
@@ -6938,20 +6994,29 @@ var TableInsertTracker = class {
    * Insert committed dictation text, table-aware.
    * @param onCommand — optional callback invoked with a voice command's id
    *   whenever one executes (drives command-feedback UI).
-   * @returns whether a stop-recording command was hit.
+   * @param continuation — when true, this text picks up exactly where our
+   *   own previous plain-text commit left off (no cursor move, no command
+   *   in between since); suppresses the mid-sentence casing/punctuation
+   *   adaptation for the off-table path and the on-table plain-dictation
+   *   path (VX_E22_S9). Defaults to false/undefined — backward compatible.
+   * @returns whether a stop-recording command was hit, and the document
+   *   offset right after the insertion (so a caller can track continuation
+   *   across commits).
    */
-  commit(editor, tracker, text, onSlotActive, onCommand) {
+  commit(editor, tracker, text, onSlotActive, onCommand, continuation) {
     const selectionText = editor.getSelection();
     if (selectionText.length > 0) {
       const replacement = text.trim();
-      if (!replacement) return false;
+      if (!replacement) {
+        return { stop: false, end: editor.posToOffset(editor.getCursor()) };
+      }
       const selLine = editor.getLine(editor.getCursor().line);
       if (isTableLine(selLine)) {
         vlog.debug(
           `Voxtral[table] replace-selection atomic line=${JSON.stringify(selLine)}`
         );
         editor.replaceSelection(replacement);
-        return false;
+        return { stop: false, end: editor.posToOffset(editor.getCursor()) };
       }
       editor.replaceSelection("");
     }
@@ -6961,7 +7026,15 @@ var TableInsertTracker = class {
       vlog.debug(
         `Voxtral[table] off-table cur=${curPos.line}:${curPos.ch}`
       );
-      return tracker.trackProcessText(editor, text, onSlotActive, void 0, onCommand).stop;
+      const result = tracker.trackProcessText(
+        editor,
+        text,
+        onSlotActive,
+        void 0,
+        onCommand,
+        continuation
+      );
+      return { stop: result.stop, end: result.end };
     }
     if (matchCommand(text)) {
       const col2 = cellIndexOf(line, curPos.ch);
@@ -6978,15 +7051,17 @@ var TableInsertTracker = class {
         onCommand
       );
       this.reassertCursor(editor, curPos.line, col2);
-      return result.stop;
+      return { stop: result.stop, end: result.end };
     }
     const col = cellIndexOf(line, curPos.ch);
     const cStart = cellStartCh(line, col);
     const context = detectContext(line.substring(cStart, curPos.ch));
     let out = text;
-    if (shouldLowercase(context)) out = lowercaseFirstLetter(out);
-    if (shouldStripTrailingPunctuation(context)) {
-      out = stripTrailingPunctuation(out);
+    if (!continuation) {
+      if (shouldLowercase(context)) out = lowercaseFirstLetter(out);
+      if (shouldStripTrailingPunctuation(context)) {
+        out = stripTrailingPunctuation(out);
+      }
     }
     const before = curPos.ch > 0 ? editor.getRange({ line: curPos.line, ch: curPos.ch - 1 }, curPos) : "";
     if (before && /\S/.test(before) && !/^[\s\n|]/.test(out)) out = " " + out;
@@ -7003,7 +7078,7 @@ var TableInsertTracker = class {
     vlog.debug(
       `Voxtral[table] cursor-insert POST cur=${after.line}:${after.ch}`
     );
-    return false;
+    return { stop: false, end: editor.posToOffset(after) };
   }
   /**
    * Best-effort cosmetic: after the async reflow, drop the caret at the end of
@@ -7052,6 +7127,15 @@ var _RealtimeSession = class _RealtimeSession {
     // Keeps dictation appending in the right table cell despite Obsidian
     // resetting the cursor after its async table re-render.
     this.tableInserter = new TableInsertTracker();
+    // Document offset right after our previous plain-text commit, or null
+    // when there is no valid continuation (session start, a voice command
+    // just ran, or the cursor moved since). When the next commit's cursor
+    // sits exactly here, that commit is a direct continuation of the
+    // previous one — e.g. a partial-flush fragment seam — and the
+    // mid-sentence casing/punctuation adaptation in the insert path is
+    // skipped so the model's own punctuation/capitalization survives
+    // across the flush boundary. See VX_E22_S9.
+    this.lastInsertEnd = null;
     // Resolved by handleDone() as soon as the final "done" event for the
     // current turn arrives after stop() calls endAudio(). stop() races this
     // against a fixed ceiling so it doesn't wait the full ceiling when the
@@ -7077,21 +7161,28 @@ var _RealtimeSession = class _RealtimeSession {
     this.audioBufferBytes = 0;
     this.disconnectedAudioWarned = false;
     this.tableInserter.reset();
+    this.lastInsertEnd = null;
     this.tokenManager = this.httpRequest ? new RealtimeTokenManager(this.settings, this.httpRequest) : null;
     await this.connectWebSocket(editor);
   }
   /** Insert committed dictation text (table-aware; see TableInsertTracker). */
   commit(editor, text) {
-    this.tableInserter.commit(
+    const cursorOffset = editor.posToOffset(editor.getCursor());
+    const continuation = this.lastInsertEnd !== null && cursorOffset === this.lastInsertEnd;
+    let commandExecuted = false;
+    const result = this.tableInserter.commit(
       editor,
       this.tracker,
       text,
       () => this.callbacks.updateStatusBar("slot"),
       (commandId) => {
         var _a, _b;
-        return (_b = (_a = this.callbacks).onCommandExecuted) == null ? void 0 : _b.call(_a, commandId);
-      }
+        commandExecuted = true;
+        (_b = (_a = this.callbacks).onCommandExecuted) == null ? void 0 : _b.call(_a, commandId);
+      },
+      continuation
     );
+    this.lastInsertEnd = commandExecuted ? null : result.end;
   }
   clearCommandFlushTimer() {
     if (this.commandFlushTimer) {
@@ -7253,11 +7344,20 @@ var _RealtimeSession = class _RealtimeSession {
     this.pendingText += newText;
     this.turnDelta += newText.length;
     const sentenceEnd = /[.!?]\s*$/;
-    const longEnough = this.pendingText.length > 120;
-    if (sentenceEnd.test(this.pendingText) || longEnough) {
+    if (sentenceEnd.test(this.pendingText)) {
       this.clearCommandFlushTimer();
       this.flushPending(editor);
       return;
+    }
+    const limit = this.pendingText.length - _RealtimeSession.COMMAND_TAIL_CHARS;
+    if (limit > 0) {
+      const split = this.findPartialFlushSplit(limit);
+      if (split !== null) {
+        this.clearCommandFlushTimer();
+        const fragment = this.pendingText.slice(0, split);
+        this.pendingText = this.pendingText.slice(split);
+        this.commitFragment(editor, fragment);
+      }
     }
     if (matchCommand(this.pendingText.trim())) {
       this.clearCommandFlushTimer();
@@ -7266,6 +7366,48 @@ var _RealtimeSession = class _RealtimeSession {
         this.flushPending(editor);
       }, _RealtimeSession.COMMAND_FLUSH_DEBOUNCE_MS);
     }
+  }
+  /**
+   * Find the split point for a partial flush within `[0, limit]` of
+   * pendingText, or null if no suitable boundary exists yet (wait for
+   * more text). Prefers the last ", " (a stronger natural commit point,
+   * split after the comma+space) whose end is within limit; otherwise,
+   * once pendingText is long enough, falls back to the last plain space
+   * at or before limit (split point after the space). See VX_E22_S9.
+   */
+  findPartialFlushSplit(limit) {
+    const commaIndex = this.pendingText.lastIndexOf(", ", limit - 2);
+    if (commaIndex !== -1) {
+      return commaIndex + 2;
+    }
+    if (this.pendingText.length > _RealtimeSession.FLUSH_THRESHOLD_CHARS) {
+      const spaceIndex = this.pendingText.lastIndexOf(" ", limit);
+      if (spaceIndex !== -1) {
+        return spaceIndex + 1;
+      }
+    }
+    return null;
+  }
+  /**
+   * Recognizes the "stop recording" voice command in normalized text.
+   * Shared by flushPending (full flush) and commitFragment (partial
+   * flush) so the pattern list isn't duplicated.
+   */
+  isStopCommand(sentence) {
+    const normalized = normalizeCommand(sentence);
+    const stopPatterns = [
+      "beeindig opname",
+      "beeindig de opname",
+      "beeindigt opname",
+      "beeindigt de opname",
+      "beeindigde opname",
+      "beeindigde de opname",
+      "stop opname",
+      "stopopname",
+      "stop de opname",
+      "stop recording"
+    ];
+    return stopPatterns.some((p) => normalized.includes(p));
   }
   /**
    * Process and commit the accumulated pending text. Recognizes the
@@ -7280,24 +7422,27 @@ var _RealtimeSession = class _RealtimeSession {
     }
     this.turnProcessed += this.pendingText.length;
     this.pendingText = "";
-    const normalized = normalizeCommand(sentence);
-    const stopPatterns = [
-      "beeindig opname",
-      "beeindig de opname",
-      "beeindigt opname",
-      "beeindigt de opname",
-      "beeindigde opname",
-      "beeindigde de opname",
-      "stop opname",
-      "stopopname",
-      "stop de opname",
-      "stop recording"
-    ];
-    if (stopPatterns.some((p) => normalized.includes(p))) {
+    if (this.isStopCommand(sentence)) {
       this.callbacks.stopRecording();
       return;
     }
     this.commit(editor, sentence + " ");
+  }
+  /**
+   * Commit a leading fragment produced by the word/comma-boundary partial
+   * flush in handleDelta (VX_E22_S9). Mirrors flushPending's stop-command
+   * handling; turnProcessed only accounts for the flushed fragment here —
+   * the retained tail is counted later when it is itself flushed.
+   */
+  commitFragment(editor, fragment) {
+    this.turnProcessed += fragment.length;
+    const trimmed = fragment.trim();
+    if (!trimmed) return;
+    if (this.isStopCommand(trimmed)) {
+      this.callbacks.stopRecording();
+      return;
+    }
+    this.commit(editor, trimmed + " ");
   }
   handleDone(editor, doneText) {
     if (doneText && doneText.length > this.turnDelta) {
@@ -7323,6 +7468,17 @@ var _RealtimeSession = class _RealtimeSession {
   }
 };
 _RealtimeSession.COMMAND_FLUSH_DEBOUNCE_MS = 400;
+// Pending-text length above which a partial flush may split at a plain
+// word boundary (a space); below it, a partial flush only fires on a
+// comma, a stronger natural commit point. Replaces the old unconditional
+// `this.pendingText.length > 120` full-flush branch — see VX_E22_S9.
+_RealtimeSession.FLUSH_THRESHOLD_CHARS = 60;
+// Tail length always retained in pendingText across a partial flush, so
+// a voice command that is still being spoken can never be split across a
+// flush boundary. Sized to the longest trigger phrase across all 13
+// supported languages (~30 chars, "maak laatste commando ongedaan") plus
+// margin — see VX_E22_S9.
+_RealtimeSession.COMMAND_TAIL_CHARS = 40;
 // Cap the buffer so a long disconnect can't grow memory without bound.
 // 16kHz · 16-bit · mono = 32000 bytes/s, so this holds ~10s of audio.
 _RealtimeSession.MAX_AUDIO_BUFFER_BYTES = 32e4;
@@ -8351,6 +8507,13 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     this.app.workspace.onLayoutReady(() => {
       void this.checkForUpdateNotice();
     });
+    this.app.workspace.onLayoutReady(() => {
+      this.registerEvent(
+        this.app.vault.on("create", (file) => {
+          this.onVaultFileCreated(file);
+        })
+      );
+    });
   }
   /**
    * VX_E2_S5: show a one-time Notice when the installed version stepped up a
@@ -8823,7 +8986,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       }
       this.updateStatusBar("recording");
       if (text) {
-        const stopRequested = this.batchInserter.commit(
+        const { stop: stopRequested } = this.batchInserter.commit(
           editor,
           this.tracker,
           text,
@@ -9124,6 +9287,70 @@ ${getLogText()}
       file,
       target ? (text) => target.replaceSelection(text + "\n") : null
     );
+  }
+  // ── Watch folder (VX_E27_S14) ──
+  /**
+   * React to a file appearing anywhere in the vault. Registered only after
+   * `onLayoutReady` (see onload()), so the initial vault-load create-event
+   * storm never reaches this. Defensive by design: a watcher must never
+   * break vault operations, so the whole body is wrapped in try/catch —
+   * nothing here logs file contents.
+   */
+  onVaultFileCreated(file) {
+    try {
+      if (!(file instanceof import_obsidian10.TFile)) return;
+      const candidate = {
+        path: file.path,
+        extension: file.extension
+      };
+      const offer = shouldOfferTranscription({
+        candidate,
+        watchFolderPath: this.settings.watchFolderPath,
+        isAudio: isAudioFile,
+        transcriptExists: () => this.watchFolderTranscriptExists(file)
+      });
+      if (!offer) return;
+      if (this.settings.watchFolderMode === "auto") {
+        this.startWatchFolderTranscription(file);
+        return;
+      }
+      const notice = new import_obsidian10.Notice(
+        createFragment((frag) => {
+          frag.appendText(`New recording: ${file.name} `);
+          const btn = frag.createEl("button", { text: "Transcribe" });
+          btn.addEventListener("click", () => {
+            notice.hide();
+            this.startWatchFolderTranscription(file);
+          });
+        }),
+        0
+      );
+    } catch (e) {
+      vlog.error("Voxtral: watch-folder handler failed", e);
+    }
+  }
+  /**
+   * Start transcription for a watch-folder file into a new linked note —
+   * there is no output-target note yet, so this mirrors the "newNote" case
+   * in `transcribeFileFromMenu` (`resolveEffectiveVocabulary`/
+   * `resolveEffectiveStyleForFile` called with `null`).
+   */
+  startWatchFolderTranscription(file) {
+    this.fileTranscriptVocabularyTerms = this.resolveEffectiveVocabulary(null);
+    this.fileTranscriptStyleInstruction = this.resolveEffectiveStyleForFile(null);
+    void this.fileTranscriptionService.transcribe(file, null);
+  }
+  /**
+   * Whether a "(transcript)" note already exists for `file` — the
+   * watch-folder dedupe rule (a sync across devices can re-create the same
+   * audio file). Parent-folder logic mirrors
+   * `FileTranscriptionService.createLinkedNote`.
+   */
+  watchFolderTranscriptExists(file) {
+    const folder = file.parent && file.parent.path !== "/" ? file.parent.path : "";
+    const dir = folder ? `${folder}/` : "";
+    const transcriptPath = `${dir}${file.basename} (transcript).md`;
+    return this.app.vault.getAbstractFileByPath(transcriptPath) !== null;
   }
   /**
    * Transcribe the audio file embedded/linked at (or near) the cursor and
