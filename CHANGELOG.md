@@ -4,7 +4,22 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.12.1] - 2026-08-19
+
+- **Realtime dictation no longer drops out mid-session.** Two causes fixed:
+  a rare handshake race could abort a session with a server error about the
+  audio format changing mid-transcription (mostly during continuous speech,
+  such as transcribing a conversation), and a silently dead network
+  connection (laptop sleep, network switch) would stop the stream forever
+  without any message. A watchdog now detects a dead connection within a
+  minute and reconnects automatically — audio spoken in the reconnect window
+  is buffered and replayed, so nothing is lost.
+- **Realtime sessions are now diagnosable after the fact.** With debug
+  logging on, the session lifecycle (connects, reconnects, streaming errors,
+  watchdog interventions, stop reason) is written to `voxtral-crash-log.md`
+  — the same crash-proof log that file transcription already uses.
+
+## [1.12.0] - 2026-08-17
 
 - **Watch folder.** Point the plugin at a vault folder — for example the
   auto-sync folder your phone drops recordings into — and every new audio

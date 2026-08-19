@@ -1943,6 +1943,13 @@ var RealtimeTranscriber = class {
   constructor(settings, callbacks, delayOverrideMs, opts) {
     this.ws = null;
     this.intentionallyClosed = false;
+    // The server only accepts audio AFTER session.update declared the
+    // audio_format; an input_audio.append that lands in the open→
+    // session.created window precedes that declaration and the server
+    // rejects it as a mid-transcription format change. isConnected
+    // therefore reports handshake completion, not bare socket state,
+    // so callers keep buffering audio until the format is declared.
+    this.sessionReady = false;
     this.delayOverrideMs = null;
     this.settings = settings;
     this.callbacks = callbacks;
@@ -1954,6 +1961,7 @@ var RealtimeTranscriber = class {
     if (resolveRealtimeProtocol(this.settings) === "vllm") return this.connectVllm();
     if (!hasNodeWebSocketAuth() && ((_a = this.opts) == null ? void 0 : _a.tokenManager)) return this.connectCloudSubprotocol();
     this.intentionallyClosed = false;
+    this.sessionReady = false;
     const params = new URLSearchParams({
       model: this.settings.realtimeModel
     });
@@ -1984,6 +1992,7 @@ var RealtimeTranscriber = class {
                 case "session.created":
                   clearTimeout(timeout);
                   this.sendSessionUpdate();
+                  this.sessionReady = true;
                   this.callbacks.onSessionCreated();
                   resolve();
                   break;
@@ -2042,6 +2051,7 @@ var RealtimeTranscriber = class {
               `Voxtral WS: connection closed (intentional=${this.intentionallyClosed})`
             );
             this.ws = null;
+            this.sessionReady = false;
             if (!this.intentionallyClosed) {
               this.callbacks.onDisconnect();
             }
@@ -2061,6 +2071,7 @@ var RealtimeTranscriber = class {
    */
   connectVllm() {
     this.intentionallyClosed = false;
+    this.sessionReady = false;
     const httpBase = resolveBaseUrl(this.settings);
     const wsBase = httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
     const url = `${wsBase}/v1/realtime`;
@@ -2083,6 +2094,7 @@ var RealtimeTranscriber = class {
         opened = true;
         clearTimeout(timeout);
         this.sendSessionUpdate();
+        this.sessionReady = true;
         this.callbacks.onSessionCreated();
         resolve();
       };
@@ -2152,6 +2164,7 @@ var RealtimeTranscriber = class {
           `Voxtral WS (vLLM): connection closed (intentional=${this.intentionallyClosed})`
         );
         this.ws = null;
+        this.sessionReady = false;
         if (!this.intentionallyClosed && !failedBeforeOpen) {
           this.callbacks.onDisconnect();
         }
@@ -2172,6 +2185,7 @@ var RealtimeTranscriber = class {
   async connectCloudSubprotocol() {
     var _a;
     this.intentionallyClosed = false;
+    this.sessionReady = false;
     const tokenManager = (_a = this.opts) == null ? void 0 : _a.tokenManager;
     if (!tokenManager) {
       throw new Error("connectCloudSubprotocol() requires a token manager");
@@ -2212,6 +2226,7 @@ var RealtimeTranscriber = class {
             case "session.created":
               clearTimeout(timeout);
               this.sendSessionUpdate();
+              this.sessionReady = true;
               this.callbacks.onSessionCreated();
               resolve();
               tokenManager.prefetch();
@@ -2271,6 +2286,7 @@ var RealtimeTranscriber = class {
           `Voxtral WS (token): connection closed (intentional=${this.intentionallyClosed})`
         );
         this.ws = null;
+        this.sessionReady = false;
         if (!this.intentionallyClosed && !failedBeforeOpen) {
           this.callbacks.onDisconnect();
         }
@@ -2294,7 +2310,7 @@ var RealtimeTranscriber = class {
     this.ws.send(JSON.stringify(msg));
   }
   sendAudio(pcmBytes) {
-    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
+    if (!this.ws || this.ws.readyState !== WS_OPEN || !this.sessionReady) return;
     const base64 = arrayBufferToBase64(pcmBytes);
     const msg = {
       type: "input_audio.append",
@@ -2312,6 +2328,7 @@ var RealtimeTranscriber = class {
   }
   close() {
     this.intentionallyClosed = true;
+    this.sessionReady = false;
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -2319,7 +2336,7 @@ var RealtimeTranscriber = class {
   }
   get isConnected() {
     var _a;
-    return ((_a = this.ws) == null ? void 0 : _a.readyState) === WS_OPEN;
+    return ((_a = this.ws) == null ? void 0 : _a.readyState) === WS_OPEN && this.sessionReady;
   }
 };
 function arrayBufferToBase64(buffer) {
@@ -6073,6 +6090,14 @@ var _FileTranscriptionService = class _FileTranscriptionService {
     vlog.debug(`Voxtral: ${msg}`);
     await this.crashLog(msg);
   }
+  /**
+   * Crash-proof lifecycle line for the realtime path (VX_E22_S11): same
+   * on-disk log and debug gating as the batch steps, so a realtime dropout
+   * is diagnosable after the fact without console babysitting.
+   */
+  async logRealtime(msg) {
+    await this.logStep(msg);
+  }
   // ── File transcription (batch) ──
   /**
    * Read a vault audio file, run the pre-flight check, transcribe it (batch),
@@ -7113,6 +7138,15 @@ var _RealtimeSession = class _RealtimeSession {
     // lets cumulative deltas finish (e.g. "nieuw todo" → "nieuw todo item")
     // before we match and execute the command.
     this.commandFlushTimer = null;
+    // Watchdog against half-open connections (VX_E22_S11): a dead network
+    // path (sleep/wake, route change, proxy drop) never fires onclose, so
+    // the reconnect machinery never runs and the session goes silent
+    // forever. If no server event (created/delta/done) arrives for this
+    // long while recording, we force-close and reconnect. During genuine
+    // user silence a forced reconnect is harmless — it is the same path the
+    // cloud's own close-after-every-utterance takes, and audio in the
+    // handshake window is buffered and replayed.
+    this.watchdogTimer = null;
     // Audio captured while the WebSocket is (re)connecting is buffered here
     // and flushed once the new session is ready. The Mistral realtime API
     // closes the connection after each utterance (silence), so without this
@@ -7151,6 +7185,7 @@ var _RealtimeSession = class _RealtimeSession {
   }
   /** Connect the WebSocket and start receiving transcription. */
   async start(editor) {
+    var _a, _b;
     this.pendingText = "";
     this.prevRaw = "";
     this.turnDelta = 0;
@@ -7163,6 +7198,7 @@ var _RealtimeSession = class _RealtimeSession {
     this.tableInserter.reset();
     this.lastInsertEnd = null;
     this.tokenManager = this.httpRequest ? new RealtimeTokenManager(this.settings, this.httpRequest) : null;
+    (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: session starting");
     await this.connectWebSocket(editor);
   }
   /** Insert committed dictation text (table-aware; see TableInsertTracker). */
@@ -7230,8 +7266,10 @@ var _RealtimeSession = class _RealtimeSession {
   }
   /** Signal end of audio and finalize any pending text. */
   async stop(editor) {
-    var _a, _b;
-    (_a = this.transcriber) == null ? void 0 : _a.endAudio();
+    var _a, _b, _c, _d;
+    this.clearWatchdog();
+    (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: session stopping");
+    (_c = this.transcriber) == null ? void 0 : _c.endAudio();
     this.clearCommandFlushTimer();
     const doneSignal = new Promise((resolve) => {
       this.pendingDoneResolve = resolve;
@@ -7243,7 +7281,7 @@ var _RealtimeSession = class _RealtimeSession {
       this.commit(editor, this.pendingText.trim());
       this.pendingText = "";
     }
-    (_b = this.transcriber) == null ? void 0 : _b.close();
+    (_d = this.transcriber) == null ? void 0 : _d.close();
     this.transcriber = null;
     this.audioBuffer = [];
     this.audioBufferBytes = 0;
@@ -7261,16 +7299,23 @@ var _RealtimeSession = class _RealtimeSession {
       this.settings,
       {
         onSessionCreated: () => {
+          var _a, _b;
           vlog.debug("Voxtral: Realtime session created");
+          (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: session created");
+          this.armWatchdog();
         },
         onDelta: (text) => {
+          this.armWatchdog();
           this.handleDelta(editor, text);
         },
         onDone: (text) => {
+          this.armWatchdog();
           this.handleDone(editor, text);
         },
         onError: (message) => {
+          var _a, _b;
           vlog.error("Voxtral: Realtime error:", message);
+          (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, `realtime: streaming error: ${message}`);
           this.callbacks.notify(`Streaming error: ${message}`);
         },
         onDisconnect: () => {
@@ -7294,13 +7339,17 @@ var _RealtimeSession = class _RealtimeSession {
    * Only shows a warning if reconnection fails repeatedly.
    */
   async handleDisconnect() {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    this.clearWatchdog();
     if (!this.callbacks.isRecording()) return;
     const editor = this.callbacks.getEditor();
     if (!editor) {
+      (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: no editor on reconnect \u2014 recording stopped");
       this.callbacks.stopRecording();
       return;
     }
     vlog.debug("Voxtral: Session ended, reconnecting silently...");
+    (_d = (_c = this.callbacks).logLifecycle) == null ? void 0 : _d.call(_c, "realtime: connection ended \u2014 reconnecting");
     this.prevRaw = "";
     this.turnDelta = 0;
     this.turnProcessed = 0;
@@ -7315,7 +7364,12 @@ var _RealtimeSession = class _RealtimeSession {
         `Voxtral: Reconnect failed (${this.consecutiveFailures}/${this.maxConsecutiveFailures})`,
         e
       );
+      (_f = (_e = this.callbacks).logLifecycle) == null ? void 0 : _f.call(
+        _e,
+        `realtime: reconnect failed (${this.consecutiveFailures}/${this.maxConsecutiveFailures}): ${String(e)}`
+      );
       if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
+        (_h = (_g = this.callbacks).logLifecycle) == null ? void 0 : _h.call(_g, "realtime: cannot reconnect \u2014 recording stopped");
         this.callbacks.notify(
           "Cannot connect to the API. Recording stopped.",
           6e3
@@ -7334,6 +7388,34 @@ var _RealtimeSession = class _RealtimeSession {
         void this.handleDisconnect();
       }
     }
+  }
+  // ── Watchdog (VX_E22_S11) ──
+  /** (Re)start the countdown; called on every server event. */
+  armWatchdog() {
+    this.clearWatchdog();
+    this.watchdogTimer = setTimeout(
+      () => this.handleWatchdogTimeout(),
+      _RealtimeSession.WATCHDOG_TIMEOUT_MS
+    );
+  }
+  clearWatchdog() {
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  }
+  handleWatchdogTimeout() {
+    var _a, _b, _c;
+    this.watchdogTimer = null;
+    if (!this.callbacks.isRecording()) return;
+    const secs = _RealtimeSession.WATCHDOG_TIMEOUT_MS / 1e3;
+    vlog.warn(`Voxtral: no server events for ${secs}s \u2014 forcing reconnect (watchdog)`);
+    (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(
+      _a,
+      `realtime: watchdog \u2014 no server events for ${secs}s, forcing reconnect`
+    );
+    (_c = this.transcriber) == null ? void 0 : _c.close();
+    void this.handleDisconnect();
   }
   // ── Delta / Done text processing ──
   handleDelta(editor, text) {
@@ -7468,6 +7550,7 @@ var _RealtimeSession = class _RealtimeSession {
   }
 };
 _RealtimeSession.COMMAND_FLUSH_DEBOUNCE_MS = 400;
+_RealtimeSession.WATCHDOG_TIMEOUT_MS = 6e4;
 // Pending-text length above which a partial flush may split at a plain
 // word boundary (a space); below it, a partial flush only fires on a
 // comma, a stronger natural commit point. Replaces the old unconditional
@@ -8340,7 +8423,10 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
         return this.currentEditor || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) || null;
       },
       notify: (msg, dur) => new import_obsidian10.Notice(msg, dur),
-      onCommandExecuted: (commandId) => this.handleCommandExecuted(commandId)
+      onCommandExecuted: (commandId) => this.handleCommandExecuted(commandId),
+      logLifecycle: (msg) => {
+        void this.fileTranscriptionService.logRealtime(msg);
+      }
     };
   }
   async onload() {
