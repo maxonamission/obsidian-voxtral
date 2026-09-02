@@ -1,9 +1,9 @@
 {
 	"id": "voxtral-transcribe",
 	"name": "Voxtral Transcribe",
-	"version": "1.12.2",
+	"version": "1.13.0",
 	"minAppVersion": "1.11.4",
-	"description": "Talk, type and structure in one flow: high-quality dictation with auto-correction, on desktop and mobile. Voice commands for headings, lists and to-dos in 13 languages. File transcription included.",
+	"description": "Your notes, done when you stop talking. Dictate with structure by voice (headings, lists, to-dos), grab the keyboard mid-sentence, transcribe recordings. Mistral Voxtral, 13 languages.",
 	"author": "Max Kloosterman",
 	"authorUrl": "https://github.com/maxonamission",
 	"fundingUrl": "https://buymeacoffee.com/maxonamission",

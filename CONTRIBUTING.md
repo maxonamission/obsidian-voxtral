@@ -1,5 +1,9 @@
 # Contributing
 
+> This file is synced to the distribution repository `obsidian-voxtral`; the
+> paragraph below describes that repository. Its source lives in
+> `voxtral-transcribe/obsidian-plugin/`.
+
 This repository is **distribution-only**. It contains the pre-built
 plugin artifacts (`main.js`, `manifest.json`, `styles.css`,
 `versions.json`) that Obsidian consumes when installing the plugin
@@ -28,8 +32,9 @@ In the source repo:
 
 ```bash
 git clone https://github.com/maxonamission/voxtral-transcribe.git
-cd voxtral-transcribe/shared && npm ci
-cd ../obsidian-plugin && npm ci
+cd voxtral-transcribe
+npm ci                     # from the repository root (npm workspaces)
+cd obsidian-plugin
 npm run build
 ```
 
@@ -43,7 +48,7 @@ From `obsidian-plugin/`:
 
 ```bash
 npm test                              # vitest
-npm run lint                          # eslint with warning budget
+npm run lint                          # eslint (the warning budget is enforced in CI, see .github/workflows/plugin-ci.yml)
 npx tsc -noEmit -skipLibCheck
 ```
 

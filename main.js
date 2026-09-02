@@ -25,6 +25,11 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian10 = require("obsidian");
 
 // ../shared/src/types.ts
+var NO_VOCABULARY_TERMS = [];
+Object.freeze(NO_VOCABULARY_TERMS);
+var EMPTY_REQUEST_CONTEXT = Object.freeze({
+  vocabularyTerms: NO_VOCABULARY_TERMS
+});
 var DEFAULT_SETTINGS = {
   settingsVersion: 10,
   apiKey: "",
@@ -75,75 +80,6 @@ var DEFAULT_SETTINGS = {
   watchFolderPath: "",
   watchFolderMode: "ask"
 };
-
-// ../shared/src/similarity.ts
-function levenshtein(a, b) {
-  const m = a.length;
-  const n = b.length;
-  const dp = Array.from(
-    { length: m + 1 },
-    () => Array(n + 1).fill(0)
-  );
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
-    }
-  }
-  return dp[m][n];
-}
-function normalizeCommand(text) {
-  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-/g, " ").replace(/[.,!?;:'"()[\]{}]/g, "").toLowerCase().trim();
-}
-
-// ../shared/src/text-context.ts
-function detectContext(lineBefore) {
-  if (!lineBefore) return "new-line";
-  const trimmed = lineBefore.trimEnd();
-  if (!trimmed) return "new-line";
-  if (/^>+\s/.test(lineBefore)) {
-    const afterMarker = lineBefore.replace(/^>+\s(?:\[!.*?\]\s*)?/, "");
-    if (!afterMarker.trim()) return "comment";
-  }
-  if (/^(?:[-*]\s|[-*]\s\[.\]\s|#{1,6}\s|\d+[.)]\s)/.test(lineBefore)) {
-    const afterMarker = lineBefore.replace(
-      /^(?:[-*]\s(?:\[.\]\s)?|#{1,6}\s|\d+[.)]\s)/,
-      ""
-    );
-    if (!afterMarker.trim()) return "list-or-heading";
-  }
-  const lastChar = trimmed[trimmed.length - 1];
-  if (lastChar === "." || lastChar === "!" || lastChar === "?") {
-    return "sentence-start";
-  }
-  return "mid-sentence";
-}
-function shouldStripTrailingPunctuation(context) {
-  return context === "mid-sentence" || context === "list-or-heading";
-}
-function shouldLowercase(context) {
-  return context === "mid-sentence";
-}
-function lowercaseFirstLetter(text) {
-  const match = text.match(
-    /^(\s*)([A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝŸ])/
-  );
-  if (match) {
-    return match[1] + match[2].toLowerCase() + text.slice(match[1].length + 1);
-  }
-  return text;
-}
-function stripTrailingPunctuation(text) {
-  return text.replace(/[.!?]+\s*$/, "");
-}
-function isTableLine(line) {
-  const trimmed = line.trim();
-  if (!trimmed) return false;
-  if (trimmed.startsWith("|")) return true;
-  if (/^:?-{2,}:?(\s*\|\s*:?-{2,}:?)+$/.test(trimmed)) return true;
-  return false;
-}
 
 // ../shared/src/correction.ts
 var DEFAULT_CORRECT_PROMPT = "You are a precise text corrector for dictated text. The input language may vary (commonly Dutch, but follow whatever language the text is in).\n\nCORRECT ONLY:\n- Capitalization (sentence starts, proper nouns)\n- Clearly misspelled or garbled words (from speech recognition)\n- Missing or wrong punctuation\n\nDO NOT CHANGE:\n- Sentence structure or word order\n- Style or tone\n- Markdown formatting (# headings, - lists, - [ ] to-do items)\n- Special prefix markers at the start of lines (e.g. >>, >, > [!note], etc.)\n- Text inserted by custom commands \u2014 these are intentional formatting elements\n\nINLINE CORRECTION INSTRUCTIONS:\nThe text was dictated via speech recognition. The speaker sometimes gives inline instructions meant for you. Recognize these patterns:\n- Explicit markers: 'voor de correctie', 'voor de correctie achteraf', 'for the correction', 'correction note'\n- Spelled-out words: 'V-O-X-T-R-A-L' or 'with an x' \u2192 merge into the intended word\n- Self-corrections: 'no not X but Y', 'nee niet X maar Y', 'I mean Y', 'ik bedoel Y'\n- Meta-commentary: 'that's a Dutch word', 'with a capital letter', 'met een hoofdletter'\n\nWhen you encounter such instructions:\n1. Apply the instruction to the REST of the text\n2. Remove the instruction/meta-commentary itself from the output\n3. Keep all content text \u2014 NEVER remove normal sentences\n\nCRITICAL RULES:\n- Your output must be SHORTER than or equal to the input (after removing meta-instructions)\n- NEVER add your own text, commentary, explanations, or notes\n- NEVER add parenthesized text like '(text missing)' or '(no corrections needed)'\n- NEVER continue, elaborate, or expand on the content\n- NEVER invent or hallucinate text that wasn't in the input\n- If the input is short (even one word), just return it corrected\n- Your output must contain ONLY the corrected version of the input text, NOTHING else";
@@ -234,6 +170,233 @@ function isLikelyHallucination(text, audioDurationSec) {
     }
   }
   return false;
+}
+
+// src/default-commands.ts
+function tableInsert(column) {
+  return `
+
+| ${column} 1 | ${column} 2 | ${column} 3 |
+| --- | --- | --- |
+| | | |
+`;
+}
+function getDefaultBuiltInCommands() {
+  return [
+    {
+      id: "builtin-table",
+      builtIn: true,
+      labels: {
+        nl: "Tabel",
+        en: "Table",
+        fr: "Tableau",
+        de: "Tabelle",
+        es: "Tabla",
+        pt: "Tabela",
+        it: "Tabella",
+        ru: "\u0422\u0430\u0431\u043B\u0438\u0446\u0430",
+        zh: "\u8868\u683C",
+        ja: "\u30C6\u30FC\u30D6\u30EB",
+        ko: "\uD14C\uC774\uBE14",
+        hi: "\u091F\u0947\u092C\u0932",
+        ar: "\u062C\u062F\u0648\u0644"
+      },
+      type: "insert",
+      // Fallback for languages without an insertTextByLang entry.
+      insertText: tableInsert("Column"),
+      insertTextByLang: {
+        nl: tableInsert("Kolom"),
+        en: tableInsert("Column"),
+        fr: tableInsert("Colonne"),
+        de: tableInsert("Spalte"),
+        es: tableInsert("Columna"),
+        pt: tableInsert("Coluna"),
+        it: tableInsert("Colonna"),
+        ru: tableInsert("\u0421\u0442\u043E\u043B\u0431\u0435\u0446"),
+        zh: tableInsert("\u5217"),
+        ja: tableInsert("\u5217"),
+        ko: tableInsert("\uC5F4"),
+        hi: tableInsert("\u0915\u0949\u0932\u092E"),
+        ar: tableInsert("\u0639\u0645\u0648\u062F")
+      },
+      triggers: {
+        nl: ["tabel", "nieuwe tabel"],
+        en: ["table", "new table"],
+        fr: ["tableau", "nouveau tableau"],
+        de: ["tabelle", "neue tabelle"],
+        es: ["tabla", "nueva tabla"],
+        pt: ["tabela", "nova tabela"],
+        it: ["tabella", "nuova tabella"],
+        ru: ["\u0442\u0430\u0431\u043B\u0438\u0446\u0430", "\u043D\u043E\u0432\u0430\u044F \u0442\u0430\u0431\u043B\u0438\u0446\u0430"],
+        zh: ["\u8868\u683C", "\u65B0\u8868\u683C"],
+        ja: ["\u30C6\u30FC\u30D6\u30EB", "\u65B0\u3057\u3044\u30C6\u30FC\u30D6\u30EB"],
+        ko: ["\uD14C\uC774\uBE14", "\uC0C8 \uD14C\uC774\uBE14"],
+        hi: ["\u091F\u0947\u092C\u0932", "\u0928\u0908 \u091F\u0947\u092C\u0932"],
+        ar: ["\u062C\u062F\u0648\u0644", "\u062C\u062F\u0648\u0644 \u062C\u062F\u064A\u062F"]
+      }
+    },
+    {
+      id: "builtin-callout",
+      builtIn: true,
+      labels: {
+        nl: "Callout (opmerking)",
+        en: "Callout (note)",
+        fr: "Callout (note)",
+        de: "Callout (Hinweis)",
+        es: "Callout (nota)",
+        pt: "Callout (nota)",
+        it: "Callout (nota)",
+        ru: "\u0417\u0430\u043C\u0435\u0442\u043A\u0430",
+        zh: "\u6807\u6CE8\uFF08\u5907\u6CE8\uFF09",
+        ja: "\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8\uFF08\u6CE8\u91C8\uFF09",
+        ko: "\uCF5C\uC544\uC6C3 (\uBA54\uBAA8)",
+        hi: "\u0915\u0949\u0932\u0906\u0909\u091F (\u0928\u094B\u091F)",
+        ar: "\u062A\u0646\u0628\u064A\u0647 (\u0645\u0644\u0627\u062D\u0638\u0629)"
+      },
+      type: "insert",
+      insertText: "\n\n> [!note]\n> ",
+      triggers: {
+        nl: ["callout", "opmerking", "notitie blok"],
+        en: ["callout", "note block"],
+        fr: ["callout", "bloc de note"],
+        de: ["callout", "hinweisblock"],
+        es: ["callout", "bloque de nota"],
+        pt: ["callout", "bloco de nota"],
+        it: ["callout", "blocco nota"],
+        ru: ["\u0437\u0430\u043C\u0435\u0442\u043A\u0430", "\u0431\u043B\u043E\u043A \u0437\u0430\u043C\u0435\u0442\u043A\u0438"],
+        zh: ["\u6807\u6CE8", "\u6CE8\u91CA\u5757"],
+        ja: ["\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8", "\u6CE8\u91C8"],
+        ko: ["\uCF5C\uC544\uC6C3", "\uBA54\uBAA8 \uBE14\uB85D"],
+        hi: ["\u0915\u0949\u0932\u0906\u0909\u091F", "\u0928\u094B\u091F \u092C\u094D\u0932\u0949\u0915"],
+        ar: ["\u062A\u0646\u0628\u064A\u0647", "\u0643\u062A\u0644\u0629 \u0645\u0644\u0627\u062D\u0638\u0629"]
+      }
+    },
+    {
+      id: "builtin-warning",
+      builtIn: true,
+      labels: {
+        nl: "Callout (waarschuwing)",
+        en: "Callout (warning)",
+        fr: "Callout (avertissement)",
+        de: "Callout (Warnung)",
+        es: "Callout (advertencia)",
+        pt: "Callout (aviso)",
+        it: "Callout (avviso)",
+        ru: "\u041F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435",
+        zh: "\u6807\u6CE8\uFF08\u8B66\u544A\uFF09",
+        ja: "\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8\uFF08\u8B66\u544A\uFF09",
+        ko: "\uCF5C\uC544\uC6C3 (\uACBD\uACE0)",
+        hi: "\u0915\u0949\u0932\u0906\u0909\u091F (\u091A\u0947\u0924\u093E\u0935\u0928\u0940)",
+        ar: "\u062A\u0646\u0628\u064A\u0647 (\u062A\u062D\u0630\u064A\u0631)"
+      },
+      type: "insert",
+      insertText: "\n\n> [!warning]\n> ",
+      triggers: {
+        nl: ["waarschuwing", "waarschuwing blok"],
+        en: ["warning", "warning block"],
+        fr: ["avertissement"],
+        de: ["warnung"],
+        es: ["advertencia"],
+        pt: ["aviso"],
+        it: ["avviso"],
+        ru: ["\u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435"],
+        zh: ["\u8B66\u544A"],
+        ja: ["\u8B66\u544A"],
+        ko: ["\uACBD\uACE0"],
+        hi: ["\u091A\u0947\u0924\u093E\u0935\u0928\u0940"],
+        ar: ["\u062A\u062D\u0630\u064A\u0631"]
+      }
+    },
+    {
+      id: "builtin-tip",
+      builtIn: true,
+      labels: {
+        nl: "Callout (tip)",
+        en: "Callout (tip)",
+        fr: "Callout (astuce)",
+        de: "Callout (Tipp)",
+        es: "Callout (consejo)",
+        pt: "Callout (dica)",
+        it: "Callout (suggerimento)",
+        ru: "\u0421\u043E\u0432\u0435\u0442",
+        zh: "\u6807\u6CE8\uFF08\u63D0\u793A\uFF09",
+        ja: "\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8\uFF08\u30D2\u30F3\u30C8\uFF09",
+        ko: "\uCF5C\uC544\uC6C3 (\uD301)",
+        hi: "\u0915\u0949\u0932\u0906\u0909\u091F (\u0938\u0941\u091D\u093E\u0935)",
+        ar: "\u062A\u0646\u0628\u064A\u0647 (\u0646\u0635\u064A\u062D\u0629)"
+      },
+      type: "insert",
+      insertText: "\n\n> [!tip]\n> ",
+      triggers: {
+        nl: ["tip", "tip blok"],
+        en: ["tip", "tip block"],
+        fr: ["astuce"],
+        de: ["tipp"],
+        es: ["consejo"],
+        pt: ["dica"],
+        it: ["suggerimento"],
+        ru: ["\u0441\u043E\u0432\u0435\u0442"],
+        zh: ["\u63D0\u793A"],
+        ja: ["\u30D2\u30F3\u30C8"],
+        ko: ["\uD301"],
+        hi: ["\u0938\u0941\u091D\u093E\u0935"],
+        ar: ["\u0646\u0635\u064A\u062D\u0629"]
+      }
+    }
+  ];
+}
+
+// src/settings-migration.ts
+var CURRENT_VERSION = 10;
+var migrations = {
+  // NB: the localized insert text for built-ins (obsidian-voxtral#14) needs
+  // no migration — loadSettings() refreshes every stored built-in's content
+  // fields (labels, triggers, insertText, insertTextByLang, slot fields)
+  // from getDefaultBuiltInCommands() on each load.
+};
+function migrateSettings(data) {
+  if (!data) {
+    return { ...DEFAULT_SETTINGS, settingsVersion: CURRENT_VERSION };
+  }
+  let version = typeof data.settingsVersion === "number" ? data.settingsVersion : 0;
+  while (migrations[version]) {
+    data = migrations[version](data);
+    version++;
+  }
+  data.settingsVersion = CURRENT_VERSION;
+  return { ...DEFAULT_SETTINGS, ...data };
+}
+
+// src/secrets.ts
+var MISTRAL_SECRET_ID = "voxtral-transcribe-mistral-api";
+function allocateSecretId(base, store) {
+  if (store.getSecret(base) === null) return base;
+  for (let n = 2; ; n++) {
+    const candidate = `${base}-${n}`;
+    if (store.getSecret(candidate) === null) return candidate;
+  }
+}
+function migrateApiKeyToSecret(settings, store) {
+  var _a;
+  const plaintext = ((_a = settings.apiKey) == null ? void 0 : _a.trim()) ? settings.apiKey : "";
+  if (!plaintext) return { changed: false };
+  const id = settings.apiKeySecretId || allocateSecretId(MISTRAL_SECRET_ID, store);
+  try {
+    store.setSecret(id, plaintext);
+    if (store.getSecret(id) !== plaintext) return { changed: false };
+  } catch (e) {
+    return { changed: false };
+  }
+  settings.apiKeySecretId = id;
+  settings.apiKey = "";
+  return { changed: true };
+}
+function readApiKey(settings, store) {
+  var _a;
+  return settings.apiKeySecretId ? (_a = store.getSecret(settings.apiKeySecretId)) != null ? _a : "" : "";
+}
+function stripApiKeyValue(settings) {
+  return { ...settings, apiKey: "" };
 }
 
 // ../shared/src/languages/nl.json
@@ -1208,1568 +1371,6 @@ function getMishearings(lang) {
   return (_a = MISHEARINGS[lang]) != null ? _a : [];
 }
 
-// ../shared/src/phonetics.ts
-var ALL_LANGS2 = {
-  nl: nl_default,
-  en: en_default,
-  fr: fr_default,
-  de: de_default,
-  es: es_default,
-  pt: pt_default,
-  it: it_default,
-  ru: ru_default,
-  zh: zh_default,
-  hi: hi_default,
-  ar: ar_default,
-  ja: ja_default,
-  ko: ko_default
-};
-function compileRules(data) {
-  return data.map(({ pattern, flags, replacement }) => [
-    new RegExp(pattern, flags),
-    replacement
-  ]);
-}
-var PHONETIC_RULES = Object.fromEntries(
-  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS2[code].phonetics.length > 0).map((code) => [code, compileRules(ALL_LANGS2[code].phonetics)])
-);
-var ARTICLES = Object.fromEntries(
-  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS2[code].articles])
-);
-var TRAILING_FILLERS = Object.fromEntries(
-  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS2[code].fillers.length > 0).map((code) => [code, ALL_LANGS2[code].fillers])
-);
-function phoneticNormalize(text, lang) {
-  const rules = PHONETIC_RULES[lang];
-  if (!rules) return text;
-  let result = text;
-  for (const [pattern, replacement] of rules) {
-    result = result.replace(pattern, replacement);
-  }
-  return result;
-}
-function stripArticles(text, lang) {
-  const articles = ARTICLES[lang];
-  if (!articles || articles.length === 0) return text;
-  const words = text.split(/\s+/);
-  let stripped = 0;
-  while (stripped < Math.min(2, words.length - 1)) {
-    if (articles.includes(words[stripped])) {
-      stripped++;
-    } else {
-      break;
-    }
-  }
-  return stripped > 0 ? words.slice(stripped).join(" ") : text;
-}
-function stripTrailingFillers(text, lang) {
-  const fillers = TRAILING_FILLERS[lang];
-  if (!fillers || fillers.length === 0) return text;
-  let result = text;
-  for (const filler of fillers.sort((a, b) => b.length - a.length)) {
-    if (result.endsWith(" " + filler)) {
-      result = result.slice(0, -(filler.length + 1)).trimEnd();
-    }
-  }
-  return result;
-}
-function trySplitCompound(text, knownWords) {
-  if (text.includes(" ") || text.length < 4) return text;
-  for (const phrase of knownWords) {
-    const words = phrase.split(/\s+/);
-    if (words.length < 2) continue;
-    const joined = words.join("");
-    if (text === joined) {
-      return phrase;
-    }
-  }
-  return text;
-}
-
-// ../shared/src/plugin-logger.ts
-var LOG_BUFFER_SIZE = 500;
-var logBuffer = [];
-var debugEnabled = false;
-function setDebugLogging(enabled) {
-  debugEnabled = enabled;
-}
-function pushLog(level, args) {
-  const ts = (/* @__PURE__ */ new Date()).toISOString();
-  const msg = args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
-  logBuffer.push(`[${ts}] [${level}] ${msg}`);
-  if (logBuffer.length > LOG_BUFFER_SIZE) {
-    logBuffer.shift();
-  }
-}
-var vlog = {
-  debug: (...args) => {
-    if (!debugEnabled) return;
-    pushLog("DEBUG", args);
-    console.debug(...args);
-  },
-  warn: (...args) => {
-    pushLog("WARN", args);
-    console.warn(...args);
-  },
-  error: (...args) => {
-    pushLog("ERROR", args);
-    console.error(...args);
-  }
-};
-function redactForExport(line) {
-  let redacted = line.replace(/\b[A-Za-z0-9]{32,}\b/g, "[REDACTED]");
-  redacted = redacted.replace(/"[^"]{20,}"/g, '"[text redacted]"');
-  redacted = redacted.replace(
-    /(full text:|Hallucination detected —|Discarding hallucinated) .+/gi,
-    "$1 [redacted]"
-  );
-  return redacted;
-}
-function getLogText() {
-  return logBuffer.map(redactForExport).join("\n");
-}
-function getLogCount() {
-  return logBuffer.length;
-}
-
-// ../shared/src/authenticated-websocket.ts
-var WS_OPEN = 1;
-function loadNodeModule(name) {
-  const r = globalThis["require"];
-  if (!r) throw new Error(`Node.js require() not available (needed for ${name})`);
-  return r(name);
-}
-function hasNodeWebSocketAuth() {
-  return typeof globalThis["require"] === "function";
-}
-function createAuthenticatedWebSocket(url, headers, callbacks) {
-  const https = loadNodeModule("https");
-  const crypto = loadNodeModule("crypto");
-  const parsed = new URL(url);
-  const wsKey = crypto.randomBytes(16).toString("base64");
-  const conn = {
-    readyState: 0,
-    send: () => {
-    },
-    close: () => {
-    }
-  };
-  const req = https.request(
-    {
-      hostname: parsed.hostname,
-      port: parsed.port || 443,
-      path: parsed.pathname + parsed.search,
-      method: "GET",
-      headers: {
-        ...headers,
-        Connection: "Upgrade",
-        Upgrade: "websocket",
-        "Sec-WebSocket-Version": "13",
-        "Sec-WebSocket-Key": wsKey
-      }
-    },
-    (res) => {
-      callbacks.onError(
-        new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
-      );
-      conn.readyState = 3;
-      req.destroy();
-    }
-  );
-  req.on("upgrade", (_res, socket) => {
-    conn.readyState = WS_OPEN;
-    conn.send = (data) => {
-      const payload = Buffer.from(data, "utf-8");
-      const mask = crypto.randomBytes(4);
-      let header;
-      if (payload.length < 126) {
-        header = Buffer.alloc(6);
-        header[0] = 129;
-        header[1] = 128 | payload.length;
-        mask.copy(header, 2);
-      } else if (payload.length < 65536) {
-        header = Buffer.alloc(8);
-        header[0] = 129;
-        header[1] = 128 | 126;
-        header.writeUInt16BE(payload.length, 2);
-        mask.copy(header, 4);
-      } else {
-        header = Buffer.alloc(14);
-        header[0] = 129;
-        header[1] = 128 | 127;
-        header.writeBigUInt64BE(BigInt(payload.length), 2);
-        mask.copy(header, 10);
-      }
-      const masked = Buffer.alloc(payload.length);
-      for (let i = 0; i < payload.length; i++) {
-        masked[i] = payload[i] ^ mask[i % 4];
-      }
-      socket.write(Buffer.concat([header, masked]));
-    };
-    conn.close = () => {
-      conn.readyState = 3;
-      const closeFrame = Buffer.alloc(6);
-      closeFrame[0] = 136;
-      closeFrame[1] = 128;
-      const closeMask = crypto.randomBytes(4);
-      closeMask.copy(closeFrame, 2);
-      try {
-        socket.write(closeFrame);
-      } catch (e) {
-      }
-      socket.end();
-    };
-    const pingInterval = setInterval(() => {
-      if (conn.readyState !== WS_OPEN) {
-        clearInterval(pingInterval);
-        return;
-      }
-      try {
-        const pingFrame = Buffer.alloc(6);
-        pingFrame[0] = 137;
-        pingFrame[1] = 128;
-        const pingMask = crypto.randomBytes(4);
-        pingMask.copy(pingFrame, 2);
-        socket.write(pingFrame);
-      } catch (e) {
-      }
-    }, 15e3);
-    callbacks.onOpen();
-    let buffer = Buffer.alloc(0);
-    socket.on("data", (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      while (buffer.length >= 2) {
-        const firstByte = buffer[0];
-        const secondByte = buffer[1];
-        const opcode = firstByte & 15;
-        const isMasked = (secondByte & 128) !== 0;
-        let payloadLength = secondByte & 127;
-        let offset = 2;
-        if (payloadLength === 126) {
-          if (buffer.length < 4) return;
-          payloadLength = buffer.readUInt16BE(2);
-          offset = 4;
-        } else if (payloadLength === 127) {
-          if (buffer.length < 10) return;
-          payloadLength = Number(buffer.readBigUInt64BE(2));
-          offset = 10;
-        }
-        if (isMasked) offset += 4;
-        if (buffer.length < offset + payloadLength) return;
-        let payload = buffer.subarray(offset, offset + payloadLength);
-        if (isMasked) {
-          const maskKey = buffer.subarray(offset - 4, offset);
-          payload = Buffer.from(payload);
-          for (let i = 0; i < payload.length; i++) {
-            payload[i] ^= maskKey[i % 4];
-          }
-        }
-        buffer = buffer.subarray(offset + payloadLength);
-        if (opcode === 1) {
-          callbacks.onMessage(payload.toString("utf-8"));
-        } else if (opcode === 8) {
-          conn.readyState = 3;
-          clearInterval(pingInterval);
-          socket.end();
-          callbacks.onClose();
-          return;
-        } else if (opcode === 9) {
-          const pongMask = crypto.randomBytes(4);
-          const pongLen = payload.length;
-          let pongHeader;
-          if (pongLen < 126) {
-            pongHeader = Buffer.alloc(6);
-            pongHeader[0] = 138;
-            pongHeader[1] = 128 | pongLen;
-            pongMask.copy(pongHeader, 2);
-          } else {
-            pongHeader = Buffer.alloc(8);
-            pongHeader[0] = 138;
-            pongHeader[1] = 128 | 126;
-            pongHeader.writeUInt16BE(pongLen, 2);
-            pongMask.copy(pongHeader, 4);
-          }
-          const maskedPong = Buffer.from(payload);
-          for (let i = 0; i < maskedPong.length; i++) {
-            maskedPong[i] ^= pongMask[i % 4];
-          }
-          socket.write(Buffer.concat([pongHeader, maskedPong]));
-        }
-      }
-    });
-    socket.on("close", () => {
-      conn.readyState = 3;
-      clearInterval(pingInterval);
-      callbacks.onClose();
-    });
-    socket.on("error", (err) => {
-      conn.readyState = 3;
-      clearInterval(pingInterval);
-      callbacks.onError(err);
-    });
-  });
-  req.on("error", (err) => {
-    callbacks.onError(err);
-  });
-  req.end();
-  return conn;
-}
-
-// ../shared/src/tts.ts
-var TTS_MODEL = "voxtral-mini-tts-2603";
-var TTS_RESPONSE_FORMAT = "wav";
-var TTS_VOICES = [
-  { id: "en_paul_neutral", label: "Paul \u2014 neutral (US English)" },
-  { id: "gb_jane_neutral", label: "Jane \u2014 neutral (UK English)" }
-];
-
-// ../shared/src/retry.ts
-var realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function retryWithBackoff(fn, options = {}) {
-  var _a, _b, _c, _d;
-  const attempts = Math.max(1, (_a = options.attempts) != null ? _a : 3);
-  const baseDelayMs = (_b = options.baseDelayMs) != null ? _b : 1e3;
-  const sleep = (_c = options.sleep) != null ? _c : realSleep;
-  const shouldRetry = (_d = options.shouldRetry) != null ? _d : (() => true);
-  let lastError;
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    try {
-      return await fn(attempt);
-    } catch (error) {
-      lastError = error;
-      const isLast = attempt === attempts - 1;
-      if (isLast || !shouldRetry(error)) break;
-      await sleep(baseDelayMs * 2 ** attempt);
-    }
-  }
-  throw lastError;
-}
-
-// ../shared/src/mistral-api.ts
-var DEFAULT_BASE_URL = "https://api.mistral.ai";
-function resolveBaseUrl(settings) {
-  var _a;
-  const trimmed = ((_a = settings.apiBaseUrl) != null ? _a : "").trim().replace(/\/+$/, "");
-  return trimmed || DEFAULT_BASE_URL;
-}
-var HTTP_TIMEOUT_UPLOAD_MS = 6e4;
-var HTTP_TIMEOUT_DEFAULT_MS = 3e4;
-var CORRECTION_TIMEOUT_BASE_MS = 6e4;
-var CORRECTION_TIMEOUT_PER_CHAR_MS = 15;
-var CORRECTION_TIMEOUT_MAX_MS = 12e5;
-function correctionTimeoutMs(textLength) {
-  const scaled = CORRECTION_TIMEOUT_BASE_MS + textLength * CORRECTION_TIMEOUT_PER_CHAR_MS;
-  return Math.min(scaled, CORRECTION_TIMEOUT_MAX_MS);
-}
-var HttpStatusError = class extends Error {
-  constructor(message, status) {
-    super(message);
-    this.status = status;
-    this.name = "HttpStatusError";
-  }
-};
-function isRateLimitError(error) {
-  return error instanceof HttpStatusError && error.status === 429;
-}
-function withTimeout(promise, timeoutMs, label) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1e3)}s`));
-    }, timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    clearTimeout(timer);
-    promise.catch(() => {
-    });
-  });
-}
-function sanitizeApiError(status, rawBody) {
-  var _a;
-  try {
-    const parsed = JSON.parse(rawBody);
-    let msg = (parsed == null ? void 0 : parsed.message) || ((_a = parsed == null ? void 0 : parsed.error) == null ? void 0 : _a.message);
-    if (!msg && (parsed == null ? void 0 : parsed.detail)) {
-      const d = parsed.detail;
-      msg = typeof d === "string" ? d : Array.isArray(d) ? d.map((e) => {
-        var _a2;
-        return (_a2 = e == null ? void 0 : e.msg) != null ? _a2 : JSON.stringify(e);
-      }).join("; ") : void 0;
-    }
-    if (typeof msg === "string" && msg.length > 0 && msg.length < 300) {
-      return `HTTP ${status}: ${msg}`;
-    }
-  } catch (e) {
-  }
-  switch (status) {
-    case 401:
-      return "HTTP 401: Invalid or expired API key";
-    case 403:
-      return "HTTP 403: Access denied";
-    case 404:
-      return "HTTP 404: API endpoint not found (check model name)";
-    case 413:
-      return "HTTP 413: Audio file too large";
-    case 429:
-      return "HTTP 429: Rate limit exceeded \u2014 try again later";
-    case 500:
-    case 502:
-    case 503:
-      return `HTTP ${status}: API server error \u2014 try again later`;
-    default:
-      return `HTTP ${status}: Request failed`;
-  }
-}
-async function listModels(apiKey, httpRequest, baseUrl) {
-  if (!apiKey || !apiKey.trim()) return [];
-  const base = resolveBaseUrl({ apiBaseUrl: baseUrl != null ? baseUrl : "" });
-  try {
-    const response = await withTimeout(
-      httpRequest({
-        url: `${base}/v1/models`,
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiKey}`
-        }
-      }),
-      HTTP_TIMEOUT_DEFAULT_MS,
-      "List models request"
-    );
-    if (response.status !== 200) {
-      console.warn(
-        `Voxtral: Failed to list models (${response.status})`
-      );
-      return [];
-    }
-    const data = response.json;
-    const seen = /* @__PURE__ */ new Set();
-    const models = (data.data || []).map(
-      (m) => ({
-        id: m.id,
-        type: m.type,
-        capabilities: m.capabilities
-      })
-    ).filter((m) => {
-      if (seen.has(m.id)) return false;
-      seen.add(m.id);
-      return true;
-    });
-    models.sort((a, b) => a.id.localeCompare(b.id));
-    return models;
-  } catch (e) {
-    console.warn("Voxtral: Could not fetch models", e);
-    return [];
-  }
-}
-async function listVoices(apiKey, httpRequest, baseUrl) {
-  var _a, _b, _c, _d;
-  if (!apiKey || !apiKey.trim()) return [];
-  const base = resolveBaseUrl({ apiBaseUrl: baseUrl != null ? baseUrl : "" });
-  try {
-    const response = await withTimeout(
-      httpRequest({
-        url: `${base}/v1/audio/voices?limit=100`,
-        method: "GET",
-        headers: { Authorization: `Bearer ${apiKey}` }
-      }),
-      HTTP_TIMEOUT_DEFAULT_MS,
-      "List voices request"
-    );
-    if (response.status !== 200) {
-      console.warn(`Voxtral: Failed to list voices (${response.status})`);
-      return [];
-    }
-    const data = response.json;
-    const arr = Array.isArray(data) ? data : (_d = (_c = (_b = (_a = data == null ? void 0 : data.data) != null ? _a : data == null ? void 0 : data.voices) != null ? _b : data == null ? void 0 : data.items) != null ? _c : data == null ? void 0 : data.results) != null ? _d : [];
-    const seenIds = /* @__PURE__ */ new Set();
-    return arr.map((v) => {
-      var _a2, _b2, _c2, _d2;
-      const voice = v;
-      const id = (_b2 = (_a2 = voice.id) != null ? _a2 : voice.slug) != null ? _b2 : voice.name;
-      return id ? { id, name: (_d2 = (_c2 = voice.name) != null ? _c2 : voice.slug) != null ? _d2 : id } : null;
-    }).filter((v) => {
-      if (v === null || seenIds.has(v.id)) return false;
-      seenIds.add(v.id);
-      return true;
-    });
-  } catch (e) {
-    console.warn("Voxtral: Could not fetch voices", e);
-    return [];
-  }
-}
-var CONTEXT_BIAS_MAX_TERMS = 100;
-var CONTEXT_BIAS_MAX_TERM_LENGTH = 40;
-function buildContextBias(terms) {
-  if (!terms || terms.length === 0) return [];
-  const seen = /* @__PURE__ */ new Set();
-  const result = [];
-  for (const raw of terms) {
-    const term = raw.trim().replace(/\s+/g, "_").replace(/,/g, "");
-    if (!term) continue;
-    if (term.length > CONTEXT_BIAS_MAX_TERM_LENGTH) continue;
-    if (!/\p{L}/u.test(term)) continue;
-    if (seen.has(term)) continue;
-    seen.add(term);
-    result.push(term);
-    if (result.length >= CONTEXT_BIAS_MAX_TERMS) break;
-  }
-  return result;
-}
-async function transcribeBatchRaw(audioBlob, settings, httpRequest, diarize = false) {
-  var _a, _b, _c;
-  const t = audioBlob.type;
-  const ext = t.includes("mp4") ? "m4a" : t.includes("ogg") ? "ogg" : t.includes("mpeg") || t.includes("mp3") ? "mp3" : t.includes("wav") ? "wav" : t.includes("flac") ? "flac" : t.includes("aac") ? "aac" : "webm";
-  const mimeType = audioBlob.type || `audio/${ext}`;
-  const boundary = `----VoxtralBoundary${Date.now()}`;
-  const arrayBuf = await audioBlob.arrayBuffer();
-  const fileBytes = new Uint8Array(arrayBuf);
-  let textParts = "";
-  textParts += `--${boundary}\r
-`;
-  textParts += `Content-Disposition: form-data; name="file"; filename="recording.${ext}"\r
-`;
-  textParts += `Content-Type: ${mimeType}\r
-\r
-`;
-  const afterFile = `\r
---${boundary}\r
-Content-Disposition: form-data; name="model"\r
-\r
-${settings.batchModel}\r
-`;
-  let extraFields = "";
-  if (diarize) {
-    extraFields += `--${boundary}\r
-Content-Disposition: form-data; name="diarize"\r
-\r
-true\r
-`;
-    extraFields += `--${boundary}\r
-Content-Disposition: form-data; name="timestamp_granularities"\r
-\r
-segment\r
-`;
-  } else if (settings.language) {
-    extraFields += `--${boundary}\r
-Content-Disposition: form-data; name="language"\r
-\r
-${settings.language}\r
-`;
-  }
-  const bias = buildContextBias(settings.vocabularyTerms);
-  for (const term of bias) {
-    extraFields += `--${boundary}\r
-Content-Disposition: form-data; name="context_bias"\r
-\r
-${term}\r
-`;
-  }
-  extraFields += `--${boundary}--\r
-`;
-  const enc = new TextEncoder();
-  const headerBuf = enc.encode(textParts);
-  const tailBuf = enc.encode(afterFile + extraFields);
-  const body = new Uint8Array(headerBuf.length + fileBytes.length + tailBuf.length);
-  body.set(headerBuf, 0);
-  body.set(fileBytes, headerBuf.length);
-  body.set(tailBuf, headerBuf.length + fileBytes.length);
-  const base = resolveBaseUrl(settings);
-  const response = await withTimeout(
-    httpRequest({
-      url: `${base}/v1/audio/transcriptions`,
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${settings.apiKey}`,
-        "Content-Type": `multipart/form-data; boundary=${boundary}`
-      },
-      body: body.buffer
-    }),
-    HTTP_TIMEOUT_UPLOAD_MS,
-    "Transcription request"
-  );
-  if (response.status !== 200) {
-    throw new Error(
-      `Transcription failed: ${sanitizeApiError(response.status, response.text)}`
-    );
-  }
-  return {
-    text: ((_a = response.json) == null ? void 0 : _a.text) || "",
-    segments: (_c = (_b = response.json) == null ? void 0 : _b.segments) != null ? _c : []
-  };
-}
-async function transcribeBatch(audioBlob, settings, httpRequest, diarize = false) {
-  return (await transcribeBatchRaw(audioBlob, settings, httpRequest, diarize)).text;
-}
-async function synthesizeSpeech(text, settings, httpRequest) {
-  var _a, _b, _c, _d, _e;
-  const base = resolveBaseUrl(settings);
-  const response = await retryWithBackoff(
-    async () => {
-      const resp = await withTimeout(
-        httpRequest({
-          url: `${base}/v1/audio/speech`,
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${settings.apiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: TTS_MODEL,
-            input: text,
-            voice: settings.ttsVoice,
-            response_format: TTS_RESPONSE_FORMAT
-          })
-        }),
-        HTTP_TIMEOUT_DEFAULT_MS,
-        "Speech synthesis request"
-      );
-      if (resp.status !== 200) {
-        throw new HttpStatusError(
-          `Speech synthesis failed: ${sanitizeApiError(resp.status, resp.text)}`,
-          resp.status
-        );
-      }
-      return resp;
-    },
-    { shouldRetry: isRateLimitError }
-  );
-  const json = response.json;
-  if (json && typeof json === "object" && !Array.isArray(json)) {
-    const candidate = (_e = (_d = (_c = (_b = (_a = json.audio_data) != null ? _a : (
-      // confirmed field name returned by Mistral TTS
-      json.audio
-    )) != null ? _b : json.audio_base64) != null ? _c : json.b64_audio) != null ? _d : json.audio_content) != null ? _e : typeof json.data === "string" ? json.data : void 0;
-    if (typeof candidate === "string" && candidate.length > 0) {
-      return base64ToArrayBuffer(candidate);
-    }
-    throw new Error(
-      `Speech synthesis returned JSON, not audio (fields: ${Object.keys(json).join(", ")})`
-    );
-  }
-  if (!response.arrayBuffer || response.arrayBuffer.byteLength === 0) {
-    throw new Error("Speech synthesis returned no audio.");
-  }
-  return response.arrayBuffer;
-}
-function base64ToArrayBuffer(b64) {
-  const clean = b64.replace(/^data:[^;,]*;base64,/, "");
-  const binary = atob(clean);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
-}
-function buildCustomCommandGuard2(settings) {
-  var _a;
-  return buildCustomCommandGuard((_a = settings.customCommands) != null ? _a : [], settings.language);
-}
-function buildVocabularyGuard2(settings) {
-  var _a;
-  return buildVocabularyGuard((_a = settings.vocabularyTerms) != null ? _a : []);
-}
-async function correctText(text, settings, httpRequest, opts) {
-  var _a, _b, _c, _d, _e, _f;
-  const local = isLocalMode(settings);
-  const localUrl = local ? (_a = settings.localCorrectionUrl) == null ? void 0 : _a.trim() : void 0;
-  if (local && !localUrl) {
-    console.debug(
-      "Voxtral: correction skipped in local mode \u2014 no local correction endpoint configured"
-    );
-    return text;
-  }
-  const basePrompt = settings.systemPrompt || (settings.correctionIntensity === "light" ? LIGHT_CORRECT_PROMPT : DEFAULT_CORRECT_PROMPT);
-  const systemPrompt = basePrompt + buildCustomCommandGuard2(settings) + buildVocabularyGuard2(settings) + buildStyleGuard(settings.styleInstruction);
-  const base = local && localUrl ? localUrl : resolveBaseUrl(settings);
-  const model = local ? ((_b = settings.localCorrectionModel) == null ? void 0 : _b.trim()) || "ministral-3:3b" : settings.correctModel;
-  const headers = local ? { "Content-Type": "application/json" } : { Authorization: `Bearer ${settings.apiKey}`, "Content-Type": "application/json" };
-  const body = {
-    model,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: text }
-    ],
-    temperature: 0.1
-  };
-  const response = await retryWithBackoff(
-    async () => {
-      var _a2;
-      const resp = await withTimeout(
-        httpRequest({
-          url: `${base}/v1/chat/completions`,
-          method: "POST",
-          headers,
-          body: JSON.stringify(body)
-        }),
-        (_a2 = opts == null ? void 0 : opts.timeoutMs) != null ? _a2 : HTTP_TIMEOUT_DEFAULT_MS,
-        "Correction request"
-      );
-      if (resp.status !== 200) {
-        throw new HttpStatusError(
-          `Correction failed: ${sanitizeApiError(resp.status, resp.text)}`,
-          resp.status
-        );
-      }
-      return resp;
-    },
-    { shouldRetry: isRateLimitError }
-  );
-  const data = response.json;
-  let result = ((_f = (_e = (_d = (_c = data.choices) == null ? void 0 : _c[0]) == null ? void 0 : _d.message) == null ? void 0 : _e.content) == null ? void 0 : _f.trim()) || text;
-  result = stripLlmCommentary(result, text);
-  if (result.length > text.length * 1.5 + 50) {
-    console.warn(
-      "Voxtral: Correction rejected \u2014 output is suspiciously longer than input",
-      { inputLen: text.length, outputLen: result.length }
-    );
-    return text;
-  }
-  return result;
-}
-function resolveRealtimeProtocol(settings) {
-  if (settings.realtimeProtocol === "mistral" || settings.realtimeProtocol === "vllm") {
-    return settings.realtimeProtocol;
-  }
-  try {
-    const { hostname } = new URL(resolveBaseUrl(settings));
-    const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
-    return isLocalhost ? "vllm" : "mistral";
-  } catch (e) {
-    return "mistral";
-  }
-}
-function isLocalMode(settings) {
-  return resolveRealtimeProtocol(settings) === "vllm";
-}
-var RealtimeTranscriber = class {
-  constructor(settings, callbacks, delayOverrideMs, opts) {
-    this.ws = null;
-    this.intentionallyClosed = false;
-    // The server only accepts audio AFTER session.update declared the
-    // audio_format; an input_audio.append that lands in the open→
-    // session.created window precedes that declaration and the server
-    // rejects it as a mid-transcription format change. isConnected
-    // therefore reports handshake completion, not bare socket state,
-    // so callers keep buffering audio until the format is declared.
-    this.sessionReady = false;
-    this.delayOverrideMs = null;
-    this.settings = settings;
-    this.callbacks = callbacks;
-    this.delayOverrideMs = delayOverrideMs != null ? delayOverrideMs : null;
-    this.opts = opts;
-  }
-  async connect() {
-    var _a;
-    if (resolveRealtimeProtocol(this.settings) === "vllm") return this.connectVllm();
-    if (!hasNodeWebSocketAuth() && ((_a = this.opts) == null ? void 0 : _a.tokenManager)) return this.connectCloudSubprotocol();
-    this.intentionallyClosed = false;
-    this.sessionReady = false;
-    const params = new URLSearchParams({
-      model: this.settings.realtimeModel
-    });
-    const httpBase = resolveBaseUrl(this.settings);
-    const wsBase = httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
-    const url = `${wsBase}/v1/audio/transcriptions/realtime?${params}`;
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        var _a2;
-        (_a2 = this.ws) == null ? void 0 : _a2.close();
-        reject(new Error("WebSocket connection timeout"));
-      }, 1e4);
-      this.ws = createAuthenticatedWebSocket(
-        url,
-        { Authorization: `Bearer ${this.settings.apiKey}` },
-        {
-          onOpen: () => {
-          },
-          onMessage: (data) => {
-            var _a2, _b, _c;
-            try {
-              const msg = JSON.parse(data);
-              console.debug(
-                `Voxtral WS \u2190 ${msg.type}`,
-                msg.type === "transcription.text.delta" ? (_a2 = msg.text) == null ? void 0 : _a2.slice(0, 50) : ""
-              );
-              switch (msg.type) {
-                case "session.created":
-                  clearTimeout(timeout);
-                  this.sendSessionUpdate();
-                  this.sessionReady = true;
-                  this.callbacks.onSessionCreated();
-                  resolve();
-                  break;
-                case "session.updated":
-                  console.debug(
-                    "Voxtral WS: session updated",
-                    JSON.stringify(msg.session || {})
-                  );
-                  break;
-                case "transcription.text.delta":
-                  this.callbacks.onDelta(msg.text || "");
-                  break;
-                case "transcription.done":
-                  console.debug(
-                    "Voxtral WS: transcription.done \u2014 full text:",
-                    (_b = msg.text) == null ? void 0 : _b.slice(0, 200)
-                  );
-                  this.callbacks.onDone(msg.text || "");
-                  break;
-                case "error":
-                  console.error(
-                    "Voxtral WS: server error:",
-                    JSON.stringify(msg.error)
-                  );
-                  this.callbacks.onError(
-                    ((_c = msg.error) == null ? void 0 : _c.message) || "Unknown error"
-                  );
-                  break;
-                default:
-                  console.debug(
-                    "Voxtral WS: unknown message type:",
-                    msg.type,
-                    data.slice(0, 300)
-                  );
-                  break;
-              }
-            } catch (e) {
-              console.error(
-                "Voxtral: failed to parse WS message",
-                data.slice(0, 200),
-                e
-              );
-            }
-          },
-          onError: (err) => {
-            clearTimeout(timeout);
-            console.error("Voxtral: WebSocket error", err);
-            reject(
-              new Error(
-                `WebSocket connection failed: ${err.message}`
-              )
-            );
-          },
-          onClose: () => {
-            console.debug(
-              `Voxtral WS: connection closed (intentional=${this.intentionallyClosed})`
-            );
-            this.ws = null;
-            this.sessionReady = false;
-            if (!this.intentionallyClosed) {
-              this.callbacks.onDisconnect();
-            }
-          }
-        }
-      );
-    });
-  }
-  /**
-   * Connect to a local vLLM `/v1/realtime` endpoint. Unlike the Mistral cloud
-   * path, this is a plain (unauthenticated) WebSocket — no upgrade headers,
-   * no model query param — so it uses the platform-native `WebSocket`
-   * directly instead of authenticated-websocket.ts (which only speaks
-   * https/443 and exists purely to inject the cloud Authorization header).
-   * The native socket is wrapped in the same AuthenticatedWsConnection shape
-   * so sendAudio/flush/endAudio/close/isConnected keep working unchanged.
-   */
-  connectVllm() {
-    this.intentionallyClosed = false;
-    this.sessionReady = false;
-    const httpBase = resolveBaseUrl(this.settings);
-    const wsBase = httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
-    const url = `${wsBase}/v1/realtime`;
-    return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url);
-      let opened = false;
-      let failedBeforeOpen = false;
-      const timeout = setTimeout(() => {
-        socket.close();
-        reject(new Error("WebSocket connection timeout"));
-      }, 1e4);
-      this.ws = {
-        send: (data) => socket.send(data),
-        close: () => socket.close(),
-        get readyState() {
-          return socket.readyState;
-        }
-      };
-      socket.onopen = () => {
-        opened = true;
-        clearTimeout(timeout);
-        this.sendSessionUpdate();
-        this.sessionReady = true;
-        this.callbacks.onSessionCreated();
-        resolve();
-      };
-      socket.onmessage = (event) => {
-        var _a, _b, _c;
-        const data = String(event.data);
-        try {
-          const msg = JSON.parse(data);
-          console.debug(
-            `Voxtral WS (vLLM) \u2190 ${msg.type}`,
-            msg.type === "transcription.delta" || msg.type === "transcription.text.delta" ? (_a = msg.text) == null ? void 0 : _a.slice(0, 50) : ""
-          );
-          switch (msg.type) {
-            // The docs call this "transcription.delta"; the deployed
-            // adapter actually emits "transcription.text.delta" — accept both.
-            case "transcription.delta":
-            case "transcription.text.delta":
-              this.callbacks.onDelta(msg.text || "");
-              break;
-            case "transcription.done":
-              console.debug(
-                "Voxtral WS (vLLM): transcription.done \u2014 full text:",
-                (_b = msg.text) == null ? void 0 : _b.slice(0, 200)
-              );
-              this.callbacks.onDone(msg.text || "");
-              break;
-            case "error":
-              console.error(
-                "Voxtral WS (vLLM): server error:",
-                JSON.stringify(msg.error)
-              );
-              this.callbacks.onError(
-                ((_c = msg.error) == null ? void 0 : _c.message) || "Unknown error"
-              );
-              break;
-            case "session.created":
-            case "session.updated":
-              console.debug("Voxtral WS (vLLM): session event", msg.type);
-              break;
-            default:
-              console.debug(
-                "Voxtral WS (vLLM): unknown message type:",
-                msg.type,
-                data.slice(0, 300)
-              );
-              break;
-          }
-        } catch (e) {
-          console.error(
-            "Voxtral: failed to parse vLLM WS message",
-            data.slice(0, 200),
-            e
-          );
-        }
-      };
-      socket.onerror = () => {
-        if (!opened) {
-          failedBeforeOpen = true;
-          clearTimeout(timeout);
-          reject(new Error("WebSocket connection failed"));
-        } else {
-          console.error("Voxtral: vLLM WebSocket error");
-        }
-      };
-      socket.onclose = () => {
-        console.debug(
-          `Voxtral WS (vLLM): connection closed (intentional=${this.intentionallyClosed})`
-        );
-        this.ws = null;
-        this.sessionReady = false;
-        if (!this.intentionallyClosed && !failedBeforeOpen) {
-          this.callbacks.onDisconnect();
-        }
-      };
-    });
-  }
-  /**
-   * Connect to the Mistral cloud realtime endpoint using WebSocket-
-   * subprotocol auth (VX_E22_S8) instead of the manual-upgrade
-   * Authorization header: mints a short-lived token via
-   * `this.opts.tokenManager` and passes it as the second WebSocket
-   * subprotocol (`new WebSocket(url, ["realtime", token])`) — the route
-   * mobile/webview must take since the header route above needs Node's
-   * `require()` (see hasNodeWebSocketAuth()). Event semantics mirror the
-   * header path above (CLOUD, not vLLM): connect() only resolves once
-   * `session.created` arrives, not on bare `open`.
-   */
-  async connectCloudSubprotocol() {
-    var _a;
-    this.intentionallyClosed = false;
-    this.sessionReady = false;
-    const tokenManager = (_a = this.opts) == null ? void 0 : _a.tokenManager;
-    if (!tokenManager) {
-      throw new Error("connectCloudSubprotocol() requires a token manager");
-    }
-    const token = await tokenManager.getToken();
-    const httpBase = resolveBaseUrl(this.settings);
-    const wsBase = httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
-    const params = new URLSearchParams({ model: this.settings.realtimeModel });
-    const url = `${wsBase}/v1/audio/transcriptions/realtime?${params}`;
-    return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url, ["realtime", token]);
-      let opened = false;
-      let failedBeforeOpen = false;
-      const timeout = setTimeout(() => {
-        socket.close();
-        reject(new Error("WebSocket connection timeout"));
-      }, 1e4);
-      this.ws = {
-        send: (data) => socket.send(data),
-        close: () => socket.close(),
-        get readyState() {
-          return socket.readyState;
-        }
-      };
-      socket.onopen = () => {
-        opened = true;
-      };
-      socket.onmessage = (event) => {
-        var _a2, _b, _c;
-        const data = String(event.data);
-        try {
-          const msg = JSON.parse(data);
-          console.debug(
-            `Voxtral WS (token) \u2190 ${msg.type}`,
-            msg.type === "transcription.text.delta" ? (_a2 = msg.text) == null ? void 0 : _a2.slice(0, 50) : ""
-          );
-          switch (msg.type) {
-            case "session.created":
-              clearTimeout(timeout);
-              this.sendSessionUpdate();
-              this.sessionReady = true;
-              this.callbacks.onSessionCreated();
-              resolve();
-              tokenManager.prefetch();
-              break;
-            case "session.updated":
-              console.debug(
-                "Voxtral WS (token): session updated",
-                JSON.stringify(msg.session || {})
-              );
-              break;
-            case "transcription.text.delta":
-              this.callbacks.onDelta(msg.text || "");
-              break;
-            case "transcription.done":
-              console.debug(
-                "Voxtral WS (token): transcription.done \u2014 full text:",
-                (_b = msg.text) == null ? void 0 : _b.slice(0, 200)
-              );
-              this.callbacks.onDone(msg.text || "");
-              break;
-            case "error":
-              console.error(
-                "Voxtral WS (token): server error:",
-                JSON.stringify(msg.error)
-              );
-              this.callbacks.onError(
-                ((_c = msg.error) == null ? void 0 : _c.message) || "Unknown error"
-              );
-              break;
-            default:
-              console.debug(
-                "Voxtral WS (token): unknown message type:",
-                msg.type,
-                data.slice(0, 300)
-              );
-              break;
-          }
-        } catch (e) {
-          console.error(
-            "Voxtral: failed to parse WS (token) message",
-            data.slice(0, 200),
-            e
-          );
-        }
-      };
-      socket.onerror = () => {
-        if (!opened) {
-          failedBeforeOpen = true;
-          clearTimeout(timeout);
-          reject(new Error("WebSocket connection failed"));
-        } else {
-          console.error("Voxtral: WS (token) error");
-        }
-      };
-      socket.onclose = () => {
-        console.debug(
-          `Voxtral WS (token): connection closed (intentional=${this.intentionallyClosed})`
-        );
-        this.ws = null;
-        this.sessionReady = false;
-        if (!this.intentionallyClosed && !failedBeforeOpen) {
-          this.callbacks.onDisconnect();
-        }
-      };
-    });
-  }
-  sendSessionUpdate() {
-    var _a;
-    if (!this.ws) return;
-    const delayMs = (_a = this.delayOverrideMs) != null ? _a : this.settings.streamingDelayMs;
-    const msg = {
-      type: "session.update",
-      session: {
-        audio_format: {
-          encoding: "pcm_s16le",
-          sample_rate: 16e3
-        },
-        target_streaming_delay_ms: delayMs
-      }
-    };
-    this.ws.send(JSON.stringify(msg));
-  }
-  sendAudio(pcmBytes) {
-    if (!this.ws || this.ws.readyState !== WS_OPEN || !this.sessionReady) return;
-    const base64 = arrayBufferToBase64(pcmBytes);
-    const msg = {
-      type: "input_audio.append",
-      audio: base64
-    };
-    this.ws.send(JSON.stringify(msg));
-  }
-  flush() {
-    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
-    this.ws.send(JSON.stringify({ type: "input_audio.flush" }));
-  }
-  endAudio() {
-    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
-    this.ws.send(JSON.stringify({ type: "input_audio.end" }));
-  }
-  close() {
-    this.intentionallyClosed = true;
-    this.sessionReady = false;
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-  get isConnected() {
-    var _a;
-    return ((_a = this.ws) == null ? void 0 : _a.readyState) === WS_OPEN && this.sessionReady;
-  }
-};
-function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-// ../shared/src/realtime-token.ts
-var SAFETY_MARGIN_MS = 1e4;
-var PREFETCH_MARGIN_MS = 25e3;
-var RealtimeTokenError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "RealtimeTokenError";
-  }
-};
-var RealtimeTokenManager = class {
-  constructor(settings, httpRequest) {
-    this.settings = settings;
-    this.httpRequest = httpRequest;
-    this.cached = null;
-    // Dedupes concurrent mint requests (e.g. dual-delay's two near-simultaneous
-    // connects) onto a single in-flight POST.
-    this.minting = null;
-  }
-  /**
-   * Return a token valid for at least SAFETY_MARGIN_MS, minting one if the
-   * cache is empty, expiring soon, or scoped to a different model than the
-   * current settings. May throw RealtimeTokenError.
-   */
-  async getToken() {
-    const model = this.settings.realtimeModel;
-    if (this.cached && this.cached.model === model && this.hasMargin(this.cached, SAFETY_MARGIN_MS)) {
-      return this.cached.token;
-    }
-    return this.mintShared(model);
-  }
-  /**
-   * Fire-and-forget: mint the next token in the background once the cached
-   * one is within PREFETCH_MARGIN_MS of expiry, so a silent reconnect never
-   * blocks on the network. Errors are swallowed — the next getToken() call
-   * retries the mint and surfaces any failure there instead.
-   */
-  prefetch() {
-    const model = this.settings.realtimeModel;
-    if (this.minting) return;
-    if (this.cached && this.cached.model === model && this.hasMargin(this.cached, PREFETCH_MARGIN_MS)) {
-      return;
-    }
-    this.mintShared(model).catch(() => {
-    });
-  }
-  hasMargin(cached, marginMs) {
-    return cached.expiresAtMs - Date.now() > marginMs;
-  }
-  mintShared(model) {
-    if (this.minting) return this.minting;
-    const promise = this.mint(model).finally(() => {
-      this.minting = null;
-    });
-    this.minting = promise;
-    return promise;
-  }
-  async mint(model) {
-    var _a;
-    const base = resolveBaseUrl(this.settings);
-    const response = await withTimeout(
-      this.httpRequest({
-        url: `${base}/v1/client/sessions`,
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.settings.apiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ purpose: "realtime", model })
-      }),
-      HTTP_TIMEOUT_DEFAULT_MS,
-      "Realtime token request"
-    );
-    if (response.status !== 201) {
-      throw new RealtimeTokenError(
-        `Realtime token request failed: ${sanitizeApiError(response.status, response.text)}`
-      );
-    }
-    const secret = (_a = response.json) == null ? void 0 : _a.client_secret;
-    const token = secret == null ? void 0 : secret.value;
-    if (typeof token !== "string" || !token.startsWith("rt_")) {
-      throw new RealtimeTokenError(
-        "Realtime token request failed: malformed client_secret.value in response"
-      );
-    }
-    const expiresAtMs = typeof (secret == null ? void 0 : secret.expires_at) === "string" ? Date.parse(secret.expires_at) : NaN;
-    if (Number.isNaN(expiresAtMs)) {
-      throw new RealtimeTokenError(
-        "Realtime token request failed: malformed client_secret.expires_at in response"
-      );
-    }
-    this.cached = { token, expiresAtMs, model };
-    return token;
-  }
-};
-
-// ../shared/src/update-notice.ts
-var VERSION_RE = /^(\d+)\.(\d+)\.(\d+)(?:-.*)?$/;
-function parseVersion(version) {
-  const match = VERSION_RE.exec(version.trim());
-  if (!match) return null;
-  return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3])
-  };
-}
-function shouldAnnounceUpdate(prev, current) {
-  const prevVersion = parseVersion(prev);
-  const currentVersion = parseVersion(current);
-  if (!prevVersion || !currentVersion) return false;
-  if (currentVersion.major > prevVersion.major) return true;
-  if (currentVersion.major === prevVersion.major) {
-    return currentVersion.minor > prevVersion.minor;
-  }
-  return false;
-}
-
-// src/default-commands.ts
-function tableInsert(column) {
-  return `
-
-| ${column} 1 | ${column} 2 | ${column} 3 |
-| --- | --- | --- |
-| | | |
-`;
-}
-function getDefaultBuiltInCommands() {
-  return [
-    {
-      id: "builtin-table",
-      builtIn: true,
-      labels: {
-        nl: "Tabel",
-        en: "Table",
-        fr: "Tableau",
-        de: "Tabelle",
-        es: "Tabla",
-        pt: "Tabela",
-        it: "Tabella",
-        ru: "\u0422\u0430\u0431\u043B\u0438\u0446\u0430",
-        zh: "\u8868\u683C",
-        ja: "\u30C6\u30FC\u30D6\u30EB",
-        ko: "\uD14C\uC774\uBE14",
-        hi: "\u091F\u0947\u092C\u0932",
-        ar: "\u062C\u062F\u0648\u0644"
-      },
-      type: "insert",
-      // Fallback for languages without an insertTextByLang entry.
-      insertText: tableInsert("Column"),
-      insertTextByLang: {
-        nl: tableInsert("Kolom"),
-        en: tableInsert("Column"),
-        fr: tableInsert("Colonne"),
-        de: tableInsert("Spalte"),
-        es: tableInsert("Columna"),
-        pt: tableInsert("Coluna"),
-        it: tableInsert("Colonna"),
-        ru: tableInsert("\u0421\u0442\u043E\u043B\u0431\u0435\u0446"),
-        zh: tableInsert("\u5217"),
-        ja: tableInsert("\u5217"),
-        ko: tableInsert("\uC5F4"),
-        hi: tableInsert("\u0915\u0949\u0932\u092E"),
-        ar: tableInsert("\u0639\u0645\u0648\u062F")
-      },
-      triggers: {
-        nl: ["tabel", "nieuwe tabel"],
-        en: ["table", "new table"],
-        fr: ["tableau", "nouveau tableau"],
-        de: ["tabelle", "neue tabelle"],
-        es: ["tabla", "nueva tabla"],
-        pt: ["tabela", "nova tabela"],
-        it: ["tabella", "nuova tabella"],
-        ru: ["\u0442\u0430\u0431\u043B\u0438\u0446\u0430", "\u043D\u043E\u0432\u0430\u044F \u0442\u0430\u0431\u043B\u0438\u0446\u0430"],
-        zh: ["\u8868\u683C", "\u65B0\u8868\u683C"],
-        ja: ["\u30C6\u30FC\u30D6\u30EB", "\u65B0\u3057\u3044\u30C6\u30FC\u30D6\u30EB"],
-        ko: ["\uD14C\uC774\uBE14", "\uC0C8 \uD14C\uC774\uBE14"],
-        hi: ["\u091F\u0947\u092C\u0932", "\u0928\u0908 \u091F\u0947\u092C\u0932"],
-        ar: ["\u062C\u062F\u0648\u0644", "\u062C\u062F\u0648\u0644 \u062C\u062F\u064A\u062F"]
-      }
-    },
-    {
-      id: "builtin-callout",
-      builtIn: true,
-      labels: {
-        nl: "Callout (opmerking)",
-        en: "Callout (note)",
-        fr: "Callout (note)",
-        de: "Callout (Hinweis)",
-        es: "Callout (nota)",
-        pt: "Callout (nota)",
-        it: "Callout (nota)",
-        ru: "\u0417\u0430\u043C\u0435\u0442\u043A\u0430",
-        zh: "\u6807\u6CE8\uFF08\u5907\u6CE8\uFF09",
-        ja: "\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8\uFF08\u6CE8\u91C8\uFF09",
-        ko: "\uCF5C\uC544\uC6C3 (\uBA54\uBAA8)",
-        hi: "\u0915\u0949\u0932\u0906\u0909\u091F (\u0928\u094B\u091F)",
-        ar: "\u062A\u0646\u0628\u064A\u0647 (\u0645\u0644\u0627\u062D\u0638\u0629)"
-      },
-      type: "insert",
-      insertText: "\n\n> [!note]\n> ",
-      triggers: {
-        nl: ["callout", "opmerking", "notitie blok"],
-        en: ["callout", "note block"],
-        fr: ["callout", "bloc de note"],
-        de: ["callout", "hinweisblock"],
-        es: ["callout", "bloque de nota"],
-        pt: ["callout", "bloco de nota"],
-        it: ["callout", "blocco nota"],
-        ru: ["\u0437\u0430\u043C\u0435\u0442\u043A\u0430", "\u0431\u043B\u043E\u043A \u0437\u0430\u043C\u0435\u0442\u043A\u0438"],
-        zh: ["\u6807\u6CE8", "\u6CE8\u91CA\u5757"],
-        ja: ["\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8", "\u6CE8\u91C8"],
-        ko: ["\uCF5C\uC544\uC6C3", "\uBA54\uBAA8 \uBE14\uB85D"],
-        hi: ["\u0915\u0949\u0932\u0906\u0909\u091F", "\u0928\u094B\u091F \u092C\u094D\u0932\u0949\u0915"],
-        ar: ["\u062A\u0646\u0628\u064A\u0647", "\u0643\u062A\u0644\u0629 \u0645\u0644\u0627\u062D\u0638\u0629"]
-      }
-    },
-    {
-      id: "builtin-warning",
-      builtIn: true,
-      labels: {
-        nl: "Callout (waarschuwing)",
-        en: "Callout (warning)",
-        fr: "Callout (avertissement)",
-        de: "Callout (Warnung)",
-        es: "Callout (advertencia)",
-        pt: "Callout (aviso)",
-        it: "Callout (avviso)",
-        ru: "\u041F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435",
-        zh: "\u6807\u6CE8\uFF08\u8B66\u544A\uFF09",
-        ja: "\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8\uFF08\u8B66\u544A\uFF09",
-        ko: "\uCF5C\uC544\uC6C3 (\uACBD\uACE0)",
-        hi: "\u0915\u0949\u0932\u0906\u0909\u091F (\u091A\u0947\u0924\u093E\u0935\u0928\u0940)",
-        ar: "\u062A\u0646\u0628\u064A\u0647 (\u062A\u062D\u0630\u064A\u0631)"
-      },
-      type: "insert",
-      insertText: "\n\n> [!warning]\n> ",
-      triggers: {
-        nl: ["waarschuwing", "waarschuwing blok"],
-        en: ["warning", "warning block"],
-        fr: ["avertissement"],
-        de: ["warnung"],
-        es: ["advertencia"],
-        pt: ["aviso"],
-        it: ["avviso"],
-        ru: ["\u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435"],
-        zh: ["\u8B66\u544A"],
-        ja: ["\u8B66\u544A"],
-        ko: ["\uACBD\uACE0"],
-        hi: ["\u091A\u0947\u0924\u093E\u0935\u0928\u0940"],
-        ar: ["\u062A\u062D\u0630\u064A\u0631"]
-      }
-    },
-    {
-      id: "builtin-tip",
-      builtIn: true,
-      labels: {
-        nl: "Callout (tip)",
-        en: "Callout (tip)",
-        fr: "Callout (astuce)",
-        de: "Callout (Tipp)",
-        es: "Callout (consejo)",
-        pt: "Callout (dica)",
-        it: "Callout (suggerimento)",
-        ru: "\u0421\u043E\u0432\u0435\u0442",
-        zh: "\u6807\u6CE8\uFF08\u63D0\u793A\uFF09",
-        ja: "\u30B3\u30FC\u30EB\u30A2\u30A6\u30C8\uFF08\u30D2\u30F3\u30C8\uFF09",
-        ko: "\uCF5C\uC544\uC6C3 (\uD301)",
-        hi: "\u0915\u0949\u0932\u0906\u0909\u091F (\u0938\u0941\u091D\u093E\u0935)",
-        ar: "\u062A\u0646\u0628\u064A\u0647 (\u0646\u0635\u064A\u062D\u0629)"
-      },
-      type: "insert",
-      insertText: "\n\n> [!tip]\n> ",
-      triggers: {
-        nl: ["tip", "tip blok"],
-        en: ["tip", "tip block"],
-        fr: ["astuce"],
-        de: ["tipp"],
-        es: ["consejo"],
-        pt: ["dica"],
-        it: ["suggerimento"],
-        ru: ["\u0441\u043E\u0432\u0435\u0442"],
-        zh: ["\u63D0\u793A"],
-        ja: ["\u30D2\u30F3\u30C8"],
-        ko: ["\uD301"],
-        hi: ["\u0938\u0941\u091D\u093E\u0935"],
-        ar: ["\u0646\u0635\u064A\u062D\u0629"]
-      }
-    }
-  ];
-}
-
-// src/settings-migration.ts
-var CURRENT_VERSION = 10;
-var migrations = {
-  // v1 → v2: add file-transcription output placement + correction toggle (E23_S3).
-  1: (data) => {
-    if (typeof data.fileTranscriptOutput !== "string") {
-      data.fileTranscriptOutput = "cursor";
-    }
-    if (typeof data.fileTranscriptCorrect !== "boolean") {
-      data.fileTranscriptCorrect = false;
-    }
-    return data;
-  },
-  // v2 → v3: add the file-transcription quality pre-flight toggle (E4_S2).
-  2: (data) => {
-    if (typeof data.fileTranscriptQualityWarnings !== "boolean") {
-      data.fileTranscriptQualityWarnings = true;
-    }
-    return data;
-  },
-  // v3 → v4: add the long-recording chunk length (E24).
-  3: (data) => {
-    if (typeof data.chunkSeconds !== "number") {
-      data.chunkSeconds = 600;
-    }
-    return data;
-  },
-  // v4 → v5: add the speaker-diarization toggle (E25_S1).
-  4: (data) => {
-    if (typeof data.fileTranscriptDiarize !== "boolean") {
-      data.fileTranscriptDiarize = false;
-    }
-    return data;
-  },
-  // v5 → v6: add the experimental "listen back" TTS settings (E26).
-  5: (data) => {
-    if (typeof data.ttsEnabled !== "boolean") {
-      data.ttsEnabled = false;
-    }
-    if (typeof data.ttsVoice !== "string") {
-      data.ttsVoice = "en_paul_neutral";
-    }
-    return data;
-  },
-  // v6 → v7: add the voice-command feedback toggle (VX_E27_S4).
-  6: (data) => {
-    if (typeof data.commandFeedback !== "boolean") {
-      data.commandFeedback = true;
-    }
-    return data;
-  },
-  // v7 → v8: add the file-transcription review/rename-speakers step toggle (VX_E27_S6).
-  7: (data) => {
-    if (typeof data.fileTranscriptReview !== "boolean") {
-      data.fileTranscriptReview = false;
-    }
-    return data;
-  },
-  // v8 → v9: add the vault-aware correction toggles (VX_E27_S7). Both default
-  // off — vaultVocabulary is a privacy-sensitive opt-in (sends vault term
-  // names to the API); vaultWikilinks is local-only but reuses the same
-  // collected term list, so it stays off by default too.
-  8: (data) => {
-    if (typeof data.vaultVocabulary !== "boolean") {
-      data.vaultVocabulary = false;
-    }
-    if (typeof data.vaultWikilinks !== "boolean") {
-      data.vaultWikilinks = false;
-    }
-    return data;
-  },
-  // v9 → v10: add the secret-storage id reference (VX_E28_S1). The plaintext
-  // `apiKey` stays in the object here; the actual move into `app.secretStorage`
-  // is a separate, Obsidian-only step in main.ts (migrateApiKeyToSecret), since
-  // this pure migration has no access to the secret store.
-  9: (data) => {
-    if (typeof data.apiKeySecretId !== "string") {
-      data.apiKeySecretId = "";
-    }
-    return data;
-  }
-  // NB: the localized insert text for built-ins (obsidian-voxtral#14) needs
-  // no migration — loadSettings() refreshes every stored built-in's content
-  // fields (labels, triggers, insertText, insertTextByLang, slot fields)
-  // from getDefaultBuiltInCommands() on each load.
-};
-function migrateSettings(data) {
-  if (!data) {
-    return { ...DEFAULT_SETTINGS, settingsVersion: CURRENT_VERSION };
-  }
-  let version = typeof data.settingsVersion === "number" ? data.settingsVersion : 0;
-  while (migrations[version]) {
-    data = migrations[version](data);
-    version++;
-  }
-  data.settingsVersion = CURRENT_VERSION;
-  return { ...DEFAULT_SETTINGS, ...data };
-}
-
-// src/secrets.ts
-var MISTRAL_SECRET_ID = "voxtral-transcribe-mistral-api";
-function allocateSecretId(base, store) {
-  if (store.getSecret(base) === null) return base;
-  for (let n = 2; ; n++) {
-    const candidate = `${base}-${n}`;
-    if (store.getSecret(candidate) === null) return candidate;
-  }
-}
-function migrateApiKeyToSecret(settings, store) {
-  var _a;
-  const plaintext = ((_a = settings.apiKey) == null ? void 0 : _a.trim()) ? settings.apiKey : "";
-  if (!plaintext) return { changed: false };
-  const id = settings.apiKeySecretId || allocateSecretId(MISTRAL_SECRET_ID, store);
-  try {
-    store.setSecret(id, plaintext);
-    if (store.getSecret(id) !== plaintext) return { changed: false };
-  } catch (e) {
-    return { changed: false };
-  }
-  settings.apiKeySecretId = id;
-  settings.apiKey = "";
-  return { changed: true };
-}
-function readApiKey(settings, store) {
-  var _a;
-  return settings.apiKeySecretId ? (_a = store.getSecret(settings.apiKeySecretId)) != null ? _a : "" : "";
-}
-function stripApiKeyValue(settings) {
-  return { ...settings, apiKey: "" };
-}
-
 // src/resolve-language.ts
 function isSupportedLanguage(value) {
   return SUPPORTED_LANGUAGES.includes(value);
@@ -2820,14 +1421,110 @@ function resolveVocabularyOverride(frontmatterValue) {
 // src/settings-tab.ts
 var import_obsidian = require("obsidian");
 
+// ../shared/src/plugin-logger.ts
+var LOG_BUFFER_SIZE = 500;
+var logBuffer = [];
+var debugEnabled = false;
+function setDebugLogging(enabled) {
+  debugEnabled = enabled;
+}
+function serializeLogArg(a) {
+  if (typeof a === "string") return a;
+  if (a instanceof Error) {
+    const header = `${a.name}: ${a.message}`;
+    if (!a.stack) return header;
+    const frames = a.stack.split("\n").slice(1).slice(0, 3).map((line) => line.trim()).filter(Boolean);
+    return frames.length > 0 ? `${header}
+${frames.join("\n")}` : header;
+  }
+  try {
+    return JSON.stringify(a);
+  } catch (e) {
+    return String(a);
+  }
+}
+function pushLog(level, args) {
+  const ts = (/* @__PURE__ */ new Date()).toISOString();
+  const msg = args.map(serializeLogArg).join(" ");
+  logBuffer.push(`[${ts}] [${level}] ${msg}`);
+  if (logBuffer.length > LOG_BUFFER_SIZE) {
+    logBuffer.shift();
+  }
+}
+var vlog = {
+  debug: (...args) => {
+    if (!debugEnabled) return;
+    pushLog("DEBUG", args);
+    console.debug(...args);
+  },
+  warn: (...args) => {
+    pushLog("WARN", args);
+    console.warn(...args);
+  },
+  error: (...args) => {
+    pushLog("ERROR", args);
+    console.error(...args);
+  }
+};
+function redactForExport(line) {
+  let redacted = line.replace(/\b[A-Za-z0-9]{32,}\b/g, "[REDACTED]");
+  redacted = redacted.replace(/"(?:[^"\\]|\\.){20,}"/g, '"[text redacted]"');
+  redacted = redacted.replace(
+    /(full text:|Hallucination detected —|Discarding hallucinated) .+/gi,
+    "$1 [redacted]"
+  );
+  return redacted;
+}
+function getLogText() {
+  return logBuffer.map(redactForExport).join("\n");
+}
+function getLogCount() {
+  return logBuffer.length;
+}
+
 // src/audio-recorder.ts
-var WORKLET_SOURCE = `
+function resampleLinear(input, inputRate, outputRate, state) {
+  if (inputRate === outputRate) return input;
+  const ratio = inputRate / outputRate;
+  const outLength = Math.max(0, Math.ceil((input.length - state.pos) / ratio));
+  const out = new Float32Array(outLength);
+  let pos = state.pos;
+  const sampleAt = (idx) => {
+    if (idx < 0) return state.prevSample;
+    if (idx >= input.length) return input.length > 0 ? input[input.length - 1] : state.prevSample;
+    return input[idx];
+  };
+  for (let i = 0; i < outLength; i++) {
+    const idx = Math.floor(pos);
+    const frac = pos - idx;
+    const s0 = sampleAt(idx);
+    const s1 = sampleAt(idx + 1);
+    out[i] = s0 + (s1 - s0) * frac;
+    pos += ratio;
+  }
+  state.pos = pos - input.length;
+  if (input.length > 0) state.prevSample = input[input.length - 1];
+  return out;
+}
+function buildWorkletSource() {
+  return `
+${resampleLinear.toString()}
 class PcmProcessor extends AudioWorkletProcessor {
+	constructor(options) {
+		super();
+		const po = options && options.processorOptions;
+		this.inputRate = (po && po.inputSampleRate) || 16000;
+		this.resampleState = { pos: 0, prevSample: 0 };
+	}
 	process(inputs) {
 		const input = inputs[0];
 		if (!input || input.length === 0) return true;
-		const channelData = input[0];
+		let channelData = input[0];
 		if (!channelData || channelData.length === 0) return true;
+		if (this.inputRate !== 16000) {
+			channelData = resampleLinear(channelData, this.inputRate, 16000, this.resampleState);
+			if (channelData.length === 0) return true;
+		}
 		const pcm16 = new Int16Array(channelData.length);
 		for (let i = 0; i < channelData.length; i++) {
 			const s = Math.max(-1, Math.min(1, channelData[i]));
@@ -2839,6 +1536,17 @@ class PcmProcessor extends AudioWorkletProcessor {
 }
 registerProcessor("pcm-processor", PcmProcessor);
 `;
+}
+function buildAudioConstraints(noiseSuppression, deviceId) {
+  const constraints = { channelCount: 1 };
+  if (noiseSuppression) {
+    constraints.noiseSuppression = { ideal: true };
+    constraints.echoCancellation = { ideal: true };
+    constraints.autoGainControl = { ideal: true };
+  }
+  if (deviceId) constraints.deviceId = { exact: deviceId };
+  return constraints;
+}
 var AudioRecorder = class {
   constructor() {
     this.stream = null;
@@ -2878,24 +1586,13 @@ var AudioRecorder = class {
   }
   async start(deviceId, onPcmChunk, noiseSuppression) {
     this.onPcmChunk = onPcmChunk || null;
-    const audioConstraints = { channelCount: 1 };
-    if (noiseSuppression) {
-      audioConstraints.noiseSuppression = { ideal: true };
-      audioConstraints.echoCancellation = { ideal: true };
-      audioConstraints.autoGainControl = { ideal: true };
-    }
-    if (deviceId) audioConstraints.deviceId = { exact: deviceId };
+    const audioConstraints = buildAudioConstraints(!!noiseSuppression, deviceId);
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     } catch (err) {
       if (deviceId) {
-        console.warn("Voxtral: Selected mic failed, falling back to default:", err);
-        const fallbackConstraints = { channelCount: 1 };
-        if (noiseSuppression) {
-          fallbackConstraints.noiseSuppression = { ideal: true };
-          fallbackConstraints.echoCancellation = { ideal: true };
-          fallbackConstraints.autoGainControl = { ideal: true };
-        }
+        vlog.warn("Voxtral: Selected mic failed, falling back to default:", err);
+        const fallbackConstraints = buildAudioConstraints(!!noiseSuppression);
         this.stream = await navigator.mediaDevices.getUserMedia({ audio: fallbackConstraints });
         this.fallbackUsed = true;
       } else {
@@ -2909,15 +1606,22 @@ var AudioRecorder = class {
       this.sourceNode = this.audioContext.createMediaStreamSource(
         this.stream
       );
+      const actualSampleRate = this.audioContext.sampleRate;
+      if (actualSampleRate !== 16e3) {
+        vlog.warn(
+          `Voxtral: AudioContext sample rate is ${actualSampleRate} Hz, not the requested 16000 Hz \u2014 resampling in the worklet.`
+        );
+      }
       if (this.onPcmChunk) {
-        const blob = new Blob([WORKLET_SOURCE], {
+        const blob = new Blob([buildWorkletSource()], {
           type: "application/javascript"
         });
         this.workletUrl = URL.createObjectURL(blob);
         await this.audioContext.audioWorklet.addModule(this.workletUrl);
         this.workletNode = new AudioWorkletNode(
           this.audioContext,
-          "pcm-processor"
+          "pcm-processor",
+          { processorOptions: { inputSampleRate: actualSampleRate } }
         );
         this.workletNode.port.onmessage = (e) => {
           var _a;
@@ -2926,26 +1630,61 @@ var AudioRecorder = class {
         this.sourceNode.connect(this.workletNode);
         this.workletNode.connect(this.audioContext.destination);
       }
-      this.chunks = [];
-      this.mediaRecorder = new MediaRecorder(this.stream, {
-        mimeType: this.getSupportedMimeType()
-      });
-      this.mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          this.chunks.push(e.data);
-        }
-      };
-      this.mediaRecorder.start(1e3);
-      this.lastFlushTime = Date.now();
+      if (!this.onPcmChunk) {
+        this.chunks = [];
+        this.mediaRecorder = new MediaRecorder(this.stream, {
+          mimeType: this.getSupportedMimeType()
+        });
+        this.mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            this.chunks.push(e.data);
+          }
+        };
+        this.mediaRecorder.start(1e3);
+        this.lastFlushTime = Date.now();
+      }
     } catch (e) {
       this.cleanup();
       throw e;
     }
   }
+  /** Build a blob from the chunks collected so far and clear them. */
+  takeChunksAsBlob() {
+    const blob = new Blob(this.chunks, { type: this.getSupportedMimeType() });
+    this.chunks = [];
+    return blob;
+  }
+  /** Update `lastChunkDurationSec`/`lastFlushTime` for the chunk ending now. */
+  recordFlushTiming() {
+    const now = Date.now();
+    this.lastChunkDurationSec = (now - this.lastFlushTime) / 1e3;
+    this.lastFlushTime = now;
+  }
+  /**
+   * Start a fresh MediaRecorder on the current stream (batch mode only —
+   * a no-op without one), so the next chunk also gets proper container
+   * headers. Used after both a clean flush and a stalled one.
+   */
+  restartMediaRecorder() {
+    if (!this.stream) {
+      this.mediaRecorder = null;
+      return;
+    }
+    this.mediaRecorder = new MediaRecorder(this.stream, {
+      mimeType: this.getSupportedMimeType()
+    });
+    this.mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        this.chunks.push(e.data);
+      }
+    };
+    this.mediaRecorder.start(1e3);
+  }
   /**
    * Flush current audio as a blob WITHOUT stopping the recording.
    * Stops and restarts MediaRecorder so each blob is a complete,
-   * valid audio file with proper container headers.
+   * valid audio file with proper container headers. In realtime mode
+   * (no MediaRecorder — audit §4 B5) this resolves an empty blob.
    */
   async flushChunk() {
     return new Promise((resolve) => {
@@ -2955,70 +1694,56 @@ var AudioRecorder = class {
       }
       const stalledRecorder = this.mediaRecorder;
       const timeout = window.setTimeout(() => {
-        console.warn("Voxtral: flushChunk timed out after 5s");
+        vlog.warn("Voxtral: flushChunk timed out after 5s");
         stalledRecorder.onstop = null;
         stalledRecorder.ondataavailable = null;
-        const mimeType = this.getSupportedMimeType();
-        const blob = new Blob(this.chunks, { type: mimeType });
-        this.chunks = [];
-        const now = Date.now();
-        this.lastChunkDurationSec = (now - this.lastFlushTime) / 1e3;
-        this.lastFlushTime = now;
-        if (this.stream) {
-          this.mediaRecorder = new MediaRecorder(this.stream, {
-            mimeType
-          });
-          this.mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-              this.chunks.push(e.data);
-            }
-          };
-          this.mediaRecorder.start(1e3);
-        } else {
-          this.mediaRecorder = null;
-        }
+        const blob = this.takeChunksAsBlob();
+        this.recordFlushTiming();
+        this.restartMediaRecorder();
         resolve(blob);
       }, 5e3);
       stalledRecorder.onstop = () => {
         window.clearTimeout(timeout);
-        const now = Date.now();
-        this.lastChunkDurationSec = (now - this.lastFlushTime) / 1e3;
-        this.lastFlushTime = now;
-        const mimeType = this.getSupportedMimeType();
-        const blob = new Blob(this.chunks, { type: mimeType });
-        this.chunks = [];
-        if (this.stream) {
-          this.mediaRecorder = new MediaRecorder(this.stream, {
-            mimeType
-          });
-          this.mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-              this.chunks.push(e.data);
-            }
-          };
-          this.mediaRecorder.start(1e3);
-        }
+        this.recordFlushTiming();
+        const blob = this.takeChunksAsBlob();
+        this.restartMediaRecorder();
         resolve(blob);
       };
       stalledRecorder.stop();
     });
   }
+  /**
+   * Stop recording and resolve the recorded blob (empty in realtime mode,
+   * where there is no MediaRecorder — audit §4 B5). Mirrors `flushChunk()`'s
+   * 5s safety timeout: if `onstop` never fires, this still resolves with
+   * whatever chunks were collected instead of hanging "Processing…" forever
+   * (audit §4 B4).
+   */
   async stop() {
     return new Promise((resolve) => {
-      if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
-        this.mediaRecorder.onstop = () => {
-          this.lastChunkDurationSec = (Date.now() - this.lastFlushTime) / 1e3;
-          const blob = new Blob(this.chunks, {
-            type: this.getSupportedMimeType()
-          });
-          this.cleanup();
-          resolve(blob);
-        };
-        this.mediaRecorder.stop();
-      } else {
+      if (!this.mediaRecorder || this.mediaRecorder.state === "inactive") {
         this.cleanup();
         resolve(new Blob([]));
+        return;
       }
+      const stalledRecorder = this.mediaRecorder;
+      const timeout = window.setTimeout(() => {
+        vlog.warn("Voxtral: stop timed out after 5s");
+        stalledRecorder.onstop = null;
+        stalledRecorder.ondataavailable = null;
+        this.recordFlushTiming();
+        const blob = this.takeChunksAsBlob();
+        this.cleanup();
+        resolve(blob);
+      }, 5e3);
+      stalledRecorder.onstop = () => {
+        window.clearTimeout(timeout);
+        this.recordFlushTiming();
+        const blob = this.takeChunksAsBlob();
+        this.cleanup();
+        resolve(blob);
+      };
+      stalledRecorder.stop();
     });
   }
   cleanup() {
@@ -3092,6 +1817,1396 @@ var AudioRecorder = class {
   }
 };
 
+// ../shared/src/tts.ts
+var TTS_MODEL = "voxtral-mini-tts-2603";
+var TTS_RESPONSE_FORMAT = "wav";
+var TTS_VOICES = [
+  { id: "en_paul_neutral", label: "Paul \u2014 neutral (US English)" },
+  { id: "gb_jane_neutral", label: "Jane \u2014 neutral (UK English)" }
+];
+
+// ../shared/src/retry.ts
+var realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function retryWithBackoff(fn, options = {}) {
+  var _a, _b, _c, _d;
+  const attempts = Math.max(1, (_a = options.attempts) != null ? _a : 3);
+  const baseDelayMs = (_b = options.baseDelayMs) != null ? _b : 1e3;
+  const sleep = (_c = options.sleep) != null ? _c : realSleep;
+  const shouldRetry = (_d = options.shouldRetry) != null ? _d : (() => true);
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await fn(attempt);
+    } catch (error) {
+      lastError = error;
+      const isLast = attempt === attempts - 1;
+      if (isLast || !shouldRetry(error)) break;
+      await sleep(baseDelayMs * 2 ** attempt);
+    }
+  }
+  throw lastError;
+}
+
+// ../shared/src/http-core.ts
+var DEFAULT_BASE_URL = "https://api.mistral.ai";
+function resolveBaseUrl(settings) {
+  var _a;
+  const trimmed = ((_a = settings.apiBaseUrl) != null ? _a : "").trim().replace(/\/+$/, "");
+  return trimmed || DEFAULT_BASE_URL;
+}
+var LOOPBACK_HOSTNAMES = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]);
+function isRfc1918Address(hostname) {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
+  if (!match) return false;
+  const octets = match.slice(1, 5).map(Number);
+  if (octets.some((n) => n > 255)) return false;
+  const [a, b] = octets;
+  return a === 10 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168;
+}
+function classifyBaseUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(resolveBaseUrl({ apiBaseUrl: url }));
+  } catch (e) {
+    return "invalid";
+  }
+  if (parsed.protocol === "https:") return "https";
+  if (parsed.protocol !== "http:") return "invalid";
+  const hostname = parsed.hostname.toLowerCase();
+  const isLocal = LOOPBACK_HOSTNAMES.has(hostname) || isRfc1918Address(hostname) || hostname.endsWith(".local");
+  return isLocal ? "http-local" : "http-remote";
+}
+var INSECURE_BASE_URL_MESSAGE = "Refusing to send your API key over an unencrypted connection; use https:// or a local address.";
+function assertKeySafeBaseUrl(baseUrl) {
+  if (classifyBaseUrl(baseUrl) === "http-remote") {
+    throw new Error(INSECURE_BASE_URL_MESSAGE);
+  }
+}
+function authHeaders(apiKey, extra) {
+  return { Authorization: `Bearer ${apiKey}`, ...extra };
+}
+var HTTP_TIMEOUT_UPLOAD_MS = 6e4;
+var HTTP_TIMEOUT_DEFAULT_MS = 3e4;
+var HttpStatusError = class extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+    this.name = "HttpStatusError";
+  }
+};
+function isRateLimitError(error) {
+  return error instanceof HttpStatusError && error.status === 429;
+}
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1e3)}s`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    clearTimeout(timer);
+    promise.catch(() => {
+    });
+  });
+}
+function sanitizeApiError(status, rawBody) {
+  var _a;
+  try {
+    const parsed = JSON.parse(rawBody);
+    let msg = (parsed == null ? void 0 : parsed.message) || ((_a = parsed == null ? void 0 : parsed.error) == null ? void 0 : _a.message);
+    if (!msg && (parsed == null ? void 0 : parsed.detail)) {
+      const d = parsed.detail;
+      msg = typeof d === "string" ? d : Array.isArray(d) ? d.map((e) => {
+        var _a2;
+        return (_a2 = e == null ? void 0 : e.msg) != null ? _a2 : JSON.stringify(e);
+      }).join("; ") : void 0;
+    }
+    if (typeof msg === "string" && msg.length > 0 && msg.length < 300) {
+      return `HTTP ${status}: ${msg}`;
+    }
+  } catch (e) {
+  }
+  switch (status) {
+    case 401:
+      return "HTTP 401: Invalid or expired API key";
+    case 403:
+      return "HTTP 403: Access denied";
+    case 404:
+      return "HTTP 404: API endpoint not found (check model name)";
+    case 413:
+      return "HTTP 413: Audio file too large";
+    case 429:
+      return "HTTP 429: Rate limit exceeded \u2014 try again later";
+    case 500:
+    case 502:
+    case 503:
+      return `HTTP ${status}: API server error \u2014 try again later`;
+    default:
+      return `HTTP ${status}: Request failed`;
+  }
+}
+
+// ../shared/src/authenticated-websocket.ts
+var WS_OPEN = 1;
+function loadNodeModule(name) {
+  const r = globalThis["require"];
+  if (!r) throw new Error(`Node.js require() not available (needed for ${name})`);
+  return r(name);
+}
+function hasNodeWebSocketAuth() {
+  return typeof globalThis["require"] === "function";
+}
+function createAuthenticatedWebSocket(url, headers, callbacks) {
+  const https = loadNodeModule("https");
+  const crypto = loadNodeModule("crypto");
+  const parsed = new URL(url);
+  const wsKey = crypto.randomBytes(16).toString("base64");
+  let closed = false;
+  let pingInterval = null;
+  function clearPing() {
+    if (pingInterval) {
+      clearInterval(pingInterval);
+      pingInterval = null;
+    }
+  }
+  const conn = {
+    readyState: 0,
+    send: () => {
+    },
+    // Pre-upgrade close (VX_E31_S3, audit §6.1 S2): before the HTTP
+    // upgrade there is no socket yet, and this used to be an empty
+    // function — the underlying https request kept running, so a connect
+    // timeout that "closed" the connection still got its upgrade a moment
+    // later and produced a second live socket with its own ping interval
+    // and callbacks into a session that had already been thrown away.
+    // Destroying the request is what actually cancels the handshake; the
+    // `closed` flag covers the race where the upgrade already landed in
+    // the event queue.
+    close: () => {
+      closed = true;
+      conn.readyState = 3;
+      clearPing();
+      try {
+        req.destroy();
+      } catch (e) {
+      }
+    }
+  };
+  const req = https.request(
+    {
+      hostname: parsed.hostname,
+      port: parsed.port || 443,
+      path: parsed.pathname + parsed.search,
+      method: "GET",
+      headers: {
+        ...headers,
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": wsKey
+      }
+    },
+    (res) => {
+      callbacks.onError(
+        new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
+      );
+      closed = true;
+      conn.readyState = 3;
+      req.destroy();
+    }
+  );
+  req.on("upgrade", (_res, socket) => {
+    if (closed) {
+      try {
+        socket.destroy();
+      } catch (e) {
+      }
+      return;
+    }
+    conn.readyState = WS_OPEN;
+    conn.send = (data) => {
+      const payload = Buffer.from(data, "utf-8");
+      const mask = crypto.randomBytes(4);
+      let header;
+      if (payload.length < 126) {
+        header = Buffer.alloc(6);
+        header[0] = 129;
+        header[1] = 128 | payload.length;
+        mask.copy(header, 2);
+      } else if (payload.length < 65536) {
+        header = Buffer.alloc(8);
+        header[0] = 129;
+        header[1] = 128 | 126;
+        header.writeUInt16BE(payload.length, 2);
+        mask.copy(header, 4);
+      } else {
+        header = Buffer.alloc(14);
+        header[0] = 129;
+        header[1] = 128 | 127;
+        header.writeBigUInt64BE(BigInt(payload.length), 2);
+        mask.copy(header, 10);
+      }
+      const masked = Buffer.alloc(payload.length);
+      for (let i = 0; i < payload.length; i++) {
+        masked[i] = payload[i] ^ mask[i % 4];
+      }
+      socket.write(Buffer.concat([header, masked]));
+    };
+    conn.close = () => {
+      closed = true;
+      conn.readyState = 3;
+      clearPing();
+      const closeFrame = Buffer.alloc(6);
+      closeFrame[0] = 136;
+      closeFrame[1] = 128;
+      const closeMask = crypto.randomBytes(4);
+      closeMask.copy(closeFrame, 2);
+      try {
+        socket.write(closeFrame);
+      } catch (e) {
+      }
+      socket.end();
+    };
+    pingInterval = setInterval(() => {
+      if (conn.readyState !== WS_OPEN) {
+        clearPing();
+        return;
+      }
+      try {
+        const pingFrame = Buffer.alloc(6);
+        pingFrame[0] = 137;
+        pingFrame[1] = 128;
+        const pingMask = crypto.randomBytes(4);
+        pingMask.copy(pingFrame, 2);
+        socket.write(pingFrame);
+      } catch (e) {
+      }
+    }, 15e3);
+    callbacks.onOpen();
+    let buffer = Buffer.alloc(0);
+    socket.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (buffer.length >= 2) {
+        const firstByte = buffer[0];
+        const secondByte = buffer[1];
+        const opcode = firstByte & 15;
+        const isMasked = (secondByte & 128) !== 0;
+        let payloadLength = secondByte & 127;
+        let offset = 2;
+        if (payloadLength === 126) {
+          if (buffer.length < 4) return;
+          payloadLength = buffer.readUInt16BE(2);
+          offset = 4;
+        } else if (payloadLength === 127) {
+          if (buffer.length < 10) return;
+          payloadLength = Number(buffer.readBigUInt64BE(2));
+          offset = 10;
+        }
+        if (isMasked) offset += 4;
+        if (buffer.length < offset + payloadLength) return;
+        let payload = buffer.subarray(offset, offset + payloadLength);
+        if (isMasked) {
+          const maskKey = buffer.subarray(offset - 4, offset);
+          payload = Buffer.from(payload);
+          for (let i = 0; i < payload.length; i++) {
+            payload[i] ^= maskKey[i % 4];
+          }
+        }
+        buffer = buffer.subarray(offset + payloadLength);
+        if (opcode === 1) {
+          callbacks.onMessage(payload.toString("utf-8"));
+        } else if (opcode === 8) {
+          conn.readyState = 3;
+          clearPing();
+          socket.end();
+          callbacks.onClose();
+          return;
+        } else if (opcode === 9) {
+          const pongMask = crypto.randomBytes(4);
+          const pongLen = payload.length;
+          let pongHeader;
+          if (pongLen < 126) {
+            pongHeader = Buffer.alloc(6);
+            pongHeader[0] = 138;
+            pongHeader[1] = 128 | pongLen;
+            pongMask.copy(pongHeader, 2);
+          } else {
+            pongHeader = Buffer.alloc(8);
+            pongHeader[0] = 138;
+            pongHeader[1] = 128 | 126;
+            pongHeader.writeUInt16BE(pongLen, 2);
+            pongMask.copy(pongHeader, 4);
+          }
+          const maskedPong = Buffer.from(payload);
+          for (let i = 0; i < maskedPong.length; i++) {
+            maskedPong[i] ^= pongMask[i % 4];
+          }
+          socket.write(Buffer.concat([pongHeader, maskedPong]));
+        }
+      }
+    });
+    socket.on("close", () => {
+      conn.readyState = 3;
+      clearPing();
+      callbacks.onClose();
+    });
+    socket.on("error", (err) => {
+      conn.readyState = 3;
+      clearPing();
+      callbacks.onError(err);
+    });
+  });
+  req.on("error", (err) => {
+    callbacks.onError(err);
+  });
+  req.end();
+  return conn;
+}
+
+// ../shared/src/realtime-token.ts
+var SAFETY_MARGIN_MS = 1e4;
+var PREFETCH_MARGIN_MS = 25e3;
+var RealtimeTokenError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "RealtimeTokenError";
+  }
+};
+var RealtimeTokenManager = class {
+  constructor(settings, httpRequest) {
+    this.settings = settings;
+    this.httpRequest = httpRequest;
+    this.cached = null;
+    // Dedupes concurrent mint requests (e.g. dual-delay's two near-simultaneous
+    // connects) onto a single in-flight POST.
+    this.minting = null;
+  }
+  /**
+   * Return a token valid for at least SAFETY_MARGIN_MS, minting one if the
+   * cache is empty, expiring soon, or scoped to a different model than the
+   * current settings. May throw RealtimeTokenError.
+   */
+  async getToken() {
+    const model = this.settings.realtimeModel;
+    if (this.cached && this.cached.model === model && this.hasMargin(this.cached, SAFETY_MARGIN_MS)) {
+      return this.cached.token;
+    }
+    return this.mintShared(model);
+  }
+  /**
+   * Fire-and-forget: mint the next token in the background once the cached
+   * one is within PREFETCH_MARGIN_MS of expiry, so a silent reconnect never
+   * blocks on the network. Errors are swallowed — the next getToken() call
+   * retries the mint and surfaces any failure there instead.
+   */
+  prefetch() {
+    const model = this.settings.realtimeModel;
+    if (this.minting) return;
+    if (this.cached && this.cached.model === model && this.hasMargin(this.cached, PREFETCH_MARGIN_MS)) {
+      return;
+    }
+    this.mintShared(model).catch(() => {
+    });
+  }
+  hasMargin(cached, marginMs) {
+    return cached.expiresAtMs - Date.now() > marginMs;
+  }
+  mintShared(model) {
+    if (this.minting) return this.minting;
+    const promise = this.mint(model).finally(() => {
+      this.minting = null;
+    });
+    this.minting = promise;
+    return promise;
+  }
+  async mint(model) {
+    var _a;
+    const base = resolveBaseUrl(this.settings);
+    assertKeySafeBaseUrl(base);
+    const response = await withTimeout(
+      this.httpRequest({
+        url: `${base}/v1/client/sessions`,
+        method: "POST",
+        headers: authHeaders(this.settings.apiKey, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ purpose: "realtime", model })
+      }),
+      HTTP_TIMEOUT_DEFAULT_MS,
+      "Realtime token request"
+    );
+    if (response.status !== 201) {
+      throw new RealtimeTokenError(
+        `Realtime token request failed: ${sanitizeApiError(response.status, response.text)}`
+      );
+    }
+    const secret = (_a = response.json) == null ? void 0 : _a.client_secret;
+    const token = secret == null ? void 0 : secret.value;
+    if (typeof token !== "string" || !token.startsWith("rt_")) {
+      throw new RealtimeTokenError(
+        "Realtime token request failed: malformed client_secret.value in response"
+      );
+    }
+    const expiresAtMs = typeof (secret == null ? void 0 : secret.expires_at) === "string" ? Date.parse(secret.expires_at) : NaN;
+    if (Number.isNaN(expiresAtMs)) {
+      throw new RealtimeTokenError(
+        "Realtime token request failed: malformed client_secret.expires_at in response"
+      );
+    }
+    this.cached = { token, expiresAtMs, model };
+    return token;
+  }
+};
+
+// ../shared/src/session-support.ts
+var WATCHDOG_TIMEOUT_MS = 6e4;
+var MAX_AUDIO_BUFFER_BYTES = 32e4;
+var MAX_CONSECUTIVE_FAILURES = 5;
+var DONE_SIGNAL_CEILING_MS = 1e3;
+var RECONNECT_BACKOFF_STEP_MS = 500;
+var RECONNECT_BACKOFF_MAX_MS = 3e3;
+var REALTIME_CONNECT_TIMEOUT_MS = 1e4;
+var REALTIME_AUDIO_ENCODING = "pcm_s16le";
+var REALTIME_AUDIO_SAMPLE_RATE_HZ = 16e3;
+var ConnectionWatchdog = class {
+  constructor(onTimeout, timeoutMs = WATCHDOG_TIMEOUT_MS) {
+    this.onTimeout = onTimeout;
+    this.timeoutMs = timeoutMs;
+    this.timer = null;
+  }
+  /** (Re)start the countdown. Call this on every server event. */
+  arm() {
+    this.clear();
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.onTimeout();
+    }, this.timeoutMs);
+  }
+  /** Stop the countdown (stop(), disconnect, teardown). */
+  clear() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+  /** Whether a countdown is currently running (tests/diagnostics). */
+  get armed() {
+    return this.timer !== null;
+  }
+};
+var ReconnectAudioBuffer = class {
+  constructor(maxBytes = MAX_AUDIO_BUFFER_BYTES) {
+    this.maxBytes = maxBytes;
+    this.chunks = [];
+    this.bytes = 0;
+    // Warn once per disconnected episode (not per chunk): a long disconnect
+    // eventually overflows the cap and genuinely loses audio, so this is a
+    // useful early signal without being spammy.
+    this.warned = false;
+  }
+  /**
+   * Store a chunk that could not be sent. Returns true exactly once per
+   * disconnected episode, so the caller can log a single warning.
+   */
+  push(chunk) {
+    const firstOfEpisode = !this.warned;
+    this.warned = true;
+    this.chunks.push(chunk);
+    this.bytes += chunk.byteLength;
+    while (this.bytes > this.maxBytes && this.chunks.length > 1) {
+      const dropped = this.chunks.shift();
+      if (dropped) this.bytes -= dropped.byteLength;
+    }
+    return firstOfEpisode;
+  }
+  /**
+   * Note that audio went out over a live connection — ends the current
+   * disconnected episode, so a later drop warns again.
+   */
+  noteDelivered() {
+    this.warned = false;
+  }
+  /** Take everything buffered so far, leaving the buffer empty. */
+  drain() {
+    const buffered = this.chunks;
+    this.chunks = [];
+    this.bytes = 0;
+    return buffered;
+  }
+  /** Drop everything, including the warned-this-episode flag (session start/stop). */
+  reset() {
+    this.chunks = [];
+    this.bytes = 0;
+    this.warned = false;
+  }
+  get length() {
+    return this.chunks.length;
+  }
+  get byteLength() {
+    return this.bytes;
+  }
+};
+var ReconnectPolicy = class {
+  constructor(maxFailures = MAX_CONSECUTIVE_FAILURES, stepMs = RECONNECT_BACKOFF_STEP_MS, maxDelayMs = RECONNECT_BACKOFF_MAX_MS) {
+    this.maxFailures = maxFailures;
+    this.stepMs = stepMs;
+    this.maxDelayMs = maxDelayMs;
+    this.failureCount = 0;
+  }
+  get failures() {
+    return this.failureCount;
+  }
+  /** Count a failed attempt; null means "give up" (limit reached). */
+  recordFailure() {
+    this.failureCount++;
+    if (this.failureCount >= this.maxFailures) return null;
+    return Math.min(this.stepMs * this.failureCount, this.maxDelayMs);
+  }
+  /** A connection succeeded — the next outage starts from zero again. */
+  reset() {
+    this.failureCount = 0;
+  }
+};
+async function runReconnectLoop(opts) {
+  var _a, _b, _c;
+  const sleep = (_a = opts.sleep) != null ? _a : ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  for (; ; ) {
+    if (!opts.prepare()) return;
+    try {
+      await opts.connect();
+      opts.policy.reset();
+      (_b = opts.onSuccess) == null ? void 0 : _b.call(opts);
+      return;
+    } catch (e) {
+      const delay = opts.policy.recordFailure();
+      (_c = opts.onFailure) == null ? void 0 : _c.call(opts, e, opts.policy.failures, opts.policy.maxFailures);
+      if (delay === null) {
+        opts.onGiveUp();
+        return;
+      }
+      await sleep(delay);
+      if (!opts.isActive()) return;
+    }
+  }
+}
+function parseDelta(prevRaw, incoming) {
+  const cumulative = prevRaw !== "" && incoming.startsWith(prevRaw);
+  return {
+    text: cumulative ? incoming.slice(prevRaw.length) : incoming,
+    prevRaw: cumulative ? incoming : prevRaw + incoming
+  };
+}
+var DoneSignal = class {
+  constructor() {
+    this.pending = null;
+  }
+  /** Wait for `signal()`, or for `ceilingMs` to elapse — whichever first. */
+  async awaitDone(ceilingMs = DONE_SIGNAL_CEILING_MS) {
+    let timer = null;
+    const signalled = new Promise((resolve) => {
+      this.pending = resolve;
+    });
+    const ceiling = new Promise((resolve) => {
+      timer = setTimeout(resolve, ceilingMs);
+    });
+    try {
+      await Promise.race([signalled, ceiling]);
+    } finally {
+      this.pending = null;
+      if (timer !== null) clearTimeout(timer);
+    }
+  }
+  /** The done event arrived — release a waiting `awaitDone()`. */
+  signal() {
+    const resolve = this.pending;
+    if (!resolve) return;
+    this.pending = null;
+    resolve();
+  }
+  /** Whether a wait is currently in flight (tests/diagnostics). */
+  get waiting() {
+    return this.pending !== null;
+  }
+};
+function createTokenManager(settings, httpRequest) {
+  return httpRequest ? new RealtimeTokenManager(settings, httpRequest) : null;
+}
+
+// ../shared/src/realtime-transcriber.ts
+function resolveRealtimeProtocol(settings) {
+  if (settings.realtimeProtocol === "mistral" || settings.realtimeProtocol === "vllm") {
+    return settings.realtimeProtocol;
+  }
+  try {
+    const { hostname } = new URL(resolveBaseUrl(settings));
+    return LOOPBACK_HOSTNAMES.has(hostname) ? "vllm" : "mistral";
+  } catch (e) {
+    return "mistral";
+  }
+}
+function isLocalMode(settings) {
+  return resolveRealtimeProtocol(settings) === "vllm";
+}
+var REALTIME_DELTA_TYPE = "transcription.text.delta";
+var VLLM_DELTA_TYPE_ALIAS = "transcription.delta";
+function parseRealtimeMessage(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const raw = value;
+  if (typeof raw.type !== "string") return null;
+  const msg = { type: raw.type };
+  if (typeof raw.text === "string") msg.text = raw.text;
+  if ("session" in raw) msg.session = raw.session;
+  const err = raw.error;
+  if (typeof err === "object" && err !== null && !Array.isArray(err)) {
+    const e = err;
+    msg.error = {
+      type: typeof e.type === "string" ? e.type : void 0,
+      code: typeof e.code === "string" || typeof e.code === "number" ? e.code : void 0,
+      message: typeof e.message === "string" ? e.message : void 0
+    };
+  }
+  return msg;
+}
+var RealtimeTranscriber = class {
+  constructor(settings, callbacks, delayOverrideMs, opts) {
+    this.ws = null;
+    this.intentionallyClosed = false;
+    // The server only accepts audio AFTER session.update declared the
+    // audio_format; an input_audio.append that lands in the open→
+    // session.created window precedes that declaration and the server
+    // rejects it as a mid-transcription format change. isConnected
+    // therefore reports handshake completion, not bare socket state,
+    // so callers keep buffering audio until the format is declared.
+    this.sessionReady = false;
+    // Terminal flag (VX_E31_S3, audit §6.1 S2): set by close() and by the
+    // connect-timeout path. A transcriber is single-use — the sessions build a
+    // fresh one for every (re)connect — so once disposed it must behave like a
+    // dead object even if the socket it opened is still alive somewhere in the
+    // event queue: no session.created, no deltas, no done, no errors, no
+    // disconnect callback, and sendAudio/flush/endAudio are no-ops. Without it
+    // a connect timeout (or a stop() during a reconnect) could still get its
+    // upgrade a moment later and start feeding a session that had already
+    // thrown this connection away.
+    this.disposed = false;
+    this.delayOverrideMs = null;
+    this.settings = settings;
+    this.callbacks = callbacks;
+    this.delayOverrideMs = delayOverrideMs != null ? delayOverrideMs : null;
+    this.opts = opts;
+  }
+  async connect() {
+    var _a;
+    if (this.disposed) {
+      throw new Error("RealtimeTranscriber is closed");
+    }
+    if (resolveRealtimeProtocol(this.settings) === "vllm") return this.connectVllm();
+    if (!hasNodeWebSocketAuth() && ((_a = this.opts) == null ? void 0 : _a.tokenManager)) return this.connectCloudSubprotocol();
+    this.intentionallyClosed = false;
+    this.sessionReady = false;
+    const url = this.realtimeUrl({ assertKeySafe: true });
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.close();
+        reject(new Error("WebSocket connection timeout"));
+      }, REALTIME_CONNECT_TIMEOUT_MS);
+      const route = {
+        tag: "",
+        completeHandshake: () => {
+          clearTimeout(timeout);
+          this.sendSessionUpdate();
+          this.sessionReady = true;
+          this.callbacks.onSessionCreated();
+          resolve();
+        }
+      };
+      this.ws = createAuthenticatedWebSocket(
+        url,
+        authHeaders(this.settings.apiKey),
+        {
+          onOpen: () => {
+          },
+          onMessage: (data) => {
+            this.dispatchMessage(data, route);
+          },
+          onError: (err) => {
+            if (this.disposed) return;
+            clearTimeout(timeout);
+            vlog.error("Voxtral: WebSocket error", err);
+            reject(
+              new Error(
+                `WebSocket connection failed: ${err.message}`
+              )
+            );
+          },
+          onClose: () => {
+            vlog.debug(
+              `Voxtral WS: connection closed (intentional=${this.intentionallyClosed})`
+            );
+            this.ws = null;
+            this.sessionReady = false;
+            if (!this.intentionallyClosed && !this.disposed) {
+              this.callbacks.onDisconnect();
+            }
+          }
+        }
+      );
+    });
+  }
+  /**
+   * Connect to a local vLLM `/v1/realtime` endpoint. Unlike the Mistral cloud
+   * path, this is a plain (unauthenticated) WebSocket — no upgrade headers,
+   * no model query param — so it uses the platform-native `WebSocket`
+   * directly instead of authenticated-websocket.ts (which only speaks
+   * https/443 and exists purely to inject the cloud Authorization header).
+   * The native socket is wrapped in the same AuthenticatedWsConnection shape
+   * so sendAudio/flush/endAudio/close/isConnected keep working unchanged.
+   */
+  connectVllm() {
+    this.intentionallyClosed = false;
+    this.sessionReady = false;
+    const url = `${this.wsBase()}/v1/realtime`;
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      let opened = false;
+      let failedBeforeOpen = false;
+      const timeout = setTimeout(() => {
+        this.close();
+        reject(new Error("WebSocket connection timeout"));
+      }, REALTIME_CONNECT_TIMEOUT_MS);
+      const route = {
+        tag: " (vLLM)",
+        deltaAliases: [VLLM_DELTA_TYPE_ALIAS]
+      };
+      this.ws = this.wrapNativeSocket(socket);
+      socket.onopen = () => {
+        if (this.disposed) {
+          socket.close();
+          return;
+        }
+        opened = true;
+        clearTimeout(timeout);
+        this.sendSessionUpdate();
+        this.sessionReady = true;
+        this.callbacks.onSessionCreated();
+        resolve();
+      };
+      socket.onmessage = (event) => {
+        this.dispatchMessage(String(event.data), route);
+      };
+      socket.onerror = () => {
+        if (this.disposed) return;
+        if (!opened) {
+          failedBeforeOpen = true;
+          clearTimeout(timeout);
+          reject(new Error("WebSocket connection failed"));
+        } else {
+          vlog.error("Voxtral: vLLM WebSocket error");
+        }
+      };
+      socket.onclose = () => {
+        vlog.debug(
+          `Voxtral WS (vLLM): connection closed (intentional=${this.intentionallyClosed})`
+        );
+        this.ws = null;
+        this.sessionReady = false;
+        if (!this.intentionallyClosed && !failedBeforeOpen && !this.disposed) {
+          this.callbacks.onDisconnect();
+        }
+      };
+    });
+  }
+  /**
+   * Connect to the Mistral cloud realtime endpoint using WebSocket-
+   * subprotocol auth (VX_E22_S8) instead of the manual-upgrade
+   * Authorization header: mints a short-lived token via
+   * `this.opts.tokenManager` and passes it as the second WebSocket
+   * subprotocol (`new WebSocket(url, ["realtime", token])`) — the route
+   * mobile/webview must take since the header route above needs Node's
+   * `require()` (see hasNodeWebSocketAuth()). Event semantics mirror the
+   * header path above (CLOUD, not vLLM): connect() only resolves once
+   * `session.created` arrives, not on bare `open`.
+   */
+  async connectCloudSubprotocol() {
+    var _a;
+    this.intentionallyClosed = false;
+    this.sessionReady = false;
+    const tokenManager = (_a = this.opts) == null ? void 0 : _a.tokenManager;
+    if (!tokenManager) {
+      throw new Error("connectCloudSubprotocol() requires a token manager");
+    }
+    const token = await tokenManager.getToken();
+    if (this.disposed) {
+      throw new Error("RealtimeTranscriber is closed");
+    }
+    const url = this.realtimeUrl();
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url, ["realtime", token]);
+      let opened = false;
+      let failedBeforeOpen = false;
+      const timeout = setTimeout(() => {
+        this.close();
+        reject(new Error("WebSocket connection timeout"));
+      }, REALTIME_CONNECT_TIMEOUT_MS);
+      const route = {
+        tag: " (token)",
+        completeHandshake: () => {
+          clearTimeout(timeout);
+          this.sendSessionUpdate();
+          this.sessionReady = true;
+          this.callbacks.onSessionCreated();
+          resolve();
+          tokenManager.prefetch();
+        }
+      };
+      this.ws = this.wrapNativeSocket(socket);
+      socket.onopen = () => {
+        if (this.disposed) {
+          socket.close();
+          return;
+        }
+        opened = true;
+      };
+      socket.onmessage = (event) => {
+        this.dispatchMessage(String(event.data), route);
+      };
+      socket.onerror = () => {
+        if (this.disposed) return;
+        if (!opened) {
+          failedBeforeOpen = true;
+          clearTimeout(timeout);
+          reject(new Error("WebSocket connection failed"));
+        } else {
+          vlog.error("Voxtral: WS (token) error");
+        }
+      };
+      socket.onclose = () => {
+        vlog.debug(
+          `Voxtral WS (token): connection closed (intentional=${this.intentionallyClosed})`
+        );
+        this.ws = null;
+        this.sessionReady = false;
+        if (!this.intentionallyClosed && !failedBeforeOpen && !this.disposed) {
+          this.callbacks.onDisconnect();
+        }
+      };
+    });
+  }
+  // ── URL + socket plumbing shared by the routes ──
+  /** `https://…` → `wss://…`, `http://…` → `ws://…` on the resolved base URL. */
+  wsBase() {
+    const httpBase = resolveBaseUrl(this.settings);
+    return httpBase.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
+  }
+  /**
+   * The cloud realtime endpoint with its `model` query parameter. Both cloud
+   * routes hit the same URL; only the header route sends the API key on the
+   * upgrade, so only it asks for the VX_E30_S6 transport-safety assertion.
+   */
+  realtimeUrl(opts) {
+    if (opts == null ? void 0 : opts.assertKeySafe) assertKeySafeBaseUrl(resolveBaseUrl(this.settings));
+    const params = new URLSearchParams({ model: this.settings.realtimeModel });
+    return `${this.wsBase()}/v1/audio/transcriptions/realtime?${params}`;
+  }
+  /**
+   * Wrap a platform-native `WebSocket` in the AuthenticatedWsConnection shape
+   * the rest of this class talks to, so sendAudio/flush/endAudio/close/
+   * isConnected are route-agnostic.
+   */
+  wrapNativeSocket(socket) {
+    return {
+      send: (data) => socket.send(data),
+      close: () => socket.close(),
+      get readyState() {
+        return socket.readyState;
+      }
+    };
+  }
+  // ── One dispatcher for all three routes (VX_E31_S7) ──
+  /**
+   * Handle one raw server message. Every route funnels through here: the
+   * `disposed` gate, the JSON decode, the shape check, the debug logging
+   * (lengths only, never transcript text — VX_E30_S7) and the callback
+   * fan-out are identical, and `route` carries the few genuine differences.
+   */
+  dispatchMessage(raw, route) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+    if (this.disposed) return;
+    let decoded;
+    try {
+      decoded = JSON.parse(raw);
+    } catch (e) {
+      vlog.error(
+        `Voxtral: failed to parse WS${route.tag} message`,
+        `len=${raw.length}`,
+        e
+      );
+      return;
+    }
+    const msg = parseRealtimeMessage(decoded);
+    if (!msg) {
+      vlog.debug(
+        `Voxtral WS${route.tag}: unknown message type:`,
+        void 0,
+        `len=${raw.length}`
+      );
+      return;
+    }
+    const isDelta = msg.type === REALTIME_DELTA_TYPE || ((_b = (_a = route.deltaAliases) == null ? void 0 : _a.includes(msg.type)) != null ? _b : false);
+    vlog.debug(
+      `Voxtral WS${route.tag} \u2190 ${msg.type}`,
+      isDelta ? `text=${(_d = (_c = msg.text) == null ? void 0 : _c.length) != null ? _d : 0} chars` : ""
+    );
+    if (isDelta) {
+      this.callbacks.onDelta((_e = msg.text) != null ? _e : "");
+      return;
+    }
+    switch (msg.type) {
+      case "session.created":
+      case "session.updated":
+        this.handleSessionEvent(msg, route);
+        break;
+      case "transcription.done":
+        vlog.debug(
+          `Voxtral WS${route.tag}: transcription.done`,
+          `text=${(_g = (_f = msg.text) == null ? void 0 : _f.length) != null ? _g : 0} chars`
+        );
+        this.callbacks.onDone((_h = msg.text) != null ? _h : "");
+        break;
+      case "error":
+        vlog.error(
+          `Voxtral WS${route.tag}: server error:`,
+          `type=${(_i = msg.error) == null ? void 0 : _i.type} code=${(_j = msg.error) == null ? void 0 : _j.code} message=${(_k = msg.error) == null ? void 0 : _k.message}`
+        );
+        this.callbacks.onError(((_l = msg.error) == null ? void 0 : _l.message) || "Unknown error");
+        break;
+      default:
+        vlog.debug(
+          `Voxtral WS${route.tag}: unknown message type:`,
+          msg.type,
+          `len=${raw.length}`
+        );
+        break;
+    }
+  }
+  /**
+   * `session.created` / `session.updated`. A route without a
+   * `completeHandshake` (vLLM) already sent session.update on open, so both
+   * events are tolerated and ignored there; the cloud routes complete their
+   * handshake on `session.created` and log the echoed session on
+   * `session.updated`.
+   */
+  handleSessionEvent(msg, route) {
+    var _a;
+    if (!route.completeHandshake) {
+      vlog.debug(`Voxtral WS${route.tag}: session event`, msg.type);
+      return;
+    }
+    if (msg.type === "session.created") {
+      route.completeHandshake();
+      return;
+    }
+    vlog.debug(
+      `Voxtral WS${route.tag}: session updated`,
+      JSON.stringify((_a = msg.session) != null ? _a : {})
+    );
+  }
+  sendSessionUpdate() {
+    var _a;
+    if (!this.ws) return;
+    const delayMs = (_a = this.delayOverrideMs) != null ? _a : this.settings.streamingDelayMs;
+    const msg = {
+      type: "session.update",
+      session: {
+        audio_format: {
+          encoding: REALTIME_AUDIO_ENCODING,
+          sample_rate: REALTIME_AUDIO_SAMPLE_RATE_HZ
+        },
+        target_streaming_delay_ms: delayMs
+      }
+    };
+    this.ws.send(JSON.stringify(msg));
+  }
+  sendAudio(pcmBytes) {
+    if (this.disposed) return;
+    if (!this.ws || this.ws.readyState !== WS_OPEN || !this.sessionReady) return;
+    const base64 = arrayBufferToBase64(pcmBytes);
+    const msg = {
+      type: "input_audio.append",
+      audio: base64
+    };
+    this.ws.send(JSON.stringify(msg));
+  }
+  flush() {
+    if (this.disposed) return;
+    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
+    this.ws.send(JSON.stringify({ type: "input_audio.flush" }));
+  }
+  endAudio() {
+    if (this.disposed) return;
+    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
+    this.ws.send(JSON.stringify({ type: "input_audio.end" }));
+  }
+  /**
+   * Close the connection and permanently dispose this transcriber
+   * (VX_E31_S3). Everything the socket may still emit afterwards is
+   * ignored; the sessions create a new instance for the next connect.
+   */
+  close() {
+    this.intentionallyClosed = true;
+    this.disposed = true;
+    this.sessionReady = false;
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+  get isConnected() {
+    var _a;
+    if (this.disposed) return false;
+    return ((_a = this.ws) == null ? void 0 : _a.readyState) === WS_OPEN && this.sessionReady;
+  }
+  /** Whether close() (or a connect timeout) already retired this instance. */
+  get isDisposed() {
+    return this.disposed;
+  }
+};
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+// ../shared/src/mistral-api.ts
+var CORRECTION_TIMEOUT_BASE_MS = 6e4;
+var CORRECTION_TIMEOUT_PER_CHAR_MS = 15;
+var CORRECTION_TIMEOUT_MAX_MS = 12e5;
+function correctionTimeoutMs(textLength) {
+  const scaled = CORRECTION_TIMEOUT_BASE_MS + textLength * CORRECTION_TIMEOUT_PER_CHAR_MS;
+  return Math.min(scaled, CORRECTION_TIMEOUT_MAX_MS);
+}
+function parseModelsResponse(value) {
+  if (typeof value !== "object" || value === null) return [];
+  const data = value.data;
+  if (!Array.isArray(data)) return [];
+  const seen = /* @__PURE__ */ new Set();
+  const models = [];
+  for (const entry of data) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const m = entry;
+    if (typeof m.id !== "string" || m.id.length === 0) continue;
+    if (seen.has(m.id)) continue;
+    seen.add(m.id);
+    models.push({
+      id: m.id,
+      type: typeof m.type === "string" ? m.type : void 0,
+      capabilities: typeof m.capabilities === "object" && m.capabilities !== null ? m.capabilities : void 0
+    });
+  }
+  models.sort((a, b) => a.id.localeCompare(b.id));
+  return models;
+}
+function parseChatCompletion(value) {
+  if (typeof value !== "object" || value === null) return null;
+  const choices = value.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return null;
+  const first = choices[0];
+  if (typeof first !== "object" || first === null) return null;
+  const message = first.message;
+  if (typeof message !== "object" || message === null) return null;
+  const content = message.content;
+  return typeof content === "string" ? content.trim() : null;
+}
+async function listModels(apiKey, httpRequest, baseUrl) {
+  if (!apiKey || !apiKey.trim()) return [];
+  const base = resolveBaseUrl({ apiBaseUrl: baseUrl != null ? baseUrl : "" });
+  assertKeySafeBaseUrl(base);
+  try {
+    const response = await withTimeout(
+      httpRequest({
+        url: `${base}/v1/models`,
+        method: "GET",
+        headers: authHeaders(apiKey)
+      }),
+      HTTP_TIMEOUT_DEFAULT_MS,
+      "List models request"
+    );
+    if (response.status !== 200) {
+      vlog.warn(
+        `Voxtral: Failed to list models (${response.status})`
+      );
+      return [];
+    }
+    return parseModelsResponse(response.json);
+  } catch (e) {
+    vlog.warn("Voxtral: Could not fetch models", e);
+    return [];
+  }
+}
+async function listVoices(apiKey, httpRequest, baseUrl) {
+  var _a, _b, _c, _d;
+  if (!apiKey || !apiKey.trim()) return [];
+  const base = resolveBaseUrl({ apiBaseUrl: baseUrl != null ? baseUrl : "" });
+  assertKeySafeBaseUrl(base);
+  try {
+    const response = await withTimeout(
+      httpRequest({
+        url: `${base}/v1/audio/voices?limit=100`,
+        method: "GET",
+        headers: authHeaders(apiKey)
+      }),
+      HTTP_TIMEOUT_DEFAULT_MS,
+      "List voices request"
+    );
+    if (response.status !== 200) {
+      vlog.warn(`Voxtral: Failed to list voices (${response.status})`);
+      return [];
+    }
+    const data = response.json;
+    const arr = Array.isArray(data) ? data : (_d = (_c = (_b = (_a = data == null ? void 0 : data.data) != null ? _a : data == null ? void 0 : data.voices) != null ? _b : data == null ? void 0 : data.items) != null ? _c : data == null ? void 0 : data.results) != null ? _d : [];
+    const seenIds = /* @__PURE__ */ new Set();
+    return arr.map((v) => {
+      var _a2, _b2, _c2, _d2;
+      const voice = v;
+      const id = (_b2 = (_a2 = voice.id) != null ? _a2 : voice.slug) != null ? _b2 : voice.name;
+      return id ? { id, name: (_d2 = (_c2 = voice.name) != null ? _c2 : voice.slug) != null ? _d2 : id } : null;
+    }).filter((v) => {
+      if (v === null || seenIds.has(v.id)) return false;
+      seenIds.add(v.id);
+      return true;
+    });
+  } catch (e) {
+    vlog.warn("Voxtral: Could not fetch voices", e);
+    return [];
+  }
+}
+var CONTEXT_BIAS_MAX_TERMS = 100;
+var CONTEXT_BIAS_MAX_TERM_LENGTH = 40;
+function buildContextBias(terms) {
+  if (!terms || terms.length === 0) return [];
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const raw of terms) {
+    const term = raw.trim().replace(/\s+/g, "_").replace(/,/g, "");
+    if (!term) continue;
+    if (term.length > CONTEXT_BIAS_MAX_TERM_LENGTH) continue;
+    if (!/\p{L}/u.test(term)) continue;
+    if (seen.has(term)) continue;
+    seen.add(term);
+    result.push(term);
+    if (result.length >= CONTEXT_BIAS_MAX_TERMS) break;
+  }
+  return result;
+}
+async function transcribeBatchRaw(audioBlob, settings, httpRequest, diarize = false, context = EMPTY_REQUEST_CONTEXT) {
+  var _a, _b, _c;
+  const t = audioBlob.type;
+  const ext = t.includes("mp4") ? "m4a" : t.includes("ogg") ? "ogg" : t.includes("mpeg") || t.includes("mp3") ? "mp3" : t.includes("wav") ? "wav" : t.includes("flac") ? "flac" : t.includes("aac") ? "aac" : "webm";
+  const mimeType = audioBlob.type || `audio/${ext}`;
+  const boundary = `----VoxtralBoundary${Date.now()}`;
+  const arrayBuf = await audioBlob.arrayBuffer();
+  const fileBytes = new Uint8Array(arrayBuf);
+  let textParts = "";
+  textParts += `--${boundary}\r
+`;
+  textParts += `Content-Disposition: form-data; name="file"; filename="recording.${ext}"\r
+`;
+  textParts += `Content-Type: ${mimeType}\r
+\r
+`;
+  const afterFile = `\r
+--${boundary}\r
+Content-Disposition: form-data; name="model"\r
+\r
+${settings.batchModel}\r
+`;
+  let extraFields = "";
+  if (diarize) {
+    extraFields += `--${boundary}\r
+Content-Disposition: form-data; name="diarize"\r
+\r
+true\r
+`;
+    extraFields += `--${boundary}\r
+Content-Disposition: form-data; name="timestamp_granularities"\r
+\r
+segment\r
+`;
+  } else if (settings.language) {
+    extraFields += `--${boundary}\r
+Content-Disposition: form-data; name="language"\r
+\r
+${settings.language}\r
+`;
+  }
+  const bias = buildContextBias(context.vocabularyTerms);
+  for (const term of bias) {
+    extraFields += `--${boundary}\r
+Content-Disposition: form-data; name="context_bias"\r
+\r
+${term}\r
+`;
+  }
+  extraFields += `--${boundary}--\r
+`;
+  const enc = new TextEncoder();
+  const headerBuf = enc.encode(textParts);
+  const tailBuf = enc.encode(afterFile + extraFields);
+  const body = new Uint8Array(headerBuf.length + fileBytes.length + tailBuf.length);
+  body.set(headerBuf, 0);
+  body.set(fileBytes, headerBuf.length);
+  body.set(tailBuf, headerBuf.length + fileBytes.length);
+  const base = resolveBaseUrl(settings);
+  assertKeySafeBaseUrl(base);
+  const response = await withTimeout(
+    httpRequest({
+      url: `${base}/v1/audio/transcriptions`,
+      method: "POST",
+      headers: authHeaders(settings.apiKey, {
+        "Content-Type": `multipart/form-data; boundary=${boundary}`
+      }),
+      body: body.buffer
+    }),
+    HTTP_TIMEOUT_UPLOAD_MS,
+    "Transcription request"
+  );
+  if (response.status !== 200) {
+    throw new Error(
+      `Transcription failed: ${sanitizeApiError(response.status, response.text)}`
+    );
+  }
+  return {
+    text: ((_a = response.json) == null ? void 0 : _a.text) || "",
+    segments: (_c = (_b = response.json) == null ? void 0 : _b.segments) != null ? _c : []
+  };
+}
+async function transcribeBatch(audioBlob, settings, httpRequest, diarize = false, context = EMPTY_REQUEST_CONTEXT) {
+  return (await transcribeBatchRaw(audioBlob, settings, httpRequest, diarize, context)).text;
+}
+async function synthesizeSpeech(text, settings, httpRequest) {
+  var _a, _b, _c, _d, _e;
+  const base = resolveBaseUrl(settings);
+  assertKeySafeBaseUrl(base);
+  const response = await retryWithBackoff(
+    async () => {
+      const resp = await withTimeout(
+        httpRequest({
+          url: `${base}/v1/audio/speech`,
+          method: "POST",
+          headers: authHeaders(settings.apiKey, { "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            model: TTS_MODEL,
+            input: text,
+            voice: settings.ttsVoice,
+            response_format: TTS_RESPONSE_FORMAT
+          })
+        }),
+        HTTP_TIMEOUT_DEFAULT_MS,
+        "Speech synthesis request"
+      );
+      if (resp.status !== 200) {
+        throw new HttpStatusError(
+          `Speech synthesis failed: ${sanitizeApiError(resp.status, resp.text)}`,
+          resp.status
+        );
+      }
+      return resp;
+    },
+    { shouldRetry: isRateLimitError }
+  );
+  const json = response.json;
+  if (json && typeof json === "object" && !Array.isArray(json)) {
+    const candidate = (_e = (_d = (_c = (_b = (_a = json.audio_data) != null ? _a : (
+      // confirmed field name returned by Mistral TTS
+      json.audio
+    )) != null ? _b : json.audio_base64) != null ? _c : json.b64_audio) != null ? _d : json.audio_content) != null ? _e : typeof json.data === "string" ? json.data : void 0;
+    if (typeof candidate === "string" && candidate.length > 0) {
+      return base64ToArrayBuffer(candidate);
+    }
+    throw new Error(
+      `Speech synthesis returned JSON, not audio (fields: ${Object.keys(json).join(", ")})`
+    );
+  }
+  if (!response.arrayBuffer || response.arrayBuffer.byteLength === 0) {
+    throw new Error("Speech synthesis returned no audio.");
+  }
+  return response.arrayBuffer;
+}
+function base64ToArrayBuffer(b64) {
+  const clean = b64.replace(/^data:[^;,]*;base64,/, "");
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+function buildCustomCommandGuard2(settings) {
+  var _a;
+  return buildCustomCommandGuard((_a = settings.customCommands) != null ? _a : [], settings.language);
+}
+function buildVocabularyGuard2(context) {
+  return buildVocabularyGuard(context.vocabularyTerms);
+}
+async function correctText(text, settings, httpRequest, opts) {
+  var _a, _b, _c;
+  const context = (_a = opts == null ? void 0 : opts.context) != null ? _a : EMPTY_REQUEST_CONTEXT;
+  const local = isLocalMode(settings);
+  const localUrl = local ? (_b = settings.localCorrectionUrl) == null ? void 0 : _b.trim() : void 0;
+  if (local && !localUrl) {
+    vlog.debug(
+      "Voxtral: correction skipped in local mode \u2014 no local correction endpoint configured"
+    );
+    return text;
+  }
+  const basePrompt = settings.systemPrompt || (settings.correctionIntensity === "light" ? LIGHT_CORRECT_PROMPT : DEFAULT_CORRECT_PROMPT);
+  const systemPrompt = basePrompt + buildCustomCommandGuard2(settings) + buildVocabularyGuard2(context) + buildStyleGuard(context.styleInstruction);
+  const base = local && localUrl ? localUrl : resolveBaseUrl(settings);
+  if (!local) assertKeySafeBaseUrl(base);
+  const model = local ? ((_c = settings.localCorrectionModel) == null ? void 0 : _c.trim()) || "ministral-3:3b" : settings.correctModel;
+  const headers = local ? { "Content-Type": "application/json" } : authHeaders(settings.apiKey, { "Content-Type": "application/json" });
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: text }
+    ],
+    temperature: 0.1
+  };
+  const response = await retryWithBackoff(
+    async () => {
+      var _a2;
+      const resp = await withTimeout(
+        httpRequest({
+          url: `${base}/v1/chat/completions`,
+          method: "POST",
+          headers,
+          body: JSON.stringify(body)
+        }),
+        (_a2 = opts == null ? void 0 : opts.timeoutMs) != null ? _a2 : HTTP_TIMEOUT_DEFAULT_MS,
+        "Correction request"
+      );
+      if (resp.status !== 200) {
+        throw new HttpStatusError(
+          `Correction failed: ${sanitizeApiError(resp.status, resp.text)}`,
+          resp.status
+        );
+      }
+      return resp;
+    },
+    { shouldRetry: isRateLimitError }
+  );
+  let result = parseChatCompletion(response.json) || text;
+  result = stripLlmCommentary(result, text);
+  if (result.length > text.length * 1.5 + 50) {
+    vlog.warn(
+      "Voxtral: Correction rejected \u2014 output is suspiciously longer than input",
+      { inputLen: text.length, outputLen: result.length }
+    );
+    return text;
+  }
+  return result;
+}
+
 // src/api-key-test.ts
 var API_KEY_TEST_TIMEOUT_MS = 15e3;
 var CUSTOM_BASE_URL_HINT = " (using custom API base URL \u2014 clear the field to return to Mistral's default)";
@@ -3120,29 +3235,20 @@ function classifyApiKeyTest(status, json) {
   }
   return { kind: "error", status };
 }
-function withTimeout2(promise, timeoutMs) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = window.setTimeout(() => {
-      reject(new Error(`Connection test timed out after ${Math.round(timeoutMs / 1e3)}s`));
-    }, timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    window.clearTimeout(timer);
-    promise.catch(() => {
-    });
-  });
-}
 async function testApiKey(apiKey, baseUrl, httpRequest) {
   const base = resolveBaseUrl({ apiBaseUrl: baseUrl });
+  if (classifyBaseUrl(base) === "http-remote") {
+    return { kind: "insecure-base-url" };
+  }
   try {
-    const response = await withTimeout2(
+    const response = await withTimeout(
       httpRequest({
         url: `${base}/v1/models`,
         method: "GET",
-        headers: { Authorization: `Bearer ${apiKey}` }
+        headers: authHeaders(apiKey)
       }),
-      API_KEY_TEST_TIMEOUT_MS
+      API_KEY_TEST_TIMEOUT_MS,
+      "Connection test"
     );
     return classifyApiKeyTest(response.status, response.json);
   } catch (e) {
@@ -3330,14 +3436,38 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
    * section re-render (mirrors the "Local server status"/keytest span
    * pattern) — only Reset tears down and rebuilds the Connection section,
    * so the field visibly returns to its placeholder-only empty state.
+   *
+   * VX_E30_S6: the same span now also shows classifyBaseUrl()'s verdict —
+   * a plaintext http:// to a non-local host gets the same refusal wording
+   * that assertKeySafeBaseUrl() throws for every guarded network call, and
+   * a local http:// (loopback/RFC1918/*.local) gets a neutral note instead
+   * of the "invalid scheme" failure styling.
    */
   renderApiBaseUrl(containerEl) {
     let schemeWarningEl;
     const updateSchemeWarning = () => {
       const value = this.plugin.settings.apiBaseUrl;
-      const looksValid = !value || /^https?:\/\//i.test(value);
-      schemeWarningEl.classList.toggle("voxtral-keytest-fail", !looksValid);
-      schemeWarningEl.setText(looksValid ? "" : "URL must start with http:// or https://");
+      const classification = classifyBaseUrl(value);
+      let text = "";
+      let fail = false;
+      switch (classification) {
+        case "invalid":
+          text = "URL must start with http:// or https://";
+          fail = true;
+          break;
+        case "http-remote":
+          text = INSECURE_BASE_URL_MESSAGE;
+          fail = true;
+          break;
+        case "http-local":
+          text = "Local address \u2014 unencrypted http:// allowed";
+          break;
+        case "https":
+          text = "";
+          break;
+      }
+      schemeWarningEl.classList.toggle("voxtral-keytest-fail", fail);
+      schemeWarningEl.setText(text);
     };
     const setting = new import_obsidian.Setting(containerEl).setName("API base URL").setDesc(createFragment((frag) => {
       const exampleUrl = "http://localhost:8000";
@@ -3460,7 +3590,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         }
         drop.setValue(this.plugin.settings.microphoneDeviceId);
       }).catch((err) => {
-        console.error("Voxtral: Failed to enumerate microphones", err);
+        vlog.error("Voxtral: Failed to enumerate microphones", err);
       });
       drop.onChange(async (value) => {
         this.plugin.settings.microphoneDeviceId = value;
@@ -3733,7 +3863,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         }
         drop.setValue(liveCurrent);
       }).catch((err) => {
-        console.error("Voxtral: Failed to fetch voices", err);
+        vlog.error("Voxtral: Failed to fetch voices", err);
       });
     }).addExtraButton(
       (btn) => btn.setIcon("refresh-cw").setTooltip("Refresh voices (pull newly cloned voices from your account)").onClick(async () => {
@@ -3749,7 +3879,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
           const r = await this.plugin.httpRequest({
             url: `${base}/v1/audio/voices?limit=100`,
             method: "GET",
-            headers: { Authorization: `Bearer ${this.plugin.settings.apiKey}` }
+            headers: authHeaders(this.plugin.settings.apiKey)
           });
           const shape = r.json && typeof r.json === "object" ? `keys: ${Object.keys(r.json).join(", ") || "(none)"}` : `text: ${(r.text || "").slice(0, 80)}`;
           new import_obsidian.Notice(`Voxtral voices: HTTP ${r.status}; ${shape}`, 1e4);
@@ -3883,6 +4013,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       (toggle) => toggle.setValue(this.plugin.settings.vaultVocabulary).onChange(async (value) => {
         this.plugin.settings.vaultVocabulary = value;
         await this.plugin.saveSettings();
+        this.rerenderSection("advanced");
       })
     );
     new import_obsidian.Setting(containerEl).setName("Custom vocabulary").setDesc(
@@ -3987,6 +4118,10 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         el.classList.add("voxtral-keytest-fail");
         text = `\u2717 Request failed (HTTP ${result.status})`;
         break;
+      case "insecure-base-url":
+        el.classList.add("voxtral-keytest-fail");
+        el.setText(`\u2717 ${INSECURE_BASE_URL_MESSAGE}`);
+        return;
     }
     if (result.kind !== "ok" && resolveBaseUrl(this.plugin.settings) !== DEFAULT_BASE_URL) {
       text += CUSTOM_BASE_URL_HINT;
@@ -4004,21 +4139,29 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       const namePrefix = cmd.builtIn ? "\u2699 " : "";
       const displayLabel = (_k = (_j = (_h = cmd.labels) == null ? void 0 : _h[lang]) != null ? _j : (_i = cmd.labels) == null ? void 0 : _i["en"]) != null ? _k : "";
       const displayName = displayLabel || triggers.join(", ") || cmd.id;
-      new import_obsidian.Setting(containerEl).setName(namePrefix + displayName).setDesc(`${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`).addButton(
-        (btn) => btn.setButtonText("Edit").onClick(() => {
-          if (commands.indexOf(cmd) === -1) return;
-          this.openCommandEditor(cmd, false);
-        })
-      ).addButton((btn) => {
-        btn.setButtonText("Delete").onClick(async () => {
-          const liveIndex = commands.indexOf(cmd);
-          if (liveIndex === -1) return;
-          commands.splice(liveIndex, 1);
-          await this.plugin.saveSettings();
-          this.render();
+      const typeDesc = `${cmd.type === "slot" ? "Slot" : "Insert"}: ${typeLabel}`;
+      const setting = new import_obsidian.Setting(containerEl).setName(namePrefix + displayName);
+      if (cmd.builtIn) {
+        setting.setDesc(
+          `${typeDesc} \xB7 Built-in: updated automatically with the plugin; add a custom command to use your own trigger.`
+        );
+      } else {
+        setting.setDesc(typeDesc).addButton(
+          (btn) => btn.setButtonText("Edit").onClick(() => {
+            if (commands.indexOf(cmd) === -1) return;
+            this.openCommandEditor(cmd, false);
+          })
+        ).addButton((btn) => {
+          btn.setButtonText("Delete").onClick(async () => {
+            const liveIndex = commands.indexOf(cmd);
+            if (liveIndex === -1) return;
+            commands.splice(liveIndex, 1);
+            await this.plugin.saveSettings();
+            this.render();
+          });
+          btn.buttonEl.addClass("mod-warning");
         });
-        btn.buttonEl.addClass("mod-warning");
-      });
+      }
     }
     new import_obsidian.Setting(containerEl).setDesc("Add a custom voice command for inserting text or opening a slot").addButton(
       (btn) => btn.setButtonText("Add command").setCta().onClick(() => {
@@ -4238,7 +4381,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         }
         drop.setValue(liveValue);
       }).catch((err) => {
-        console.error("Voxtral: Failed to fetch models", err);
+        vlog.error("Voxtral: Failed to fetch models", err);
       });
     });
   }
@@ -4272,697 +4415,6 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
 
 // src/help-view.ts
 var import_obsidian2 = require("obsidian");
-
-// ../shared/src/voice-commands.ts
-var activeLang = "nl";
-function setLanguage(lang) {
-  activeLang = lang;
-}
-var activeSlot = null;
-function isSlotActive() {
-  return activeSlot !== null;
-}
-function getActiveSlot() {
-  return activeSlot;
-}
-function closeSlot(editor) {
-  if (!activeSlot) return false;
-  let pos = editor.getCursor();
-  const suffix = activeSlot.def.suffix;
-  if (suffix && activeSlot.startPos) {
-    const textSinceOpen = editor.getRange(activeSlot.startPos, pos);
-    if (textSinceOpen.includes(suffix)) {
-      activeSlot = null;
-      return true;
-    }
-  }
-  if (suffix) {
-    const line2 = editor.getLine(pos.line);
-    const before = line2.substring(0, pos.ch);
-    const trimmed = before.replace(/\s+$/, "");
-    if (trimmed.length < before.length) {
-      const trimFrom = { line: pos.line, ch: trimmed.length };
-      editor.replaceRange("", trimFrom, pos);
-      pos = { line: pos.line, ch: trimmed.length };
-    }
-  }
-  const line = editor.getLine(pos.line);
-  const afterCursor = line.substring(pos.ch, pos.ch + suffix.length);
-  if (afterCursor === suffix) {
-    editor.setCursor({ line: pos.line, ch: pos.ch + suffix.length });
-  } else {
-    editor.replaceRange(suffix, pos);
-    editor.setCursor({ line: pos.line, ch: pos.ch + suffix.length });
-  }
-  activeSlot = null;
-  return true;
-}
-function cancelSlot() {
-  activeSlot = null;
-}
-function fixMishearings(text) {
-  for (const [pattern, replacement] of getMishearings(activeLang)) {
-    text = text.replace(pattern, replacement);
-  }
-  return text;
-}
-function insertAtCursor(editor, text, posOverride, continuation) {
-  const cursor = posOverride != null ? posOverride : editor.getCursor();
-  const context = cursor.ch === 0 ? "new-line" : detectContext(editor.getRange({ line: cursor.line, ch: 0 }, cursor));
-  if (cursor.ch === 0) {
-    text = text.replace(/^ +/, "");
-  }
-  if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !isSlotActive()) {
-    const charBefore = editor.getRange(
-      { line: cursor.line, ch: cursor.ch - 1 },
-      cursor
-    );
-    if (charBefore && /\S/.test(charBefore)) {
-      text = " " + text;
-    }
-  }
-  if (!continuation) {
-    if (shouldLowercase(context)) {
-      text = lowercaseFirstLetter(text);
-    }
-    if (shouldStripTrailingPunctuation(context)) {
-      text = stripTrailingPunctuation(text);
-    }
-  }
-  if (text.length > 0 && !/[\s\n]$/.test(text) && !isSlotActive()) {
-    const charAfter = editor.getRange(cursor, {
-      line: cursor.line,
-      ch: cursor.ch + 1
-    });
-    if (charAfter && /\S/.test(charAfter)) {
-      text = text + " ";
-    }
-  }
-  editor.replaceRange(text, cursor);
-  const lines = text.split("\n");
-  const lastLine = lines[lines.length - 1];
-  const newLine = cursor.line + lines.length - 1;
-  const newCh = lines.length === 1 ? cursor.ch + lastLine.length : lastLine.length;
-  editor.setCursor({ line: newLine, ch: newCh });
-}
-function deleteLastParagraph(editor) {
-  const cursor = editor.getCursor();
-  const fullText = editor.getValue();
-  const offset = editor.posToOffset(cursor);
-  const textBefore = fullText.substring(0, offset);
-  const lastPara = textBefore.lastIndexOf("\n\n");
-  if (lastPara >= 0) {
-    const from = editor.offsetToPos(lastPara);
-    editor.replaceRange("", from, cursor);
-  } else {
-    editor.replaceRange("", { line: 0, ch: 0 }, cursor);
-  }
-}
-function deleteLastSentence(editor) {
-  const cursor = editor.getCursor();
-  const fullText = editor.getValue();
-  const offset = editor.posToOffset(cursor);
-  const textBefore = fullText.substring(0, offset).trimEnd();
-  const sentenceEnd = Math.max(
-    textBefore.lastIndexOf(". "),
-    textBefore.lastIndexOf("! "),
-    textBefore.lastIndexOf("? "),
-    textBefore.lastIndexOf(".\n"),
-    textBefore.lastIndexOf("!\n"),
-    textBefore.lastIndexOf("?\n")
-  );
-  if (sentenceEnd >= 0) {
-    const from = editor.offsetToPos(sentenceEnd + 1);
-    editor.replaceRange("", from, cursor);
-  } else {
-    editor.replaceRange("", { line: cursor.line, ch: 0 }, cursor);
-  }
-}
-function colonAction(editor) {
-  const cursor = editor.getCursor();
-  if (cursor.ch > 0) {
-    const lineText = editor.getLine(cursor.line);
-    const before = lineText.substring(0, cursor.ch);
-    const cleaned = before.replace(/[,;.!?]+\s*$/, "");
-    if (cleaned.length < before.length) {
-      const from = { line: cursor.line, ch: cleaned.length };
-      editor.replaceRange("", from, cursor);
-      editor.setCursor(from);
-    }
-  }
-  const pos = editor.getCursor();
-  editor.replaceRange(": ", pos);
-  editor.setCursor({ line: pos.line, ch: pos.ch + 2 });
-}
-function closeSlotAndSpace(editor, expectedOpenId) {
-  if ((activeSlot == null ? void 0 : activeSlot.commandId) === expectedOpenId) {
-    closeSlot(editor);
-  } else {
-    return;
-  }
-  const pos = editor.getCursor();
-  editor.replaceRange(" ", pos);
-  editor.setCursor({ line: pos.line, ch: pos.ch + 1 });
-}
-var COMMAND_DEFS = [
-  { id: "newParagraph", action: (editor) => insertAtCursor(editor, "\n\n") },
-  { id: "newLine", action: (editor) => insertAtCursor(editor, "\n") },
-  { id: "heading1", action: (editor) => insertAtCursor(editor, "\n\n# ") },
-  { id: "heading2", action: (editor) => insertAtCursor(editor, "\n\n## ") },
-  { id: "heading3", action: (editor) => insertAtCursor(editor, "\n\n### ") },
-  {
-    id: "bulletPoint",
-    action: (editor) => {
-      var _a, _b;
-      const cursor = editor.getCursor();
-      const lineText = editor.getLine(cursor.line);
-      if (/^(\d+)\.\s/.test(lineText)) {
-        const num = parseInt((_b = (_a = lineText.match(/^(\d+)/)) == null ? void 0 : _a[1]) != null ? _b : "0", 10);
-        insertAtCursor(editor, `
-${num + 1}. `);
-      } else if (/^\s*- \[[ x]\]\s/.test(lineText)) {
-        insertAtCursor(editor, "\n- [ ] ");
-      } else {
-        insertAtCursor(editor, "\n- ");
-      }
-    }
-  },
-  { id: "todoItem", action: (editor) => insertAtCursor(editor, "\n- [ ] ") },
-  {
-    id: "numberedItem",
-    action: (editor) => {
-      const cursor = editor.getCursor();
-      const lineText = editor.getLine(cursor.line);
-      const match = lineText.match(/^(\d+)\.\s/);
-      const nextNum = match ? parseInt(match[1], 10) + 1 : 1;
-      insertAtCursor(editor, `
-${nextNum}. `);
-    }
-  },
-  { id: "deleteLastParagraph", action: (editor) => deleteLastParagraph(editor) },
-  { id: "deleteLastLine", action: (editor) => deleteLastSentence(editor) },
-  {
-    id: "undo",
-    action: (editor) => {
-      editor.undo();
-    }
-  },
-  {
-    id: "stopRecording",
-    action: () => {
-    }
-  },
-  {
-    // The actual revert runs in the plugin layer (main.ts), triggered by the
-    // onCommandExecuted callback — see undoLastCommand() below. The action
-    // itself is a no-op so executeCommand()'s before/after diff sees no
-    // change and never records THIS command as undoable (undoing an undo
-    // is not supported).
-    id: "undoLastVoiceCommand",
-    action: () => {
-    }
-  },
-  { id: "colon", punctuation: true, action: colonAction },
-  // ── Wikilink: just insert [[, Obsidian handles ]] via autocomplete ──
-  {
-    id: "wikilink",
-    action: (editor) => {
-      const cursor = editor.getCursor();
-      const line = editor.getLine(cursor.line);
-      const before = line.substring(0, cursor.ch);
-      const needsSpace = before.length > 0 && !/\s$/.test(before);
-      const insert = needsSpace ? " [[" : "[[";
-      editor.replaceRange(insert, cursor);
-      editor.setCursor({ line: cursor.line, ch: cursor.ch + insert.length });
-    }
-  },
-  // ── Open/close commands: voice command opens, voice command closes ──
-  {
-    id: "boldOpen",
-    slot: { prefix: "**", suffix: "**", exitTrigger: "voice" },
-    action: (editor) => {
-      const cursor = editor.getCursor();
-      const line = editor.getLine(cursor.line);
-      const before = line.substring(0, cursor.ch);
-      const needsSpace = before.length > 0 && !/\s$/.test(before);
-      const insert = needsSpace ? " **" : "**";
-      editor.replaceRange(insert, cursor);
-      const endCh = cursor.ch + insert.length;
-      editor.setCursor({ line: cursor.line, ch: endCh });
-      activeSlot = {
-        def: { prefix: "**", suffix: "**", exitTrigger: "voice" },
-        commandId: "boldOpen",
-        startPos: { line: cursor.line, ch: endCh }
-      };
-    }
-  },
-  {
-    id: "boldClose",
-    action: (editor) => {
-      closeSlotAndSpace(editor, "boldOpen");
-    }
-  },
-  {
-    id: "italicOpen",
-    slot: { prefix: "*", suffix: "*", exitTrigger: "voice" },
-    action: (editor) => {
-      const cursor = editor.getCursor();
-      const line = editor.getLine(cursor.line);
-      const before = line.substring(0, cursor.ch);
-      const needsSpace = before.length > 0 && !/\s$/.test(before);
-      const insert = needsSpace ? " *" : "*";
-      editor.replaceRange(insert, cursor);
-      const endCh = cursor.ch + insert.length;
-      editor.setCursor({ line: cursor.line, ch: endCh });
-      activeSlot = {
-        def: { prefix: "*", suffix: "*", exitTrigger: "voice" },
-        commandId: "italicOpen",
-        startPos: { line: cursor.line, ch: endCh }
-      };
-    }
-  },
-  {
-    id: "italicClose",
-    action: (editor) => {
-      closeSlotAndSpace(editor, "italicOpen");
-    }
-  },
-  {
-    id: "inlineCodeOpen",
-    slot: { prefix: "`", suffix: "`", exitTrigger: "voice" },
-    action: (editor) => {
-      const cursor = editor.getCursor();
-      const line = editor.getLine(cursor.line);
-      const before = line.substring(0, cursor.ch);
-      const needsSpace = before.length > 0 && !/\s$/.test(before);
-      const insert = needsSpace ? " `" : "`";
-      editor.replaceRange(insert, cursor);
-      const endCh = cursor.ch + insert.length;
-      editor.setCursor({ line: cursor.line, ch: endCh });
-      activeSlot = {
-        def: { prefix: "`", suffix: "`", exitTrigger: "voice" },
-        commandId: "inlineCodeOpen",
-        startPos: { line: cursor.line, ch: endCh }
-      };
-    }
-  },
-  {
-    id: "inlineCodeClose",
-    action: (editor) => {
-      closeSlotAndSpace(editor, "inlineCodeOpen");
-    }
-  },
-  {
-    id: "tagOpen",
-    slot: { prefix: "#", suffix: "", exitTrigger: "voice" },
-    action: (editor) => {
-      const cursor = editor.getCursor();
-      let prefix = "#";
-      if (cursor.ch > 0) {
-        const charBefore = editor.getRange(
-          { line: cursor.line, ch: cursor.ch - 1 },
-          cursor
-        );
-        if (charBefore && /\S/.test(charBefore)) {
-          prefix = " #";
-        }
-      }
-      editor.replaceRange(prefix, cursor);
-      const endCh = cursor.ch + prefix.length;
-      editor.setCursor({ line: cursor.line, ch: endCh });
-      activeSlot = {
-        def: { prefix: "#", suffix: "", exitTrigger: "voice" },
-        commandId: "tagOpen",
-        startPos: { line: cursor.line, ch: endCh }
-      };
-    }
-  },
-  {
-    id: "tagClose",
-    action: (editor) => {
-      closeSlotAndSpace(editor, "tagOpen");
-    }
-  },
-  {
-    id: "codeBlockOpen",
-    slot: { prefix: "```", suffix: "\n```", exitTrigger: "voice" },
-    action: (editor) => {
-      const cursor = editor.getCursor();
-      editor.replaceRange("\n```\n", cursor);
-      const endLine = cursor.line + 2;
-      editor.setCursor({ line: endLine, ch: 0 });
-      activeSlot = {
-        def: { prefix: "```", suffix: "\n```", exitTrigger: "voice" },
-        commandId: "codeBlockOpen",
-        startPos: { line: endLine, ch: 0 }
-      };
-    }
-  },
-  {
-    id: "codeBlockClose",
-    action: (editor) => {
-      closeSlotAndSpace(editor, "codeBlockOpen");
-    }
-  }
-];
-function computeEditDiff(before, after) {
-  if (before === after) return null;
-  const maxCommon = Math.min(before.length, after.length);
-  let start = 0;
-  while (start < maxCommon && before[start] === after[start]) start++;
-  let endBefore = before.length;
-  let endAfter = after.length;
-  while (endBefore > start && endAfter > start && before[endBefore - 1] === after[endAfter - 1]) {
-    endBefore--;
-    endAfter--;
-  }
-  return {
-    from: start,
-    removed: before.slice(start, endBefore),
-    inserted: after.slice(start, endAfter)
-  };
-}
-var NON_UNDOABLE_COMMANDS = /* @__PURE__ */ new Set([
-  "undo",
-  "undoLastVoiceCommand",
-  "stopRecording"
-]);
-var pendingUndo = null;
-function executeCommand(editor, command) {
-  const before = editor.getValue();
-  const cursorBeforeOffset = editor.posToOffset(editor.getCursor());
-  const slotBefore = activeSlot;
-  command.action(editor);
-  if (NON_UNDOABLE_COMMANDS.has(command.id)) return;
-  const after = editor.getValue();
-  const diff = computeEditDiff(before, after);
-  if (!diff) return;
-  pendingUndo = {
-    commandId: command.id,
-    snapshotAfter: after,
-    revert: (ed) => {
-      const from = ed.offsetToPos(diff.from);
-      const to = ed.offsetToPos(diff.from + diff.inserted.length);
-      ed.replaceRange(diff.removed, from, to);
-      ed.setCursor(ed.offsetToPos(cursorBeforeOffset));
-      activeSlot = slotBefore;
-    }
-  };
-}
-function undoLastCommand(editor) {
-  if (!pendingUndo) return "none";
-  const pending = pendingUndo;
-  pendingUndo = null;
-  if (editor.getValue() !== pending.snapshotAfter) return "stale";
-  pending.revert(editor);
-  return "reverted";
-}
-function resetCommandUndo() {
-  pendingUndo = null;
-}
-var customCommandDefs = [];
-function loadCustomCommands(commands) {
-  customCommandLabelSources.clear();
-  customCommandDefs = commands.map((cmd) => {
-    var _a, _b, _c;
-    if (cmd.type === "slot" && cmd.slotPrefix !== void 0) {
-      const prefix = cmd.slotPrefix;
-      const suffix = (_a = cmd.slotSuffix) != null ? _a : "";
-      const exit = (_b = cmd.slotExit) != null ? _b : "enter";
-      customCommandLabelSources.set(cmd.id, {
-        labels: cmd.labels,
-        fallback: `${prefix}\u2026${suffix}`
-      });
-      return {
-        id: cmd.id,
-        slot: { prefix, suffix, exitTrigger: exit },
-        action: (editor) => {
-          const cursor = editor.getCursor();
-          editor.replaceRange(prefix, cursor);
-          editor.setCursor({ line: cursor.line, ch: cursor.ch + prefix.length });
-          activeSlot = {
-            def: { prefix, suffix, exitTrigger: exit },
-            commandId: cmd.id,
-            startPos: { line: cursor.line, ch: cursor.ch + prefix.length }
-          };
-        }
-      };
-    }
-    const fallbackLabel = ((_c = cmd.insertText) != null ? _c : "").replace(/\n/g, "\u21B5").slice(0, 30);
-    customCommandLabelSources.set(cmd.id, {
-      labels: cmd.labels,
-      fallback: fallbackLabel || cmd.id
-    });
-    return {
-      id: cmd.id,
-      action: (editor) => insertAtCursor(editor, resolveInsertText(cmd))
-    };
-  });
-}
-function resolveInsertText(cmd) {
-  var _a, _b, _c, _d, _e;
-  return (_e = (_d = (_c = (_a = cmd.insertTextByLang) == null ? void 0 : _a[activeLang]) != null ? _c : (_b = cmd.insertTextByLang) == null ? void 0 : _b.en) != null ? _d : cmd.insertText) != null ? _e : "";
-}
-function getAllCommands() {
-  return [...COMMAND_DEFS, ...customCommandDefs];
-}
-function getCustomPatterns(cmdId, lang) {
-  var _a, _b, _c, _d;
-  return (_d = (_c = (_a = customCommandTriggers.get(cmdId)) == null ? void 0 : _a.get(lang)) != null ? _c : (_b = customCommandTriggers.get(cmdId)) == null ? void 0 : _b.get("en")) != null ? _d : [];
-}
-var customCommandTriggers = /* @__PURE__ */ new Map();
-var customCommandLabelSources = /* @__PURE__ */ new Map();
-function getCustomLabel(cmdId) {
-  var _a, _b, _c, _d;
-  const src = customCommandLabelSources.get(cmdId);
-  if (!src) return cmdId;
-  return (_d = (_c = (_a = src.labels) == null ? void 0 : _a[activeLang]) != null ? _c : (_b = src.labels) == null ? void 0 : _b.en) != null ? _d : src.fallback;
-}
-function loadCustomCommandTriggers(commands) {
-  customCommandTriggers.clear();
-  for (const cmd of commands) {
-    const langMap = /* @__PURE__ */ new Map();
-    for (const [lang, phrases] of Object.entries(cmd.triggers)) {
-      langMap.set(lang, phrases);
-    }
-    customCommandTriggers.set(cmd.id, langMap);
-  }
-}
-function getPatternsForAnyCommand(cmdId, lang) {
-  const builtinPatterns = getPatternsForCommand(cmdId, lang);
-  if (builtinPatterns.length > 0) return builtinPatterns;
-  return getCustomPatterns(cmdId, lang);
-}
-function getAllCommandPhrases() {
-  const phrases = [];
-  for (const cmd of getAllCommands()) {
-    for (const pattern of getPatternsForAnyCommand(cmd.id, activeLang)) {
-      phrases.push(normalizeCommand(pattern));
-    }
-  }
-  return phrases;
-}
-function trailingWords(text, n) {
-  const words = text.trimEnd().split(/\s+/);
-  return words.slice(-n).join(" ");
-}
-function matchCommand(rawText) {
-  var _a;
-  const normalized = fixMishearings(normalizeCommand(rawText));
-  const allCmds = getAllCommands();
-  for (const cmd of allCmds) {
-    const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
-    for (const pattern of patterns) {
-      const normPattern = normalizeCommand(pattern);
-      if (normalized.endsWith(normPattern)) {
-        const patternWordCount = pattern.split(/\s+/).length;
-        const rawWords = rawText.trimEnd().split(/\s+/);
-        const textBefore = rawWords.slice(0, -patternWordCount).join(" ").trimEnd();
-        return { command: cmd, textBefore };
-      }
-    }
-  }
-  const strippedFillers = stripTrailingFillers(normalized, activeLang);
-  if (strippedFillers !== normalized) {
-    for (const cmd of allCmds) {
-      const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
-      for (const pattern of patterns) {
-        const normPattern = normalizeCommand(pattern);
-        if (strippedFillers.endsWith(normPattern)) {
-          const patternWordCount = pattern.split(/\s+/).length;
-          const rawWords = rawText.trimEnd().split(/\s+/);
-          const fillerWordCount = normalized.split(/\s+/).length - strippedFillers.split(/\s+/).length;
-          const textBefore = rawWords.slice(0, -(patternWordCount + fillerWordCount)).join(" ").trimEnd();
-          return { command: cmd, textBefore };
-        }
-      }
-    }
-  }
-  for (const cmd of allCmds) {
-    const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
-    for (const pattern of patterns) {
-      const normPattern = normalizeCommand(pattern);
-      const patternWordCount = normPattern.split(/\s+/).length;
-      const tail = trailingWords(normalized, patternWordCount + 1);
-      const stripped = stripArticles(tail, activeLang);
-      if (stripped === normPattern) {
-        const tailWordCount = tail.split(/\s+/).length;
-        const rawWords = rawText.trimEnd().split(/\s+/);
-        const textBefore = rawWords.slice(0, -tailWordCount).join(" ").trimEnd();
-        return { command: cmd, textBefore };
-      }
-    }
-  }
-  const phoneticText = phoneticNormalize(normalized, activeLang);
-  for (const cmd of allCmds) {
-    const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
-    for (const pattern of patterns) {
-      const phoneticPattern = phoneticNormalize(normalizeCommand(pattern), activeLang);
-      if (phoneticPattern !== normalizeCommand(pattern) || phoneticText !== normalized) {
-        if (phoneticText.endsWith(phoneticPattern)) {
-          const patternWordCount = pattern.split(/\s+/).length;
-          const rawWords = rawText.trimEnd().split(/\s+/);
-          const textBefore = rawWords.slice(0, -patternWordCount).join(" ").trimEnd();
-          return { command: cmd, textBefore };
-        }
-      }
-    }
-  }
-  const lastWord = (_a = normalized.split(/\s+/).pop()) != null ? _a : "";
-  if (lastWord.length >= 4 && !lastWord.includes(" ")) {
-    const allPhrases = getAllCommandPhrases();
-    const split = trySplitCompound(lastWord, allPhrases);
-    if (split !== lastWord) {
-      const words = normalized.split(/\s+/);
-      words[words.length - 1] = split;
-      const resplit = words.join(" ");
-      for (const cmd of allCmds) {
-        const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
-        for (const pattern of patterns) {
-          const normPattern = normalizeCommand(pattern);
-          if (resplit.endsWith(normPattern)) {
-            const rawWords = rawText.trimEnd().split(/\s+/);
-            const textBefore = rawWords.slice(0, -1).join(" ").trimEnd();
-            return { command: cmd, textBefore };
-          }
-        }
-      }
-    }
-  }
-  let bestMatch = null;
-  let bestDist = 3;
-  for (const cmd of allCmds) {
-    const patterns = getPatternsForAnyCommand(cmd.id, activeLang);
-    for (const pattern of patterns) {
-      const normPattern = normalizeCommand(pattern);
-      if (normalized.length < 6 || normPattern.length < 6) continue;
-      if (Math.abs(normalized.length - normPattern.length) > 3) continue;
-      const dist = levenshtein(normalized, normPattern);
-      if (dist > 0 && dist < bestDist) {
-        bestDist = dist;
-        bestMatch = { command: cmd, textBefore: "" };
-      }
-    }
-  }
-  return bestMatch;
-}
-var preMatchHook = null;
-function setPreMatchHook(hook) {
-  preMatchHook = hook;
-}
-function processText(editor, text, posOverride, onCommand, continuation) {
-  let stopRequested = false;
-  const segments = text.match(/[^.!?]+[.!?]+\s*/g);
-  if (!segments) {
-    stopRequested = processSegment(editor, text, posOverride, onCommand, continuation);
-    return stopRequested;
-  }
-  const joined = segments.join("");
-  const remainder = text.slice(joined.length);
-  let first = true;
-  for (const segment of segments) {
-    if (processSegment(
-      editor,
-      segment,
-      first ? posOverride : void 0,
-      onCommand,
-      first ? continuation : void 0
-    )) {
-      stopRequested = true;
-    }
-    first = false;
-  }
-  if (remainder.trim()) {
-    if (processSegment(
-      editor,
-      remainder,
-      first ? posOverride : void 0,
-      onCommand,
-      first ? continuation : void 0
-    )) {
-      stopRequested = true;
-    }
-  }
-  return stopRequested;
-}
-function processSegment(editor, text, posOverride, onCommand, continuation) {
-  if (preMatchHook) {
-    const normalized = fixMishearings(normalizeCommand(text));
-    if (preMatchHook(editor, normalized, text)) return false;
-  }
-  const match = matchCommand(text);
-  if (match) {
-    if (match.textBefore) {
-      let before = match.textBefore;
-      if (match.command.punctuation) {
-        before = before.replace(/[,;.!?]+\s*$/, "");
-      }
-      insertAtCursor(editor, before, posOverride, continuation);
-    }
-    executeCommand(editor, match.command);
-    onCommand == null ? void 0 : onCommand(match.command.id);
-    return match.command.id === "stopRecording";
-  } else {
-    insertAtCursor(editor, text, posOverride, continuation);
-  }
-  return false;
-}
-var OPEN_CLOSE_PAIRS = [
-  ["boldOpen", "boldClose"],
-  ["italicOpen", "italicClose"],
-  ["inlineCodeOpen", "inlineCodeClose"],
-  ["tagOpen", "tagClose"],
-  ["codeBlockOpen", "codeBlockClose"]
-];
-function getCommandList() {
-  const closeIds = new Set(OPEN_CLOSE_PAIRS.map(([, c]) => c));
-  const openMap = new Map(OPEN_CLOSE_PAIRS);
-  const builtIn = [];
-  for (const c of COMMAND_DEFS) {
-    if (closeIds.has(c.id)) continue;
-    const closeId = openMap.get(c.id);
-    if (closeId) {
-      const openPatterns = getPatternsForCommand(c.id, activeLang);
-      const closePatterns = getPatternsForCommand(closeId, activeLang);
-      builtIn.push({
-        label: getLabel(c.id, activeLang) + " / " + getLabel(closeId, activeLang),
-        patterns: [...openPatterns.slice(0, 1), ...closePatterns.slice(0, 1)]
-      });
-    } else {
-      builtIn.push({
-        label: getLabel(c.id, activeLang),
-        patterns: getPatternsForCommand(c.id, activeLang)
-      });
-    }
-  }
-  const custom = customCommandDefs.map((c) => ({
-    label: getCustomLabel(c.id),
-    patterns: getPatternsForAnyCommand(c.id, activeLang)
-  }));
-  return [...builtIn, ...custom];
-}
-
-// src/help-view.ts
 var VIEW_TYPE_VOXTRAL_HELP = "voxtral-help";
 var UI_STRINGS = {
   nl: {
@@ -4979,7 +4431,7 @@ var UI_STRINGS = {
     privacy: "Privacy",
     privacyItems: [
       "Audio wordt via HTTPS/WSS naar de Mistral API gestuurd en niet lokaal opgeslagen.",
-      "Instellingen (incl. API-sleutel) staan in data.json in de Obsidian plugin-map.",
+      "Je API-sleutel wordt op dit apparaat bewaard in Obsidians secret storage (niet in de vault, niet gesynchroniseerd); data.json van de plugin bevat alleen een verwijzing ernaar.",
       "Logexport bevat geen getranscribeerde tekst of API-sleutels."
     ]
   },
@@ -4997,7 +4449,7 @@ var UI_STRINGS = {
     privacy: "Privacy",
     privacyItems: [
       "Audio is sent to the Mistral API over HTTPS/WSS and is not stored locally.",
-      "Settings (including your API key) are stored in data.json in the plugin folder.",
+      "Your API key is kept in Obsidian's secret storage on this device (not in the vault, not synced); the plugin's data.json only holds a reference to it.",
       "Log export does not contain transcribed text or API keys."
     ]
   },
@@ -5015,7 +4467,7 @@ var UI_STRINGS = {
     privacy: "Confidentialit\xE9",
     privacyItems: [
       "L'audio est envoy\xE9 \xE0 l'API Mistral via HTTPS/WSS et n'est pas stock\xE9 localement.",
-      "Les param\xE8tres (y compris la cl\xE9 API) sont stock\xE9s dans data.json.",
+      "Votre cl\xE9 API est conserv\xE9e dans le secret storage d'Obsidian sur cet appareil (pas dans le vault, non synchronis\xE9e) ; le data.json du plugin ne contient qu'une r\xE9f\xE9rence vers elle.",
       "L'export des logs ne contient ni texte transcrit ni cl\xE9s API."
     ]
   },
@@ -5033,7 +4485,7 @@ var UI_STRINGS = {
     privacy: "Datenschutz",
     privacyItems: [
       "Audio wird \xFCber HTTPS/WSS an die Mistral-API gesendet und nicht lokal gespeichert.",
-      "Einstellungen (inkl. API-Schl\xFCssel) werden in data.json gespeichert.",
+      "Dein API-Schl\xFCssel wird in Obsidians Secret Storage auf diesem Ger\xE4t gespeichert (nicht im Vault, nicht synchronisiert); die data.json des Plugins enth\xE4lt nur einen Verweis darauf.",
       "Der Log-Export enth\xE4lt weder transkribierten Text noch API-Schl\xFCssel."
     ]
   },
@@ -5051,7 +4503,7 @@ var UI_STRINGS = {
     privacy: "Privacidad",
     privacyItems: [
       "El audio se env\xEDa a la API de Mistral por HTTPS/WSS y no se almacena localmente.",
-      "La configuraci\xF3n (incluida la clave API) se almacena en data.json.",
+      "Tu clave API se guarda en el secret storage de Obsidian en este dispositivo (no en el vault, no se sincroniza); el data.json del plugin solo contiene una referencia a ella.",
       "La exportaci\xF3n de registros no contiene texto transcrito ni claves API."
     ]
   },
@@ -5069,7 +4521,7 @@ var UI_STRINGS = {
     privacy: "Privacidade",
     privacyItems: [
       "O \xE1udio \xE9 enviado \xE0 API Mistral via HTTPS/WSS e n\xE3o \xE9 armazenado localmente.",
-      "As configura\xE7\xF5es (incluindo a chave API) s\xE3o armazenadas em data.json.",
+      "Sua chave API \xE9 guardada no secret storage do Obsidian neste dispositivo (n\xE3o no vault, n\xE3o sincronizada); o data.json do plugin cont\xE9m apenas uma refer\xEAncia a ela.",
       "A exporta\xE7\xE3o de logs n\xE3o cont\xE9m texto transcrito nem chaves API."
     ]
   },
@@ -5087,7 +4539,7 @@ var UI_STRINGS = {
     privacy: "Privacy",
     privacyItems: [
       "L'audio viene inviato all'API Mistral tramite HTTPS/WSS e non viene salvato localmente.",
-      "Le impostazioni (inclusa la chiave API) sono memorizzate in data.json.",
+      "La tua chiave API viene conservata nel secret storage di Obsidian su questo dispositivo (non nel vault, non sincronizzata); il data.json del plugin contiene solo un riferimento ad essa.",
       "L'esportazione dei log non contiene testo trascritto n\xE9 chiavi API."
     ]
   },
@@ -5105,7 +4557,7 @@ var UI_STRINGS = {
     privacy: "\u041A\u043E\u043D\u0444\u0438\u0434\u0435\u043D\u0446\u0438\u0430\u043B\u044C\u043D\u043E\u0441\u0442\u044C",
     privacyItems: [
       "\u0410\u0443\u0434\u0438\u043E \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u0432 API Mistral \u043F\u043E HTTPS/WSS \u0438 \u043D\u0435 \u0445\u0440\u0430\u043D\u0438\u0442\u0441\u044F \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E.",
-      "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 (\u0432\u043A\u043B\u044E\u0447\u0430\u044F \u043A\u043B\u044E\u0447 API) \u0445\u0440\u0430\u043D\u044F\u0442\u0441\u044F \u0432 \u0444\u0430\u0439\u043B\u0435 data.json \u0432 \u043F\u0430\u043F\u043A\u0435 \u043F\u043B\u0430\u0433\u0438\u043D\u0430.",
+      "\u0412\u0430\u0448 \u043A\u043B\u044E\u0447 API \u0445\u0440\u0430\u043D\u0438\u0442\u0441\u044F \u0432 secret storage Obsidian \u043D\u0430 \u044D\u0442\u043E\u043C \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 (\u043D\u0435 \u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0438 \u043D\u0435 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u0443\u0435\u0442\u0441\u044F); \u0444\u0430\u0439\u043B data.json \u043F\u043B\u0430\u0433\u0438\u043D\u0430 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u043D\u0435\u0433\u043E.",
       "\u042D\u043A\u0441\u043F\u043E\u0440\u0442 \u0436\u0443\u0440\u043D\u0430\u043B\u043E\u0432 \u043D\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u0442 \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u043D\u043E\u0433\u043E \u0442\u0435\u043A\u0441\u0442\u0430 \u0438\u043B\u0438 \u043A\u043B\u044E\u0447\u0435\u0439 API."
     ]
   },
@@ -5123,7 +4575,7 @@ var UI_STRINGS = {
     privacy: "\u9690\u79C1",
     privacyItems: [
       "\u97F3\u9891\u901A\u8FC7 HTTPS/WSS \u53D1\u9001\u5230 Mistral API\uFF0C\u4E0D\u4F1A\u5728\u672C\u5730\u5B58\u50A8\u3002",
-      "\u8BBE\u7F6E\uFF08\u5305\u62EC API \u5BC6\u94A5\uFF09\u5B58\u50A8\u5728\u63D2\u4EF6\u6587\u4EF6\u5939\u7684 data.json \u4E2D\u3002",
+      "\u60A8\u7684 API \u5BC6\u94A5\u4FDD\u5B58\u5728\u672C\u8BBE\u5907 Obsidian \u7684 secret storage \u4E2D\uFF08\u4E0D\u5728 vault \u4E2D\uFF0C\u4E0D\u4F1A\u540C\u6B65\uFF09\uFF1B\u63D2\u4EF6\u7684 data.json \u4E2D\u53EA\u4FDD\u5B58\u6307\u5411\u5B83\u7684\u5F15\u7528\u3002",
       "\u65E5\u5FD7\u5BFC\u51FA\u4E0D\u5305\u542B\u8F6C\u5F55\u6587\u672C\u6216 API \u5BC6\u94A5\u3002"
     ]
   },
@@ -5141,7 +4593,7 @@ var UI_STRINGS = {
     privacy: "\u0917\u094B\u092A\u0928\u0940\u092F\u0924\u093E",
     privacyItems: [
       "\u0911\u0921\u093F\u092F\u094B HTTPS/WSS \u0915\u0947 \u092E\u093E\u0927\u094D\u092F\u092E \u0938\u0947 Mistral API \u0915\u094B \u092D\u0947\u091C\u093E \u091C\u093E\u0924\u093E \u0939\u0948 \u0914\u0930 \u0938\u094D\u0925\u093E\u0928\u0940\u092F \u0930\u0942\u092A \u0938\u0947 \u0938\u0902\u0917\u094D\u0930\u0939\u0940\u0924 \u0928\u0939\u0940\u0902 \u0939\u094B\u0924\u093E\u0964",
-      "\u0938\u0947\u091F\u093F\u0902\u0917\u094D\u0938 (API \u0915\u0941\u0902\u091C\u0940 \u0938\u0939\u093F\u0924) \u092A\u094D\u0932\u0917\u0907\u0928 \u092B\u093C\u094B\u0932\u094D\u0921\u0930 \u0915\u0940 data.json \u092E\u0947\u0902 \u0938\u0902\u0917\u094D\u0930\u0939\u0940\u0924 \u0939\u094B\u0924\u0940 \u0939\u0948\u0902\u0964",
+      "\u0906\u092A\u0915\u0940 API \u0915\u0941\u0902\u091C\u0940 \u0907\u0938 \u0921\u093F\u0935\u093E\u0907\u0938 \u092A\u0930 Obsidian \u0915\u0947 secret storage \u092E\u0947\u0902 \u0930\u0916\u0940 \u091C\u093E\u0924\u0940 \u0939\u0948 (\u0935\u0949\u0932\u094D\u091F \u092E\u0947\u0902 \u0928\u0939\u0940\u0902, \u0938\u093F\u0902\u0915 \u0928\u0939\u0940\u0902 \u0939\u094B\u0924\u0940); \u092A\u094D\u0932\u0917\u0907\u0928 \u0915\u0940 data.json \u092E\u0947\u0902 \u0915\u0947\u0935\u0932 \u0909\u0938\u0915\u093E \u0938\u0902\u0926\u0930\u094D\u092D \u0930\u0939\u0924\u093E \u0939\u0948\u0964",
       "\u0932\u0949\u0917 \u0928\u093F\u0930\u094D\u092F\u093E\u0924 \u092E\u0947\u0902 \u091F\u094D\u0930\u093E\u0902\u0938\u0915\u094D\u0930\u093E\u0907\u092C \u0915\u093F\u092F\u093E \u0917\u092F\u093E \u091F\u0947\u0915\u094D\u0938\u094D\u091F \u092F\u093E API \u0915\u0941\u0902\u091C\u093F\u092F\u093E\u0901 \u0928\u0939\u0940\u0902 \u0939\u094B\u0924\u0940\u0902\u0964"
     ]
   },
@@ -5159,7 +4611,7 @@ var UI_STRINGS = {
     privacy: "\u0627\u0644\u062E\u0635\u0648\u0635\u064A\u0629",
     privacyItems: [
       "\u064A\u064F\u0631\u0633\u064E\u0644 \u0627\u0644\u0635\u0648\u062A \u0625\u0644\u0649 \u0648\u0627\u062C\u0647\u0629 Mistral \u0639\u0628\u0631 HTTPS/WSS \u0648\u0644\u0627 \u064A\u064F\u062E\u0632\u064E\u0651\u0646 \u0645\u062D\u0644\u064A\u064B\u0627.",
-      "\u062A\u064F\u062E\u0632\u064E\u0651\u0646 \u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A (\u0628\u0645\u0627 \u0641\u064A \u0630\u0644\u0643 \u0645\u0641\u062A\u0627\u062D API) \u0641\u064A \u0645\u0644\u0641 data.json \u062F\u0627\u062E\u0644 \u0645\u062C\u0644\u062F \u0627\u0644\u0625\u0636\u0627\u0641\u0629.",
+      "\u064A\u064F\u062D\u0641\u0638 \u0645\u0641\u062A\u0627\u062D API \u0627\u0644\u062E\u0627\u0635 \u0628\u0643 \u0641\u064A secret storage \u0627\u0644\u062E\u0627\u0635 \u0628\u0640 Obsidian \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u062C\u0647\u0627\u0632 (\u0648\u0644\u064A\u0633 \u0641\u064A \u0627\u0644\u0640 vault\u060C \u0648\u0644\u0627 \u062A\u062A\u0645 \u0645\u0632\u0627\u0645\u0646\u062A\u0647)\u061B \u064A\u062D\u062A\u0648\u064A data.json \u0627\u0644\u062E\u0627\u0635 \u0628\u0627\u0644\u0625\u0636\u0627\u0641\u0629 \u0639\u0644\u0649 \u0625\u0634\u0627\u0631\u0629 \u0625\u0644\u064A\u0647 \u0641\u0642\u0637.",
       "\u0644\u0627 \u064A\u062D\u062A\u0648\u064A \u062A\u0635\u062F\u064A\u0631 \u0627\u0644\u0633\u062C\u0644\u0651\u0627\u062A \u0639\u0644\u0649 \u0646\u0635 \u0645\u064F\u0641\u0631\u064E\u0651\u063A \u0623\u0648 \u0645\u0641\u0627\u062A\u064A\u062D API."
     ]
   },
@@ -5177,7 +4629,7 @@ var UI_STRINGS = {
     privacy: "\u30D7\u30E9\u30A4\u30D0\u30B7\u30FC",
     privacyItems: [
       "\u97F3\u58F0\u306F HTTPS/WSS \u3067 Mistral API \u306B\u9001\u4FE1\u3055\u308C\u3001\u30ED\u30FC\u30AB\u30EB\u306B\u306F\u4FDD\u5B58\u3055\u308C\u307E\u305B\u3093\u3002",
-      "\u8A2D\u5B9A\uFF08API \u30AD\u30FC\u3092\u542B\u3080\uFF09\u306F\u30D7\u30E9\u30B0\u30A4\u30F3\u30D5\u30A9\u30EB\u30C0\u30FC\u306E data.json \u306B\u4FDD\u5B58\u3055\u308C\u307E\u3059\u3002",
+      "API \u30AD\u30FC\u306F\u3053\u306E\u30C7\u30D0\u30A4\u30B9\u306E Obsidian \u306E secret storage \u306B\u4FDD\u5B58\u3055\u308C\u307E\u3059\uFF08vault \u5185\u3067\u306F\u306A\u304F\u3001\u540C\u671F\u3082\u3055\u308C\u307E\u305B\u3093\uFF09\u3002\u30D7\u30E9\u30B0\u30A4\u30F3\u306E data.json \u306B\u306F\u3001\u305D\u306E\u30AD\u30FC\u3078\u306E\u53C2\u7167\u306E\u307F\u304C\u4FDD\u5B58\u3055\u308C\u307E\u3059\u3002",
       "\u30ED\u30B0\u306E\u30A8\u30AF\u30B9\u30DD\u30FC\u30C8\u306B\u306F\u6587\u5B57\u8D77\u3053\u3057\u30C6\u30AD\u30B9\u30C8\u3084 API \u30AD\u30FC\u306F\u542B\u307E\u308C\u307E\u305B\u3093\u3002"
     ]
   },
@@ -5195,7 +4647,7 @@ var UI_STRINGS = {
     privacy: "\uAC1C\uC778\uC815\uBCF4 \uBCF4\uD638",
     privacyItems: [
       "\uC624\uB514\uC624\uB294 HTTPS/WSS\uB97C \uD1B5\uD574 Mistral API\uB85C \uC804\uC1A1\uB418\uBA70 \uB85C\uCEEC\uC5D0 \uC800\uC7A5\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.",
-      "\uC124\uC815(API \uD0A4 \uD3EC\uD568)\uC740 \uD50C\uB7EC\uADF8\uC778 \uD3F4\uB354\uC758 data.json\uC5D0 \uC800\uC7A5\uB429\uB2C8\uB2E4.",
+      "API \uD0A4\uB294 \uC774 \uAE30\uAE30\uC758 Obsidian secret storage\uC5D0 \uC800\uC7A5\uB429\uB2C8\uB2E4(vault\uC5D0\uB294 \uC800\uC7A5\uB418\uC9C0 \uC54A\uC73C\uBA70 \uB3D9\uAE30\uD654\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4). \uD50C\uB7EC\uADF8\uC778\uC758 data.json\uC5D0\uB294 \uD574\uB2F9 \uD0A4\uC5D0 \uB300\uD55C \uCC38\uC870\uB9CC \uC800\uC7A5\uB429\uB2C8\uB2E4.",
       "\uB85C\uADF8 \uB0B4\uBCF4\uB0B4\uAE30\uC5D0\uB294 \uC804\uC0AC\uB41C \uD14D\uC2A4\uD2B8\uB098 API \uD0A4\uAC00 \uD3EC\uD568\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
     ]
   }
@@ -5224,7 +4676,7 @@ function getAutoOpenStrings(lang) {
   return (_a = AUTO_OPEN_STRINGS[lang]) != null ? _a : AUTO_OPEN_STRINGS.en;
 }
 var VoxtralHelpView = class extends import_obsidian2.ItemView {
-  constructor(leaf, host) {
+  constructor(leaf, commands, host) {
     super(leaf);
     /**
      * Explicit language override, set via setLanguage(). While null (a fresh
@@ -5234,6 +4686,7 @@ var VoxtralHelpView = class extends import_obsidian2.ItemView {
      * until the next language-affecting event (issue obsidian-voxtral#14).
      */
     this.lang = null;
+    this.commands = commands;
     this.host = host;
   }
   getViewType() {
@@ -5260,17 +4713,17 @@ var VoxtralHelpView = class extends import_obsidian2.ItemView {
     const host = this.host;
     const control = host ? { enabled: host.getAutoOpen(), onChange: (enabled) => host.setAutoOpen(enabled) } : void 0;
     const lang = (_b = (_a = this.lang) != null ? _a : host == null ? void 0 : host.getLanguage()) != null ? _b : "en";
-    renderHelpContent(container, lang, control);
+    renderHelpContent(container, this.commands, lang, control);
   }
   async onClose() {
     this.contentEl.empty();
   }
 };
-function renderHelpContent(container, lang, control) {
+function renderHelpContent(container, engine, lang, control) {
   container.addClass("voxtral-help-view");
   const strings = getStrings(lang);
   container.createEl("h3", { text: strings.title });
-  const commands = getCommandList();
+  const commands = engine.getCommandList();
   const table = container.createEl("table", {
     cls: "voxtral-help-table"
   });
@@ -6046,6 +5499,14 @@ function openTranscriptReviewModal(app, params) {
 var _FileTranscriptionService = class _FileTranscriptionService {
   constructor(deps) {
     this.deps = deps;
+    // One-at-a-time queue (VX_E31_S4, audit §4 B6/§9.4): a watch-folder sync
+    // landing several files, or a menu action fired while one is already
+    // running, used to share `getSettings()`'s vocabulary/style overlay and
+    // the status bar — the still-running file could pick up the next file's
+    // context mid-flight. `running` gates a single in-flight `runTranscribe()`;
+    // everything else waits here in request order.
+    this.queue = [];
+    this.running = false;
   }
   get app() {
     return this.deps.app;
@@ -6103,17 +5564,61 @@ var _FileTranscriptionService = class _FileTranscriptionService {
    * Read a vault audio file, run the pre-flight check, transcribe it (batch),
    * and hand the result to `insert` (when given) or write it to a new linked
    * note. One code path for every entry point (command, file menu, embed).
+   *
+   * Queues rather than runs immediately when another transcription is
+   * already in flight (VX_E31_S4): the returned promise resolves once THIS
+   * file is done, whether it ran right away or waited its turn. A file
+   * already running is never interrupted — cancelling it (the chunked
+   * path's progress-notice Cancel button) stops only that file's remaining
+   * parts and leaves the rest of the queue untouched.
    */
-  async transcribe(file, insert) {
-    var _a;
+  async transcribe(file, insert, context) {
+    return new Promise((resolve) => {
+      this.queue.push({ file, insert, context, resolve });
+      if (this.running) {
+        new import_obsidian7.Notice(`Queued: ${file.name} (${this.queue.length} waiting)`);
+        return;
+      }
+      void this.drainQueue();
+    });
+  }
+  /**
+   * Run queued transcriptions one at a time, in request order. `running` is
+   * set synchronously (before the first `await`) so a `transcribe()` call
+   * made in the same tick as this one starting still sees it as busy and
+   * queues instead of racing it. A failure in one item (runTranscribe
+   * never throws — see its own try/catch) can never block the next: each
+   * iteration resolves its item's promise in a `finally` regardless.
+   */
+  async drainQueue() {
+    if (this.running) return;
+    this.running = true;
+    try {
+      let next;
+      while (next = this.queue.shift()) {
+        const item = next;
+        try {
+          await this.runTranscribe(item.file, item.insert, item.context);
+        } finally {
+          item.resolve();
+        }
+      }
+    } finally {
+      this.running = false;
+    }
+  }
+  /** The actual transcription pipeline for one file — see `transcribe()` for the queue wrapping it. */
+  async runTranscribe(file, insert, context) {
+    const settings = { ...this.settings };
+    const ctx = context != null ? context : EMPTY_REQUEST_CONTEXT;
     try {
       const needsChunking = exceedsUploadLimit(file.stat.size);
       const bytes = await this.app.vault.readBinary(file);
       await this.crashLog(
         `
-=== ${(/* @__PURE__ */ new Date()).toISOString()} transcribe ${file.name} (${(file.stat.size / (1024 * 1024)).toFixed(1)} MB) chunked=${needsChunking} diarize=${this.settings.fileTranscriptDiarize} mobile=${import_obsidian7.Platform.isMobile} ===`
+=== ${(/* @__PURE__ */ new Date()).toISOString()} transcribe ${file.name} (${(file.stat.size / (1024 * 1024)).toFixed(1)} MB) chunked=${needsChunking} diarize=${settings.fileTranscriptDiarize} mobile=${import_obsidian7.Platform.isMobile} ===`
       );
-      if (this.settings.fileTranscriptQualityWarnings) {
+      if (settings.fileTranscriptQualityWarnings) {
         const proceed = await this.preflightQualityGate(file, bytes);
         if (!proceed) {
           new import_obsidian7.Notice(`Transcription of ${file.name} cancelled.`);
@@ -6121,21 +5626,21 @@ var _FileTranscriptionService = class _FileTranscriptionService {
         }
       }
       this.updateStatusBar("processing");
-      if ((_a = this.settings.vocabularyTerms) == null ? void 0 : _a.length) {
-        const n = buildContextBias(this.settings.vocabularyTerms).length;
+      if (ctx.vocabularyTerms.length) {
+        const n = buildContextBias(ctx.vocabularyTerms).length;
         await this.logStep(`vault vocabulary: sending ${n} context-bias term(s)`);
       }
       if (needsChunking) {
-        await this.transcribeInChunks(file, bytes, insert);
+        await this.transcribeInChunks(file, bytes, insert, settings, ctx);
         this.updateStatusBar("idle");
         return;
       }
       new import_obsidian7.Notice(`Transcribing ${file.name}\u2026`);
       const blob = new Blob([bytes], { type: mimeForExtension(file.extension) });
       let chunks = [];
-      if (this.settings.fileTranscriptDiarize) {
+      if (settings.fileTranscriptDiarize) {
         await this.logStep("single-call: sending diarized request");
-        const result = await this.transcribeDiarized(blob);
+        const result = await this.transcribeDiarized(blob, settings, ctx);
         await this.logStep(
           `single-call: response text=${result.text.length} chars, ${result.segments.length} segments; building body`
         );
@@ -6157,12 +5662,13 @@ ${fallback}` }];
         }
         await this.logStep(`single-call: built ${chunks.length} review chunk(s)`);
       } else {
-        let text2 = (await transcribeBatch(blob, this.settings, this.httpRequest)).trim();
-        if (text2 && this.settings.fileTranscriptCorrect) {
+        let text2 = (await transcribeBatch(blob, settings, this.httpRequest, false, ctx)).trim();
+        if (text2 && settings.fileTranscriptCorrect) {
           await this.logStep(`single-call: correcting (${text2.length} chars)`);
           try {
-            const corrected = (await correctText(text2, this.settings, this.httpRequest, {
-              timeoutMs: correctionTimeoutMs(text2.length)
+            const corrected = (await correctText(text2, settings, this.httpRequest, {
+              timeoutMs: correctionTimeoutMs(text2.length),
+              context: ctx
             })).trim();
             await this.logStep(`single-call: correction done (${corrected.length} chars)`);
             if (corrected) text2 = corrected;
@@ -6179,7 +5685,7 @@ ${fallback}` }];
         new import_obsidian7.Notice(`No speech detected in ${file.name}.`);
         return;
       }
-      if (this.settings.fileTranscriptReview) {
+      if (settings.fileTranscriptReview) {
         await this.openReviewAndPlace(file, chunks, insert, `Inserted transcript of ${file.name}.`);
         return;
       }
@@ -6286,8 +5792,8 @@ ${fallback}` }];
    * in transcribeBatchRaw — the API requires segment timestamps for diarization
    * and rejects them alongside `language`, so the language hint is dropped there.
    */
-  async transcribeDiarized(blob) {
-    return transcribeBatchRaw(blob, this.settings, this.httpRequest, true);
+  async transcribeDiarized(blob, settings, context) {
+    return transcribeBatchRaw(blob, settings, this.httpRequest, true, context);
   }
   /**
    * Decode an audio file and resample it to 16 kHz mono (the rate the speech model
@@ -6352,7 +5858,7 @@ ${fallback}` }];
    * part by part. A progress notice shows "part k/N" with a Cancel button that
    * stops further parts and leaves the already-inserted text in place.
    */
-  async transcribeInChunks(file, bytes, insert) {
+  async transcribeInChunks(file, bytes, insert, settings, context) {
     let totalFrames;
     let sampleRate;
     let chunkWav;
@@ -6381,9 +5887,9 @@ ${fallback}` }];
         `chunked: decoded source-rate ${totalFrames} frames @ ${sampleRate}Hz`
       );
     }
-    const spans = planChunks(totalFrames, sampleRate, this.settings.chunkSeconds);
+    const spans = planChunks(totalFrames, sampleRate, settings.chunkSeconds);
     await this.logStep(`chunked: planned ${spans.length} chunk(s) @ ${sampleRate}Hz`);
-    const review = this.settings.fileTranscriptReview;
+    const review = settings.fileTranscriptReview;
     const reviewChunks = [];
     let append;
     if (review) {
@@ -6428,8 +5934,8 @@ ${fallback}` }];
         })
       );
     };
-    const diarize = this.settings.fileTranscriptDiarize;
-    const correct = this.settings.fileTranscriptCorrect && !diarize;
+    const diarize = settings.fileTranscriptDiarize;
+    const correct = settings.fileTranscriptCorrect && !diarize;
     const rawParts = [];
     const failed = [];
     let anyText = false;
@@ -6457,7 +5963,7 @@ ${fallback}` }];
                   `Voxtral: retry ${attempt} for chunk ${span.index + 1}/${spans.length}`
                 );
               }
-              return diarize ? this.transcribeDiarized(blob) : transcribeBatchRaw(blob, this.settings, this.httpRequest, false);
+              return diarize ? this.transcribeDiarized(blob, settings, context) : transcribeBatchRaw(blob, settings, this.httpRequest, false, context);
             },
             {
               attempts: 5,
@@ -6524,8 +6030,9 @@ ${fallback}
         await this.logStep(`chunked: correcting full transcript (${raw.length} chars)`);
         let corrected = "";
         try {
-          corrected = (await correctText(raw, this.settings, this.httpRequest, {
-            timeoutMs: correctionTimeoutMs(raw.length)
+          corrected = (await correctText(raw, settings, this.httpRequest, {
+            timeoutMs: correctionTimeoutMs(raw.length),
+            context
           })).trim();
           await this.logStep(`chunked: correction done (${corrected.length} chars)`);
         } catch (e) {
@@ -6579,18 +6086,21 @@ ${body}
   }
   /** A note path under `folder` based on `base`, suffixed with a number if taken. */
   uniqueNotePath(folder, base) {
-    const dir = folder ? `${folder}/` : "";
-    let candidate = `${dir}${base}.md`;
-    let i = 2;
-    while (this.app.vault.getAbstractFileByPath(candidate)) {
-      candidate = `${dir}${base} ${i}.md`;
-      i++;
-    }
-    return candidate;
+    return uniqueNotePath(this.app, folder, base);
   }
 };
 _FileTranscriptionService.CRASH_LOG_PATH = "voxtral-crash-log.md";
 var FileTranscriptionService = _FileTranscriptionService;
+function uniqueNotePath(app, folder, base) {
+  const dir = folder ? `${folder}/` : "";
+  let candidate = `${dir}${base}.md`;
+  let i = 2;
+  while (app.vault.getAbstractFileByPath(candidate)) {
+    candidate = `${dir}${base} ${i}.md`;
+    i++;
+  }
+  return candidate;
+}
 
 // src/playback-controller.ts
 var import_obsidian8 = require("obsidian");
@@ -6642,48 +6152,987 @@ var PlaybackController = class {
   }
 };
 
+// ../shared/src/similarity.ts
+function levenshtein(a, b) {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from(
+    { length: m + 1 },
+    () => Array(n + 1).fill(0)
+  );
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+function normalizeCommand(text) {
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-/g, " ").replace(/[.,!?;:'"()[\]{}]/g, "").toLowerCase().trim();
+}
+
+// ../shared/src/phonetics.ts
+var ALL_LANGS2 = {
+  nl: nl_default,
+  en: en_default,
+  fr: fr_default,
+  de: de_default,
+  es: es_default,
+  pt: pt_default,
+  it: it_default,
+  ru: ru_default,
+  zh: zh_default,
+  hi: hi_default,
+  ar: ar_default,
+  ja: ja_default,
+  ko: ko_default
+};
+function compileRules(data) {
+  return data.map(({ pattern, flags, replacement }) => [
+    new RegExp(pattern, flags),
+    replacement
+  ]);
+}
+var PHONETIC_RULES = Object.fromEntries(
+  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS2[code].phonetics.length > 0).map((code) => [code, compileRules(ALL_LANGS2[code].phonetics)])
+);
+var ARTICLES = Object.fromEntries(
+  SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS2[code].articles])
+);
+var TRAILING_FILLERS = Object.fromEntries(
+  SUPPORTED_LANGUAGES.filter((code) => ALL_LANGS2[code].fillers.length > 0).map((code) => [code, ALL_LANGS2[code].fillers])
+);
+function phoneticNormalize(text, lang) {
+  const rules = PHONETIC_RULES[lang];
+  if (!rules) return text;
+  let result = text;
+  for (const [pattern, replacement] of rules) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
+function stripArticles(text, lang) {
+  const articles = ARTICLES[lang];
+  if (!articles || articles.length === 0) return text;
+  const words = text.split(/\s+/);
+  let stripped = 0;
+  while (stripped < Math.min(2, words.length - 1)) {
+    if (articles.includes(words[stripped])) {
+      stripped++;
+    } else {
+      break;
+    }
+  }
+  return stripped > 0 ? words.slice(stripped).join(" ") : text;
+}
+function stripTrailingFillers(text, lang) {
+  const fillers = TRAILING_FILLERS[lang];
+  if (!fillers || fillers.length === 0) return text;
+  let result = text;
+  for (const filler of fillers.sort((a, b) => b.length - a.length)) {
+    if (result.endsWith(" " + filler)) {
+      result = result.slice(0, -(filler.length + 1)).trimEnd();
+    }
+  }
+  return result;
+}
+function trySplitCompound(text, knownWords) {
+  if (text.includes(" ") || text.length < 4) return text;
+  for (const phrase of knownWords) {
+    const words = phrase.split(/\s+/);
+    if (words.length < 2) continue;
+    const joined = words.join("");
+    if (text === joined) {
+      return phrase;
+    }
+  }
+  return text;
+}
+
+// ../shared/src/text-context.ts
+function detectContext(lineBefore) {
+  if (!lineBefore) return "new-line";
+  const trimmed = lineBefore.trimEnd();
+  if (!trimmed) return "new-line";
+  if (/^>+\s/.test(lineBefore)) {
+    const afterMarker = lineBefore.replace(/^>+\s(?:\[!.*?\]\s*)?/, "");
+    if (!afterMarker.trim()) return "comment";
+  }
+  if (/^(?:[-*]\s|[-*]\s\[.\]\s|#{1,6}\s|\d+[.)]\s)/.test(lineBefore)) {
+    const afterMarker = lineBefore.replace(
+      /^(?:[-*]\s(?:\[.\]\s)?|#{1,6}\s|\d+[.)]\s)/,
+      ""
+    );
+    if (!afterMarker.trim()) return "list-or-heading";
+  }
+  const lastChar = trimmed[trimmed.length - 1];
+  if (lastChar === "." || lastChar === "!" || lastChar === "?") {
+    return "sentence-start";
+  }
+  return "mid-sentence";
+}
+function shouldStripTrailingPunctuation(context) {
+  return context === "mid-sentence" || context === "list-or-heading";
+}
+function shouldLowercase(context) {
+  return context === "mid-sentence";
+}
+function lowercaseFirstLetter(text) {
+  const match = text.match(
+    /^(\s*)([A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝŸ])/
+  );
+  if (match) {
+    return match[1] + match[2].toLowerCase() + text.slice(match[1].length + 1);
+  }
+  return text;
+}
+function stripTrailingPunctuation(text) {
+  return text.replace(/[.!?]+\s*$/, "");
+}
+function isTableLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("|")) return true;
+  if (/^:?-{2,}:?(\s*\|\s*:?-{2,}:?)+$/.test(trimmed)) return true;
+  return false;
+}
+
+// ../shared/src/voice-commands.ts
+function closeSlot(editor, host) {
+  const activeSlot = host.getActiveSlot();
+  if (!activeSlot) return false;
+  let pos = editor.getCursor();
+  const suffix = activeSlot.def.suffix;
+  if (suffix && activeSlot.startPos) {
+    const textSinceOpen = editor.getRange(activeSlot.startPos, pos);
+    if (textSinceOpen.includes(suffix)) {
+      host.setActiveSlot(null);
+      return true;
+    }
+  }
+  if (suffix) {
+    const line2 = editor.getLine(pos.line);
+    const before = line2.substring(0, pos.ch);
+    const trimmed = before.replace(/\s+$/, "");
+    if (trimmed.length < before.length) {
+      const trimFrom = { line: pos.line, ch: trimmed.length };
+      editor.replaceRange("", trimFrom, pos);
+      pos = { line: pos.line, ch: trimmed.length };
+    }
+  }
+  const line = editor.getLine(pos.line);
+  const afterCursor = line.substring(pos.ch, pos.ch + suffix.length);
+  if (afterCursor === suffix) {
+    editor.setCursor({ line: pos.line, ch: pos.ch + suffix.length });
+  } else {
+    editor.replaceRange(suffix, pos);
+    editor.setCursor({ line: pos.line, ch: pos.ch + suffix.length });
+  }
+  host.setActiveSlot(null);
+  return true;
+}
+function fixMishearings(text, lang) {
+  for (const [pattern, replacement] of getMishearings(lang)) {
+    text = text.replace(pattern, replacement);
+  }
+  return text;
+}
+function insertAtCursor(editor, host, text, posOverride, continuation) {
+  const slotActive = host.getActiveSlot() !== null;
+  const cursor = posOverride != null ? posOverride : editor.getCursor();
+  const context = cursor.ch === 0 ? "new-line" : detectContext(editor.getRange({ line: cursor.line, ch: 0 }, cursor));
+  if (cursor.ch === 0) {
+    text = text.replace(/^ +/, "");
+  }
+  if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !slotActive) {
+    const charBefore = editor.getRange(
+      { line: cursor.line, ch: cursor.ch - 1 },
+      cursor
+    );
+    if (charBefore && /\S/.test(charBefore)) {
+      text = " " + text;
+    }
+  }
+  if (!continuation) {
+    if (shouldLowercase(context)) {
+      text = lowercaseFirstLetter(text);
+    }
+    if (shouldStripTrailingPunctuation(context)) {
+      text = stripTrailingPunctuation(text);
+    }
+  }
+  if (text.length > 0 && !/[\s\n]$/.test(text) && !slotActive) {
+    const charAfter = editor.getRange(cursor, {
+      line: cursor.line,
+      ch: cursor.ch + 1
+    });
+    if (charAfter && /\S/.test(charAfter)) {
+      text = text + " ";
+    }
+  }
+  editor.replaceRange(text, cursor);
+  const lines = text.split("\n");
+  const lastLine = lines[lines.length - 1];
+  const newLine = cursor.line + lines.length - 1;
+  const newCh = lines.length === 1 ? cursor.ch + lastLine.length : lastLine.length;
+  editor.setCursor({ line: newLine, ch: newCh });
+}
+function deleteLastParagraph(editor) {
+  const cursor = editor.getCursor();
+  const fullText = editor.getValue();
+  const offset = editor.posToOffset(cursor);
+  const textBefore = fullText.substring(0, offset);
+  const lastPara = textBefore.lastIndexOf("\n\n");
+  if (lastPara >= 0) {
+    const from = editor.offsetToPos(lastPara);
+    editor.replaceRange("", from, cursor);
+  } else {
+    editor.replaceRange("", { line: 0, ch: 0 }, cursor);
+  }
+}
+function deleteLastSentence(editor) {
+  const cursor = editor.getCursor();
+  const fullText = editor.getValue();
+  const offset = editor.posToOffset(cursor);
+  const textBefore = fullText.substring(0, offset).trimEnd();
+  const sentenceEnd = Math.max(
+    textBefore.lastIndexOf(". "),
+    textBefore.lastIndexOf("! "),
+    textBefore.lastIndexOf("? "),
+    textBefore.lastIndexOf(".\n"),
+    textBefore.lastIndexOf("!\n"),
+    textBefore.lastIndexOf("?\n")
+  );
+  if (sentenceEnd >= 0) {
+    const from = editor.offsetToPos(sentenceEnd + 1);
+    editor.replaceRange("", from, cursor);
+  } else {
+    editor.replaceRange("", { line: cursor.line, ch: 0 }, cursor);
+  }
+}
+function colonAction(editor) {
+  const cursor = editor.getCursor();
+  if (cursor.ch > 0) {
+    const lineText = editor.getLine(cursor.line);
+    const before = lineText.substring(0, cursor.ch);
+    const cleaned = before.replace(/[,;.!?]+\s*$/, "");
+    if (cleaned.length < before.length) {
+      const from = { line: cursor.line, ch: cleaned.length };
+      editor.replaceRange("", from, cursor);
+      editor.setCursor(from);
+    }
+  }
+  const pos = editor.getCursor();
+  editor.replaceRange(": ", pos);
+  editor.setCursor({ line: pos.line, ch: pos.ch + 2 });
+}
+function closeSlotAndSpace(editor, host, expectedOpenId) {
+  var _a;
+  if (((_a = host.getActiveSlot()) == null ? void 0 : _a.commandId) === expectedOpenId) {
+    closeSlot(editor, host);
+  } else {
+    return;
+  }
+  const pos = editor.getCursor();
+  editor.replaceRange(" ", pos);
+  editor.setCursor({ line: pos.line, ch: pos.ch + 1 });
+}
+var COMMAND_DEFS = [
+  { id: "newParagraph", action: (editor, host) => insertAtCursor(editor, host, "\n\n") },
+  { id: "newLine", action: (editor, host) => insertAtCursor(editor, host, "\n") },
+  { id: "heading1", action: (editor, host) => insertAtCursor(editor, host, "\n\n# ") },
+  { id: "heading2", action: (editor, host) => insertAtCursor(editor, host, "\n\n## ") },
+  { id: "heading3", action: (editor, host) => insertAtCursor(editor, host, "\n\n### ") },
+  {
+    id: "bulletPoint",
+    action: (editor, host) => {
+      var _a, _b;
+      const cursor = editor.getCursor();
+      const lineText = editor.getLine(cursor.line);
+      if (/^(\d+)\.\s/.test(lineText)) {
+        const num = parseInt((_b = (_a = lineText.match(/^(\d+)/)) == null ? void 0 : _a[1]) != null ? _b : "0", 10);
+        insertAtCursor(editor, host, `
+${num + 1}. `);
+      } else if (/^\s*- \[[ x]\]\s/.test(lineText)) {
+        insertAtCursor(editor, host, "\n- [ ] ");
+      } else {
+        insertAtCursor(editor, host, "\n- ");
+      }
+    }
+  },
+  { id: "todoItem", action: (editor, host) => insertAtCursor(editor, host, "\n- [ ] ") },
+  {
+    id: "numberedItem",
+    action: (editor, host) => {
+      const cursor = editor.getCursor();
+      const lineText = editor.getLine(cursor.line);
+      const match = lineText.match(/^(\d+)\.\s/);
+      const nextNum = match ? parseInt(match[1], 10) + 1 : 1;
+      insertAtCursor(editor, host, `
+${nextNum}. `);
+    }
+  },
+  { id: "deleteLastParagraph", action: (editor) => deleteLastParagraph(editor) },
+  { id: "deleteLastLine", action: (editor) => deleteLastSentence(editor) },
+  {
+    id: "undo",
+    action: (editor) => {
+      editor.undo();
+    }
+  },
+  {
+    id: "stopRecording",
+    action: () => {
+    }
+  },
+  {
+    // The actual revert runs in the plugin layer (main.ts), triggered by the
+    // onCommandExecuted callback — see undoLastCommand() below. The action
+    // itself is a no-op so executeCommand()'s before/after diff sees no
+    // change and never records THIS command as undoable (undoing an undo
+    // is not supported).
+    id: "undoLastVoiceCommand",
+    action: () => {
+    }
+  },
+  { id: "colon", punctuation: true, action: colonAction },
+  // ── Wikilink: just insert [[, Obsidian handles ]] via autocomplete ──
+  {
+    id: "wikilink",
+    action: (editor) => {
+      const cursor = editor.getCursor();
+      const line = editor.getLine(cursor.line);
+      const before = line.substring(0, cursor.ch);
+      const needsSpace = before.length > 0 && !/\s$/.test(before);
+      const insert = needsSpace ? " [[" : "[[";
+      editor.replaceRange(insert, cursor);
+      editor.setCursor({ line: cursor.line, ch: cursor.ch + insert.length });
+    }
+  },
+  // ── Open/close commands: voice command opens, voice command closes ──
+  {
+    id: "boldOpen",
+    slot: { prefix: "**", suffix: "**", exitTrigger: "voice" },
+    action: (editor, host) => {
+      const cursor = editor.getCursor();
+      const line = editor.getLine(cursor.line);
+      const before = line.substring(0, cursor.ch);
+      const needsSpace = before.length > 0 && !/\s$/.test(before);
+      const insert = needsSpace ? " **" : "**";
+      editor.replaceRange(insert, cursor);
+      const endCh = cursor.ch + insert.length;
+      editor.setCursor({ line: cursor.line, ch: endCh });
+      host.setActiveSlot({
+        def: { prefix: "**", suffix: "**", exitTrigger: "voice" },
+        commandId: "boldOpen",
+        startPos: { line: cursor.line, ch: endCh }
+      });
+    }
+  },
+  {
+    id: "boldClose",
+    action: (editor, host) => {
+      closeSlotAndSpace(editor, host, "boldOpen");
+    }
+  },
+  {
+    id: "italicOpen",
+    slot: { prefix: "*", suffix: "*", exitTrigger: "voice" },
+    action: (editor, host) => {
+      const cursor = editor.getCursor();
+      const line = editor.getLine(cursor.line);
+      const before = line.substring(0, cursor.ch);
+      const needsSpace = before.length > 0 && !/\s$/.test(before);
+      const insert = needsSpace ? " *" : "*";
+      editor.replaceRange(insert, cursor);
+      const endCh = cursor.ch + insert.length;
+      editor.setCursor({ line: cursor.line, ch: endCh });
+      host.setActiveSlot({
+        def: { prefix: "*", suffix: "*", exitTrigger: "voice" },
+        commandId: "italicOpen",
+        startPos: { line: cursor.line, ch: endCh }
+      });
+    }
+  },
+  {
+    id: "italicClose",
+    action: (editor, host) => {
+      closeSlotAndSpace(editor, host, "italicOpen");
+    }
+  },
+  {
+    id: "inlineCodeOpen",
+    slot: { prefix: "`", suffix: "`", exitTrigger: "voice" },
+    action: (editor, host) => {
+      const cursor = editor.getCursor();
+      const line = editor.getLine(cursor.line);
+      const before = line.substring(0, cursor.ch);
+      const needsSpace = before.length > 0 && !/\s$/.test(before);
+      const insert = needsSpace ? " `" : "`";
+      editor.replaceRange(insert, cursor);
+      const endCh = cursor.ch + insert.length;
+      editor.setCursor({ line: cursor.line, ch: endCh });
+      host.setActiveSlot({
+        def: { prefix: "`", suffix: "`", exitTrigger: "voice" },
+        commandId: "inlineCodeOpen",
+        startPos: { line: cursor.line, ch: endCh }
+      });
+    }
+  },
+  {
+    id: "inlineCodeClose",
+    action: (editor, host) => {
+      closeSlotAndSpace(editor, host, "inlineCodeOpen");
+    }
+  },
+  {
+    id: "tagOpen",
+    slot: { prefix: "#", suffix: "", exitTrigger: "voice" },
+    action: (editor, host) => {
+      const cursor = editor.getCursor();
+      let prefix = "#";
+      if (cursor.ch > 0) {
+        const charBefore = editor.getRange(
+          { line: cursor.line, ch: cursor.ch - 1 },
+          cursor
+        );
+        if (charBefore && /\S/.test(charBefore)) {
+          prefix = " #";
+        }
+      }
+      editor.replaceRange(prefix, cursor);
+      const endCh = cursor.ch + prefix.length;
+      editor.setCursor({ line: cursor.line, ch: endCh });
+      host.setActiveSlot({
+        def: { prefix: "#", suffix: "", exitTrigger: "voice" },
+        commandId: "tagOpen",
+        startPos: { line: cursor.line, ch: endCh }
+      });
+    }
+  },
+  {
+    id: "tagClose",
+    action: (editor, host) => {
+      closeSlotAndSpace(editor, host, "tagOpen");
+    }
+  },
+  {
+    id: "codeBlockOpen",
+    slot: { prefix: "```", suffix: "\n```", exitTrigger: "voice" },
+    action: (editor, host) => {
+      const cursor = editor.getCursor();
+      editor.replaceRange("\n```\n", cursor);
+      const endLine = cursor.line + 2;
+      editor.setCursor({ line: endLine, ch: 0 });
+      host.setActiveSlot({
+        def: { prefix: "```", suffix: "\n```", exitTrigger: "voice" },
+        commandId: "codeBlockOpen",
+        startPos: { line: endLine, ch: 0 }
+      });
+    }
+  },
+  {
+    id: "codeBlockClose",
+    action: (editor, host) => {
+      closeSlotAndSpace(editor, host, "codeBlockOpen");
+    }
+  }
+];
+function computeEditDiff(before, after) {
+  if (before === after) return null;
+  const maxCommon = Math.min(before.length, after.length);
+  let start = 0;
+  while (start < maxCommon && before[start] === after[start]) start++;
+  let endBefore = before.length;
+  let endAfter = after.length;
+  while (endBefore > start && endAfter > start && before[endBefore - 1] === after[endAfter - 1]) {
+    endBefore--;
+    endAfter--;
+  }
+  return {
+    from: start,
+    removed: before.slice(start, endBefore),
+    inserted: after.slice(start, endAfter)
+  };
+}
+var NON_UNDOABLE_COMMANDS = /* @__PURE__ */ new Set([
+  "undo",
+  "undoLastVoiceCommand",
+  "stopRecording"
+]);
+function compileCustomCommands(commands) {
+  const labels = /* @__PURE__ */ new Map();
+  const triggers = /* @__PURE__ */ new Map();
+  const defs = commands.map((cmd) => {
+    var _a, _b, _c;
+    const langMap = /* @__PURE__ */ new Map();
+    for (const [lang, phrases] of Object.entries(cmd.triggers)) {
+      langMap.set(lang, phrases);
+    }
+    triggers.set(cmd.id, langMap);
+    if (cmd.type === "slot" && cmd.slotPrefix !== void 0) {
+      const prefix = cmd.slotPrefix;
+      const suffix = (_a = cmd.slotSuffix) != null ? _a : "";
+      const exit = (_b = cmd.slotExit) != null ? _b : "enter";
+      labels.set(cmd.id, {
+        labels: cmd.labels,
+        fallback: `${prefix}\u2026${suffix}`
+      });
+      return {
+        id: cmd.id,
+        slot: { prefix, suffix, exitTrigger: exit },
+        action: (editor, host) => {
+          const cursor = editor.getCursor();
+          editor.replaceRange(prefix, cursor);
+          editor.setCursor({ line: cursor.line, ch: cursor.ch + prefix.length });
+          host.setActiveSlot({
+            def: { prefix, suffix, exitTrigger: exit },
+            commandId: cmd.id,
+            startPos: { line: cursor.line, ch: cursor.ch + prefix.length }
+          });
+        }
+      };
+    }
+    const fallbackLabel = ((_c = cmd.insertText) != null ? _c : "").replace(/\n/g, "\u21B5").slice(0, 30);
+    labels.set(cmd.id, {
+      labels: cmd.labels,
+      fallback: fallbackLabel || cmd.id
+    });
+    return {
+      id: cmd.id,
+      action: (editor, host) => insertAtCursor(editor, host, resolveInsertText(cmd, host.getLanguage()))
+    };
+  });
+  return { defs, triggers, labels };
+}
+function resolveInsertText(cmd, lang) {
+  var _a, _b, _c, _d, _e;
+  return (_e = (_d = (_c = (_a = cmd.insertTextByLang) == null ? void 0 : _a[lang]) != null ? _c : (_b = cmd.insertTextByLang) == null ? void 0 : _b.en) != null ? _d : cmd.insertText) != null ? _e : "";
+}
+function resolveCustomLabel(labels, cmdId, lang) {
+  var _a, _b, _c, _d;
+  const src = labels.get(cmdId);
+  if (!src) return cmdId;
+  return (_d = (_c = (_a = src.labels) == null ? void 0 : _a[lang]) != null ? _c : (_b = src.labels) == null ? void 0 : _b.en) != null ? _d : src.fallback;
+}
+function getPatternsForAnyCommand(cmdId, lang, triggers) {
+  var _a, _b, _c, _d;
+  const builtinPatterns = getPatternsForCommand(cmdId, lang);
+  if (builtinPatterns.length > 0) return builtinPatterns;
+  return (_d = (_c = (_a = triggers.get(cmdId)) == null ? void 0 : _a.get(lang)) != null ? _c : (_b = triggers.get(cmdId)) == null ? void 0 : _b.get("en")) != null ? _d : [];
+}
+function getAllCommandPhrases(allCmds, lang, triggers) {
+  const phrases = [];
+  for (const cmd of allCmds) {
+    for (const pattern of getPatternsForAnyCommand(cmd.id, lang, triggers)) {
+      phrases.push(normalizeCommand(pattern));
+    }
+  }
+  return phrases;
+}
+function trailingWords(text, n) {
+  const words = text.trimEnd().split(/\s+/);
+  return words.slice(-n).join(" ");
+}
+function findCommandMatch(rawText, lang, allCmds, triggers) {
+  var _a;
+  const normalized = fixMishearings(normalizeCommand(rawText), lang);
+  for (const cmd of allCmds) {
+    const patterns = getPatternsForAnyCommand(cmd.id, lang, triggers);
+    for (const pattern of patterns) {
+      const normPattern = normalizeCommand(pattern);
+      if (normalized.endsWith(normPattern)) {
+        const patternWordCount = pattern.split(/\s+/).length;
+        const rawWords = rawText.trimEnd().split(/\s+/);
+        const textBefore = rawWords.slice(0, -patternWordCount).join(" ").trimEnd();
+        return { command: cmd, textBefore };
+      }
+    }
+  }
+  const strippedFillers = stripTrailingFillers(normalized, lang);
+  if (strippedFillers !== normalized) {
+    for (const cmd of allCmds) {
+      const patterns = getPatternsForAnyCommand(cmd.id, lang, triggers);
+      for (const pattern of patterns) {
+        const normPattern = normalizeCommand(pattern);
+        if (strippedFillers.endsWith(normPattern)) {
+          const patternWordCount = pattern.split(/\s+/).length;
+          const rawWords = rawText.trimEnd().split(/\s+/);
+          const fillerWordCount = normalized.split(/\s+/).length - strippedFillers.split(/\s+/).length;
+          const textBefore = rawWords.slice(0, -(patternWordCount + fillerWordCount)).join(" ").trimEnd();
+          return { command: cmd, textBefore };
+        }
+      }
+    }
+  }
+  for (const cmd of allCmds) {
+    const patterns = getPatternsForAnyCommand(cmd.id, lang, triggers);
+    for (const pattern of patterns) {
+      const normPattern = normalizeCommand(pattern);
+      const patternWordCount = normPattern.split(/\s+/).length;
+      const tail = trailingWords(normalized, patternWordCount + 1);
+      const stripped = stripArticles(tail, lang);
+      if (stripped === normPattern) {
+        const tailWordCount = tail.split(/\s+/).length;
+        const rawWords = rawText.trimEnd().split(/\s+/);
+        const textBefore = rawWords.slice(0, -tailWordCount).join(" ").trimEnd();
+        return { command: cmd, textBefore };
+      }
+    }
+  }
+  const phoneticText = phoneticNormalize(normalized, lang);
+  for (const cmd of allCmds) {
+    const patterns = getPatternsForAnyCommand(cmd.id, lang, triggers);
+    for (const pattern of patterns) {
+      const phoneticPattern = phoneticNormalize(normalizeCommand(pattern), lang);
+      if (phoneticPattern !== normalizeCommand(pattern) || phoneticText !== normalized) {
+        if (phoneticText.endsWith(phoneticPattern)) {
+          const patternWordCount = pattern.split(/\s+/).length;
+          const rawWords = rawText.trimEnd().split(/\s+/);
+          const textBefore = rawWords.slice(0, -patternWordCount).join(" ").trimEnd();
+          return { command: cmd, textBefore };
+        }
+      }
+    }
+  }
+  const lastWord = (_a = normalized.split(/\s+/).pop()) != null ? _a : "";
+  if (lastWord.length >= 4 && !lastWord.includes(" ")) {
+    const allPhrases = getAllCommandPhrases(allCmds, lang, triggers);
+    const split = trySplitCompound(lastWord, allPhrases);
+    if (split !== lastWord) {
+      const words = normalized.split(/\s+/);
+      words[words.length - 1] = split;
+      const resplit = words.join(" ");
+      for (const cmd of allCmds) {
+        const patterns = getPatternsForAnyCommand(cmd.id, lang, triggers);
+        for (const pattern of patterns) {
+          const normPattern = normalizeCommand(pattern);
+          if (resplit.endsWith(normPattern)) {
+            const rawWords = rawText.trimEnd().split(/\s+/);
+            const textBefore = rawWords.slice(0, -1).join(" ").trimEnd();
+            return { command: cmd, textBefore };
+          }
+        }
+      }
+    }
+  }
+  let bestMatch = null;
+  let bestDist = 3;
+  for (const cmd of allCmds) {
+    const patterns = getPatternsForAnyCommand(cmd.id, lang, triggers);
+    for (const pattern of patterns) {
+      const normPattern = normalizeCommand(pattern);
+      if (normalized.length < 6 || normPattern.length < 6) continue;
+      if (Math.abs(normalized.length - normPattern.length) > 3) continue;
+      const dist = levenshtein(normalized, normPattern);
+      if (dist > 0 && dist < bestDist) {
+        bestDist = dist;
+        bestMatch = { command: cmd, textBefore: "" };
+      }
+    }
+  }
+  return bestMatch;
+}
+var OPEN_CLOSE_PAIRS = [
+  ["boldOpen", "boldClose"],
+  ["italicOpen", "italicClose"],
+  ["inlineCodeOpen", "inlineCodeClose"],
+  ["tagOpen", "tagClose"],
+  ["codeBlockOpen", "codeBlockClose"]
+];
+function getBuiltInCommandList(lang) {
+  const closeIds = new Set(OPEN_CLOSE_PAIRS.map(([, c]) => c));
+  const openMap = new Map(OPEN_CLOSE_PAIRS);
+  const builtIn = [];
+  for (const c of COMMAND_DEFS) {
+    if (closeIds.has(c.id)) continue;
+    const closeId = openMap.get(c.id);
+    if (closeId) {
+      const openPatterns = getPatternsForCommand(c.id, lang);
+      const closePatterns = getPatternsForCommand(closeId, lang);
+      builtIn.push({
+        label: getLabel(c.id, lang) + " / " + getLabel(closeId, lang),
+        patterns: [...openPatterns.slice(0, 1), ...closePatterns.slice(0, 1)]
+      });
+    } else {
+      builtIn.push({
+        label: getLabel(c.id, lang),
+        patterns: getPatternsForCommand(c.id, lang)
+      });
+    }
+  }
+  return builtIn;
+}
+
+// ../shared/src/command-engine.ts
+var CommandEngine = class {
+  /** @param lang — initial matching language (the old global's default). */
+  constructor(lang = "nl") {
+    this.activeSlot = null;
+    this.pendingUndo = null;
+    this.customDefs = [];
+    this.customTriggers = /* @__PURE__ */ new Map();
+    this.customLabels = /* @__PURE__ */ new Map();
+    this.preMatchHook = null;
+    this.lang = lang;
+  }
+  // ── Language ──
+  /** The language command matching, mishearings and labels resolve against. */
+  getLanguage() {
+    return this.lang;
+  }
+  /** Update the active language for command matching. */
+  setLanguage(lang) {
+    this.lang = lang;
+  }
+  // ── Slots ──
+  /** Get the active slot info, or null when no slot is open. */
+  getActiveSlot() {
+    return this.activeSlot;
+  }
+  /** Open a slot (or clear it with null) — used by the command actions. */
+  setActiveSlot(slot) {
+    this.activeSlot = slot;
+  }
+  /** Check if a slot is currently active. */
+  isSlotActive() {
+    return this.activeSlot !== null;
+  }
+  /**
+   * Close the active slot: insert the suffix at the cursor.
+   * Returns true if a slot was closed, false if none was active.
+   */
+  closeSlot(editor) {
+    return closeSlot(editor, this);
+  }
+  /** Cancel the active slot without inserting the suffix. */
+  cancelSlot() {
+    this.activeSlot = null;
+  }
+  // ── Custom commands ──
+  /**
+   * Load user-defined custom commands into the matching pipeline: their
+   * actions, their trigger phrases and their help-panel labels, in one
+   * call. Call this whenever settings change.
+   *
+   * This used to be two exports (`loadCustomCommands` +
+   * `loadCustomCommandTriggers`) that every caller had to remember to make
+   * in lockstep; forgetting the second one silently produced commands that
+   * could never match (audit §2.2 A4).
+   */
+  loadCustomCommands(commands) {
+    const compiled = compileCustomCommands(commands);
+    this.customDefs = compiled.defs;
+    this.customTriggers = compiled.triggers;
+    this.customLabels = compiled.labels;
+  }
+  // ── Matching ──
+  /** Built-in commands plus the loaded custom ones, in matching order. */
+  allCommands() {
+    return [...COMMAND_DEFS, ...this.customDefs];
+  }
+  /**
+   * Check if the given text ends with a voice command.
+   * Returns the match (command + preceding text) or null.
+   */
+  matchCommand(rawText) {
+    return findCommandMatch(
+      rawText,
+      this.lang,
+      this.allCommands(),
+      this.customTriggers
+    );
+  }
+  // ── Execution and undo ──
+  /**
+   * Run a matched command's action and, for eligible commands, record a
+   * diff-based inverse for a later "undo last voice command". Replaces a
+   * bare `command.action(editor)` call at every command-execution site.
+   */
+  executeCommand(editor, command) {
+    const before = editor.getValue();
+    const cursorBeforeOffset = editor.posToOffset(editor.getCursor());
+    const slotBefore = this.activeSlot;
+    command.action(editor, this);
+    if (NON_UNDOABLE_COMMANDS.has(command.id)) return;
+    const after = editor.getValue();
+    const diff = computeEditDiff(before, after);
+    if (!diff) return;
+    this.pendingUndo = {
+      commandId: command.id,
+      snapshotAfter: after,
+      revert: (ed) => {
+        const from = ed.offsetToPos(diff.from);
+        const to = ed.offsetToPos(diff.from + diff.inserted.length);
+        ed.replaceRange(diff.removed, from, to);
+        ed.setCursor(ed.offsetToPos(cursorBeforeOffset));
+        this.activeSlot = slotBefore;
+      }
+    };
+  }
+  /** Whether a command is currently available to undo. */
+  canUndo() {
+    return this.pendingUndo !== null;
+  }
+  /**
+   * Revert the last executed command — but only if it's still the most
+   * recent edit. If dictation (or anything else) changed the document since,
+   * refuse rather than risk eating that later text.
+   */
+  undoLastCommand(editor) {
+    if (!this.pendingUndo) return "none";
+    const pending = this.pendingUndo;
+    this.pendingUndo = null;
+    if (editor.getValue() !== pending.snapshotAfter) return "stale";
+    pending.revert(editor);
+    return "reverted";
+  }
+  /** Clear any pending undo (call when a new recording session starts). */
+  resetUndo() {
+    this.pendingUndo = null;
+  }
+  // ── Text processing ──
+  /**
+   * Register a pre-match hook, called before built-in command matching.
+   * Returns true if the text was handled (e.g. a template was inserted).
+   * Used by main.ts to integrate template matching (which needs App access).
+   */
+  setPreMatchHook(hook) {
+    this.preMatchHook = hook;
+  }
+  /**
+   * Process transcribed text: split into sentences, check each for voice
+   * commands, and execute them or insert the text as-is.
+   */
+  processText(editor, text, posOverride, onCommand, continuation) {
+    let stopRequested = false;
+    const segments = text.match(/[^.!?]+[.!?]+\s*/g);
+    if (!segments) {
+      return this.processSegment(editor, text, posOverride, onCommand, continuation);
+    }
+    const joined = segments.join("");
+    const remainder = text.slice(joined.length);
+    let first = true;
+    for (const segment of segments) {
+      if (this.processSegment(
+        editor,
+        segment,
+        first ? posOverride : void 0,
+        onCommand,
+        first ? continuation : void 0
+      )) {
+        stopRequested = true;
+      }
+      first = false;
+    }
+    if (remainder.trim()) {
+      if (this.processSegment(
+        editor,
+        remainder,
+        first ? posOverride : void 0,
+        onCommand,
+        first ? continuation : void 0
+      )) {
+        stopRequested = true;
+      }
+    }
+    return stopRequested;
+  }
+  processSegment(editor, text, posOverride, onCommand, continuation) {
+    if (this.preMatchHook) {
+      const normalized = fixMishearings(normalizeCommand(text), this.lang);
+      if (this.preMatchHook(editor, normalized, text)) return false;
+    }
+    const match = this.matchCommand(text);
+    if (match) {
+      if (match.textBefore) {
+        let before = match.textBefore;
+        if (match.command.punctuation) {
+          before = before.replace(/[,;.!?]+\s*$/, "");
+        }
+        insertAtCursor(editor, this, before, posOverride, continuation);
+      }
+      this.executeCommand(editor, match.command);
+      onCommand == null ? void 0 : onCommand(match.command.id);
+      return match.command.id === "stopRecording";
+    } else {
+      insertAtCursor(editor, this, text, posOverride, continuation);
+    }
+    return false;
+  }
+  // ── Help panel ──
+  /**
+   * Get all commands (built-in + custom) for the help panel, with
+   * localized labels and patterns for the active language.
+   * Open/close pairs are merged into a single row.
+   */
+  getCommandList() {
+    const custom = this.customDefs.map((c) => ({
+      label: resolveCustomLabel(this.customLabels, c.id, this.lang),
+      patterns: getPatternsForAnyCommand(c.id, this.lang, this.customTriggers)
+    }));
+    return [...getBuiltInCommandList(this.lang), ...custom];
+  }
+};
+
 // src/templates.ts
 var import_obsidian9 = require("obsidian");
-var templateCommands = [];
-function scanTemplates(app, folderPath) {
-  templateCommands = [];
-  if (!folderPath) return;
-  const folder = app.vault.getFolderByPath(folderPath);
-  if (!folder) return;
-  scanFolder(folder);
-}
-function scanFolder(folder) {
-  for (const child of folder.children) {
-    if (child instanceof import_obsidian9.TFile && child.extension === "md") {
-      const displayName = child.basename;
-      templateCommands.push({
-        name: normalizeCommand(displayName),
-        displayName,
-        path: child.path
-      });
-    } else if (child instanceof import_obsidian9.TFolder) {
-      scanFolder(child);
-    }
+var TemplateRegistry = class {
+  constructor() {
+    this.templateCommands = [];
   }
-}
-function matchTemplate(normalizedText, lang) {
-  if (templateCommands.length === 0) return null;
-  const prefixes = getTemplatePrefixes(lang);
-  for (const prefix of prefixes) {
-    for (const tmpl of templateCommands) {
-      const pattern = `${prefix} ${tmpl.name}`;
-      if (normalizedText === pattern) {
-        return { template: tmpl, textBefore: "" };
-      }
-      if (normalizedText.endsWith(" " + pattern)) {
-        const idx = normalizedText.lastIndexOf(" " + pattern);
-        const textBefore = normalizedText.substring(0, idx).trim();
-        return { template: tmpl, textBefore };
+  /**
+   * Scan the templates folder and (re)build the template command list.
+   * Call this on plugin load and when settings change.
+   */
+  scan(app, folderPath) {
+    this.templateCommands = [];
+    if (!folderPath) return;
+    const folder = app.vault.getFolderByPath(folderPath);
+    if (!folder) return;
+    this.scanFolder(folder);
+  }
+  scanFolder(folder) {
+    for (const child of folder.children) {
+      if (child instanceof import_obsidian9.TFile && child.extension === "md") {
+        const displayName = child.basename;
+        this.templateCommands.push({
+          name: normalizeCommand(displayName),
+          displayName,
+          path: child.path
+        });
+      } else if (child instanceof import_obsidian9.TFolder) {
+        this.scanFolder(child);
       }
     }
   }
-  return null;
-}
+  /**
+   * Try to match text against a template command.
+   * Matches "template {name}" or "sjabloon {name}" (NL) patterns.
+   *
+   * Returns the matched template and any text before the command, or null.
+   */
+  match(normalizedText, lang) {
+    if (this.templateCommands.length === 0) return null;
+    const prefixes = getTemplatePrefixes(lang);
+    for (const prefix of prefixes) {
+      for (const tmpl of this.templateCommands) {
+        const pattern = `${prefix} ${tmpl.name}`;
+        if (normalizedText === pattern) {
+          return { template: tmpl, textBefore: "" };
+        }
+        if (normalizedText.endsWith(" " + pattern)) {
+          const idx = normalizedText.lastIndexOf(" " + pattern);
+          const textBefore = normalizedText.substring(0, idx).trim();
+          return { template: tmpl, textBefore };
+        }
+      }
+    }
+    return null;
+  }
+};
 function getTemplatePrefixes(lang) {
   switch (lang) {
     case "nl":
@@ -6739,9 +7188,10 @@ async function insertTemplate(app, editor, template) {
 
 // ../shared/src/dictation-tracker.ts
 var DictationTracker = class _DictationTracker {
-  constructor() {
+  constructor(commands = new CommandEngine()) {
     this.dictatedRanges = [];
     this.lastCorrection = null;
+    this.commands = commands;
   }
   /** Clear all tracked ranges (call when recording starts/stops). */
   reset() {
@@ -6771,8 +7221,14 @@ var DictationTracker = class _DictationTracker {
   trackProcessText(editor, text, onSlotActive, posOverride, onCommand, continuation) {
     const offsetBefore = posOverride ? editor.posToOffset(posOverride) : editor.posToOffset(editor.getCursor());
     const lenBefore = posOverride ? editor.getValue().length : 0;
-    const stop = processText(editor, text, posOverride, onCommand, continuation);
-    if (isSlotActive() && onSlotActive) {
+    const stop = this.commands.processText(
+      editor,
+      text,
+      posOverride,
+      onCommand,
+      continuation
+    );
+    if (this.commands.isSlotActive() && onSlotActive) {
       onSlotActive();
     }
     const offsetAfter = posOverride ? offsetBefore + (editor.getValue().length - lenBefore) : editor.posToOffset(editor.getCursor());
@@ -6817,7 +7273,7 @@ var DictationTracker = class _DictationTracker {
     if (cursor.ch === 0) {
       text = text.replace(/^ +/, "");
     }
-    if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !isSlotActive()) {
+    if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !this.commands.isSlotActive()) {
       const charBefore = editor.getRange(
         { line: cursor.line, ch: cursor.ch - 1 },
         cursor
@@ -6856,15 +7312,24 @@ var DictationTracker = class _DictationTracker {
     this.dictatedRanges.push({ from, to });
   }
   /**
-   * After stopping realtime recording, correct only the text
-   * that was actually dictated.  Each tracked range is corrected
-   * independently, processed from end to start so that earlier
-   * offsets remain valid after replacements.
+   * After stopping realtime recording, correct only the text that was
+   * actually dictated. Each tracked range's correction request runs
+   * concurrently (Promise.allSettled — one slow/failing span no longer
+   * blocks the rest, and each gets a timeout budget scaled to its own
+   * length via correctionTimeoutMs() rather than one fixed 30s ceiling
+   * regardless of size — audit §6.2). Once every result is in, the
+   * replacements are applied end-to-start (by their pre-edit offsets) so
+   * earlier offsets remain valid across the whole batch.
+   *
+   * `context` (VX_E31_S10) carries this session's vault vocabulary and
+   * style; it used to arrive as transient fields on `settings`. Callers
+   * with nothing to add (the VS Code extension, the plugin's manual
+   * "Correct dictated text") can leave it out.
    */
-  async autoCorrectAfterStop(editor, settings, httpRequest) {
-    var _a;
+  async autoCorrectAfterStop(editor, settings, httpRequest, context = EMPTY_REQUEST_CONTEXT) {
     if (this.dictatedRanges.length === 0) return;
     const merged = _DictationTracker.mergeRanges(this.dictatedRanges);
+    this.dictatedRanges = [];
     const fullText = editor.getValue();
     const corrections = [];
     for (const range of merged) {
@@ -6885,14 +7350,32 @@ var DictationTracker = class _DictationTracker {
         });
       }
     }
+    if (corrections.length === 0) return;
     corrections.sort(
       (a, b) => editor.posToOffset(b.from) - editor.posToOffset(a.from)
     );
-    for (const c of corrections) {
+    const results = await Promise.allSettled(
+      corrections.map(
+        (c) => correctText(c.text, settings, httpRequest, {
+          timeoutMs: correctionTimeoutMs(c.text.length),
+          context
+        })
+      )
+    );
+    if (results.every((r) => r.status === "rejected")) {
+      this.dictatedRanges = merged.map((r) => ({ ...r }));
+    }
+    for (let i = 0; i < corrections.length; i++) {
+      const c = corrections[i];
+      const result = results[i];
+      if (result.status === "rejected") {
+        vlog.error("Voxtral: Auto-correct failed", result.reason);
+        continue;
+      }
       try {
-        let corrected = await correctText(c.text, settings, httpRequest);
-        if (settings.vaultWikilinks && ((_a = settings.vocabularyTerms) == null ? void 0 : _a.length)) {
-          corrected = applyVaultWikilinks(corrected, settings.vocabularyTerms);
+        let corrected = result.value;
+        if (settings.vaultWikilinks && context.vocabularyTerms.length) {
+          corrected = applyVaultWikilinks(corrected, context.vocabularyTerms);
         }
         if (corrected && corrected !== c.text) {
           const fromOffset = editor.posToOffset(c.from);
@@ -6983,6 +7466,28 @@ var DictationTracker = class _DictationTracker {
   }
 };
 
+// ../shared/src/update-notice.ts
+var VERSION_RE = /^(\d+)\.(\d+)\.(\d+)(?:-.*)?$/;
+function parseVersion(version) {
+  const match = VERSION_RE.exec(version.trim());
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3])
+  };
+}
+function shouldAnnounceUpdate(prev, current) {
+  const prevVersion = parseVersion(prev);
+  const currentVersion = parseVersion(current);
+  if (!prevVersion || !currentVersion) return false;
+  if (currentVersion.major > prevVersion.major) return true;
+  if (currentVersion.major === prevVersion.major) {
+    return currentVersion.minor > prevVersion.minor;
+  }
+  return false;
+}
+
 // ../shared/src/table-insert.ts
 function cellIndexOf(line, ch) {
   let count = 0;
@@ -7061,7 +7566,7 @@ var TableInsertTracker = class {
       );
       return { stop: result.stop, end: result.end };
     }
-    if (matchCommand(text)) {
+    if (tracker.commands.matchCommand(text)) {
       const col2 = cellIndexOf(line, curPos.ch);
       const insertCh = cellTextEndCh(line, col2);
       const posOverride = insertCh !== null ? { line: curPos.line, ch: insertCh } : void 0;
@@ -7120,19 +7625,53 @@ var TableInsertTracker = class {
 };
 
 // ../shared/src/realtime-session.ts
+function normalizeForCompare(s) {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+function isWordChar(ch) {
+  return /[\p{L}\p{N}]/u.test(ch);
+}
+function doneTextRemainder(doneText, alreadyRaw) {
+  const normalizedAlready = normalizeForCompare(alreadyRaw);
+  const normalizedDone = normalizeForCompare(doneText);
+  if (!normalizedDone.startsWith(normalizedAlready)) return "";
+  if (normalizedDone.length === normalizedAlready.length) return "";
+  let normalizedCount = 0;
+  let cutIndex = doneText.length;
+  for (let i = 0; i < doneText.length; i++) {
+    if (normalizedCount >= normalizedAlready.length) {
+      cutIndex = i;
+      break;
+    }
+    if (isWordChar(doneText[i])) normalizedCount++;
+  }
+  return doneText.slice(cutIndex);
+}
 var _RealtimeSession = class _RealtimeSession {
   constructor(settings, tracker, callbacks, httpRequest) {
     this.settings = settings;
     this.tracker = tracker;
     this.callbacks = callbacks;
     this.httpRequest = httpRequest;
+    this.kind = "realtime";
     this.transcriber = null;
     this.pendingText = "";
     this.prevRaw = "";
     this.turnDelta = 0;
-    this.turnProcessed = 0;
-    this.consecutiveFailures = 0;
-    this.maxConsecutiveFailures = 5;
+    // The editor this session dictates into, recorded by start(). stop() and
+    // every commit use it rather than asking the host what is active now, so
+    // switching notes mid-session cannot land text in another note (audit
+    // §2.2 A2). Cleared by stop().
+    this.startEditor = null;
+    // Failure counter + capped backoff + give-up threshold, shared with
+    // DualDelaySession via session-support.ts (VX_E31_S3).
+    this.reconnects = new ReconnectPolicy();
+    // Set by stop(); cleared by start(). A reconnect started just before
+    // stop() keeps running inside connectWebSocket()'s await, so every step
+    // that could hand a live socket back to a stopped session checks this
+    // (audit §6.1 S2: "hetzelfde patroon bij stop() tijdens een lopende
+    // reconnect").
+    this.stopped = false;
     // Debounce for flushing on a trailing voice command that has no
     // sentence-ending punctuation (e.g. "nieuwe alinea"). Waiting briefly
     // lets cumulative deltas finish (e.g. "nieuw todo" → "nieuw todo item")
@@ -7145,19 +7684,16 @@ var _RealtimeSession = class _RealtimeSession {
     // long while recording, we force-close and reconnect. During genuine
     // user silence a forced reconnect is harmless — it is the same path the
     // cloud's own close-after-every-utterance takes, and audio in the
-    // handshake window is buffered and replayed.
-    this.watchdogTimer = null;
+    // handshake window is buffered and replayed. The mechanism itself lives
+    // in session-support.ts since VX_E31_S3, so dual-delay gets the same one.
+    this.watchdog = new ConnectionWatchdog(() => this.handleWatchdogTimeout());
     // Audio captured while the WebSocket is (re)connecting is buffered here
     // and flushed once the new session is ready. The Mistral realtime API
     // closes the connection after each utterance (silence), so without this
     // the first words spoken when resuming after a pause would be dropped.
-    this.audioBuffer = [];
-    this.audioBufferBytes = 0;
-    // Warn once per disconnected episode (not per chunk) when audio starts
-    // piling up in the buffer instead of reaching the transcriber — a long
-    // disconnect eventually overflows MAX_AUDIO_BUFFER_BYTES and genuinely
-    // loses audio, so this is a useful early signal without being spammy.
-    this.disconnectedAudioWarned = false;
+    // Capped and warn-once-per-episode; shared with DualDelaySession since
+    // VX_E31_S3 (see session-support.ts).
+    this.audio = new ReconnectAudioBuffer();
     // Keeps dictation appending in the right table cell despite Obsidian
     // resetting the cursor after its async table re-render.
     this.tableInserter = new TableInsertTracker();
@@ -7170,18 +7706,24 @@ var _RealtimeSession = class _RealtimeSession {
     // skipped so the model's own punctuation/capitalization survives
     // across the flush boundary. See VX_E22_S9.
     this.lastInsertEnd = null;
-    // Resolved by handleDone() as soon as the final "done" event for the
+    // Signalled by handleDone() as soon as the final "done" event for the
     // current turn arrives after stop() calls endAudio(). stop() races this
     // against a fixed ceiling so it doesn't wait the full ceiling when the
-    // API responds promptly (VX_E27_S1 item 6).
-    this.pendingDoneResolve = null;
+    // API responds promptly (VX_E27_S1 item 6). Shared with DualDelaySession
+    // via session-support.ts (VX_E31_S6).
+    this.done = new DoneSignal();
     // One ephemeral-token manager per recording session (VX_E22_S8), shared
-    // across every (re)connect this session makes — the cache/prefetch/
-    // in-flight-dedupe it provides only pay off when it outlives a single
-    // connect(). Only created when the caller passes `httpRequest` (main.ts
-    // always does; tests that omit it get the pre-VX_E22_S8 header-only
-    // behavior unchanged).
+    // across every (re)connect this session makes — see createTokenManager()
+    // in session-support.ts (VX_E31_S6) for why it outlives a single connect.
     this.tokenManager = null;
+  }
+  /**
+   * The command engine this session matches against — the tracker's, so the
+   * whole dictation path (this class, DictationTracker, TableInsertTracker)
+   * shares one instance instead of the module globals VX_E31_S10 removed.
+   */
+  get commands() {
+    return this.tracker.commands;
   }
   /** Connect the WebSocket and start receiving transcription. */
   async start(editor) {
@@ -7189,15 +7731,14 @@ var _RealtimeSession = class _RealtimeSession {
     this.pendingText = "";
     this.prevRaw = "";
     this.turnDelta = 0;
-    this.turnProcessed = 0;
-    this.consecutiveFailures = 0;
+    this.stopped = false;
+    this.startEditor = editor;
+    this.reconnects.reset();
     this.clearCommandFlushTimer();
-    this.audioBuffer = [];
-    this.audioBufferBytes = 0;
-    this.disconnectedAudioWarned = false;
+    this.audio.reset();
     this.tableInserter.reset();
     this.lastInsertEnd = null;
-    this.tokenManager = this.httpRequest ? new RealtimeTokenManager(this.settings, this.httpRequest) : null;
+    this.tokenManager = createTokenManager(this.settings, this.httpRequest);
     (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: session starting");
     await this.connectWebSocket(editor);
   }
@@ -7219,6 +7760,9 @@ var _RealtimeSession = class _RealtimeSession {
       continuation
     );
     this.lastInsertEnd = commandExecuted ? null : result.end;
+    if (result.stop) {
+      setTimeout(() => this.callbacks.stopRecording(), 0);
+    }
   }
   clearCommandFlushTimer() {
     if (this.commandFlushTimer) {
@@ -7229,62 +7773,56 @@ var _RealtimeSession = class _RealtimeSession {
   /** Send PCM audio data to the transcriber. */
   sendAudio(pcmData) {
     var _a;
+    if (this.stopped) return;
     if ((_a = this.transcriber) == null ? void 0 : _a.isConnected) {
-      this.disconnectedAudioWarned = false;
+      this.audio.noteDelivered();
       this.transcriber.sendAudio(pcmData);
-    } else {
-      if (!this.disconnectedAudioWarned) {
-        this.disconnectedAudioWarned = true;
-        vlog.warn(
-          "Voxtral: audio arriving while transcriber is disconnected \u2014 buffering until reconnect"
-        );
-      }
-      this.bufferAudio(pcmData);
-    }
-  }
-  /** Buffer audio during a (re)connect, capped to bound memory. */
-  bufferAudio(pcmData) {
-    this.audioBuffer.push(pcmData);
-    this.audioBufferBytes += pcmData.byteLength;
-    while (this.audioBufferBytes > _RealtimeSession.MAX_AUDIO_BUFFER_BYTES && this.audioBuffer.length > 1) {
-      const dropped = this.audioBuffer.shift();
-      if (dropped) this.audioBufferBytes -= dropped.byteLength;
+    } else if (this.audio.push(pcmData)) {
+      vlog.warn(
+        "Voxtral: audio arriving while transcriber is disconnected \u2014 buffering until reconnect"
+      );
     }
   }
   /** Send any buffered audio once the (new) session is connected. */
   flushAudioBuffer() {
     var _a;
-    if (!((_a = this.transcriber) == null ? void 0 : _a.isConnected) || this.audioBuffer.length === 0) {
+    if (!((_a = this.transcriber) == null ? void 0 : _a.isConnected) || this.audio.length === 0) {
       return;
     }
-    const buffered = this.audioBuffer;
-    this.audioBuffer = [];
-    this.audioBufferBytes = 0;
-    for (const chunk of buffered) {
+    for (const chunk of this.audio.drain()) {
       this.transcriber.sendAudio(chunk);
     }
   }
-  /** Signal end of audio and finalize any pending text. */
+  /**
+   * Signal end of audio and finalize any pending text.
+   *
+   * The editor argument is optional since VX_E31_S6: the session finalizes
+   * into the editor it started in (`startEditor`), so a host that only knows
+   * the `TranscriptionSession` interface can just call `stop()`. An explicit
+   * editor still wins — the VS Code extension passes one, and that call site
+   * keeps working unchanged for one release.
+   */
   async stop(editor) {
     var _a, _b, _c, _d;
-    this.clearWatchdog();
+    this.stopped = true;
+    this.watchdog.clear();
     (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: session stopping");
+    if (this.transcriber && !this.transcriber.isConnected) {
+      this.transcriber.close();
+      this.transcriber = null;
+    }
     (_c = this.transcriber) == null ? void 0 : _c.endAudio();
     this.clearCommandFlushTimer();
-    const doneSignal = new Promise((resolve) => {
-      this.pendingDoneResolve = resolve;
-    });
-    const ceiling = new Promise((resolve) => setTimeout(resolve, 1e3));
-    await Promise.race([doneSignal, ceiling]);
-    this.pendingDoneResolve = null;
-    if (this.pendingText.trim()) {
-      this.commit(editor, this.pendingText.trim());
+    await this.done.awaitDone();
+    const target = editor != null ? editor : this.startEditor;
+    if (target && this.pendingText.trim()) {
+      this.commit(target, this.pendingText.trim());
       this.pendingText = "";
     }
     (_d = this.transcriber) == null ? void 0 : _d.close();
     this.transcriber = null;
-    this.audioBuffer = [];
-    this.audioBufferBytes = 0;
+    this.audio.reset();
+    this.startEditor = null;
   }
   /** Flush any remaining pending text (called after slot close). */
   flushAfterSlot(editor) {
@@ -7295,37 +7833,49 @@ var _RealtimeSession = class _RealtimeSession {
   }
   // ── WebSocket lifecycle ──
   async connectWebSocket(editor) {
-    this.transcriber = new RealtimeTranscriber(
+    let transcriber;
+    const isCurrent = () => this.transcriber === transcriber;
+    transcriber = new RealtimeTranscriber(
       this.settings,
       {
         onSessionCreated: () => {
           var _a, _b;
+          if (!isCurrent()) return;
           vlog.debug("Voxtral: Realtime session created");
           (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: session created");
-          this.armWatchdog();
+          this.watchdog.arm();
         },
         onDelta: (text) => {
-          this.armWatchdog();
+          if (!isCurrent()) return;
+          this.watchdog.arm();
           this.handleDelta(editor, text);
         },
         onDone: (text) => {
-          this.armWatchdog();
+          if (!isCurrent()) return;
+          this.watchdog.arm();
           this.handleDone(editor, text);
         },
         onError: (message) => {
           var _a, _b;
+          if (!isCurrent()) return;
           vlog.error("Voxtral: Realtime error:", message);
           (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, `realtime: streaming error: ${message}`);
           this.callbacks.notify(`Streaming error: ${message}`);
         },
         onDisconnect: () => {
+          if (!isCurrent()) return;
           void this.handleDisconnect();
         }
       },
       void 0,
       this.tokenManager ? { tokenManager: this.tokenManager } : void 0
     );
-    await this.transcriber.connect();
+    this.transcriber = transcriber;
+    await transcriber.connect();
+    if (this.stopped || this.transcriber !== transcriber) {
+      transcriber.close();
+      return;
+    }
     this.flushAudioBuffer();
   }
   /**
@@ -7339,76 +7889,61 @@ var _RealtimeSession = class _RealtimeSession {
    * Only shows a warning if reconnection fails repeatedly.
    */
   async handleDisconnect() {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
-    this.clearWatchdog();
-    if (!this.callbacks.isRecording()) return;
-    const editor = this.callbacks.getEditor();
-    if (!editor) {
-      (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: no editor on reconnect \u2014 recording stopped");
-      this.callbacks.stopRecording();
-      return;
-    }
-    vlog.debug("Voxtral: Session ended, reconnecting silently...");
-    (_d = (_c = this.callbacks).logLifecycle) == null ? void 0 : _d.call(_c, "realtime: connection ended \u2014 reconnecting");
-    this.prevRaw = "";
-    this.turnDelta = 0;
-    this.turnProcessed = 0;
-    this.clearCommandFlushTimer();
-    try {
-      await this.connectWebSocket(editor);
-      this.consecutiveFailures = 0;
-      vlog.debug("Voxtral: Session reconnected");
-    } catch (e) {
-      this.consecutiveFailures++;
-      console.error(
-        `Voxtral: Reconnect failed (${this.consecutiveFailures}/${this.maxConsecutiveFailures})`,
-        e
-      );
-      (_f = (_e = this.callbacks).logLifecycle) == null ? void 0 : _f.call(
-        _e,
-        `realtime: reconnect failed (${this.consecutiveFailures}/${this.maxConsecutiveFailures}): ${String(e)}`
-      );
-      if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
-        (_h = (_g = this.callbacks).logLifecycle) == null ? void 0 : _h.call(_g, "realtime: cannot reconnect \u2014 recording stopped");
+    this.watchdog.clear();
+    if (this.stopped) return;
+    let target = null;
+    await runReconnectLoop({
+      policy: this.reconnects,
+      prepare: () => {
+        var _a, _b, _c, _d;
+        if (this.stopped || !this.callbacks.isRecording()) return false;
+        target = this.callbacks.getEditor();
+        if (!target) {
+          (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(
+            _a,
+            "realtime: no editor on reconnect \u2014 recording stopped"
+          );
+          this.callbacks.stopRecording();
+          return false;
+        }
+        vlog.debug("Voxtral: Session ended, reconnecting silently...");
+        (_d = (_c = this.callbacks).logLifecycle) == null ? void 0 : _d.call(_c, "realtime: connection ended \u2014 reconnecting");
+        this.prevRaw = "";
+        this.turnDelta = 0;
+        this.clearCommandFlushTimer();
+        return true;
+      },
+      connect: async () => {
+        const editor = target;
+        if (!editor) return;
+        await this.connectWebSocket(editor);
+      },
+      isActive: () => !this.stopped && this.callbacks.isRecording(),
+      onSuccess: () => vlog.debug("Voxtral: Session reconnected"),
+      onFailure: (e, failures, max) => {
+        var _a, _b;
+        vlog.error(`Voxtral: Reconnect failed (${failures}/${max})`, e);
+        (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(
+          _a,
+          `realtime: reconnect failed (${failures}/${max}): ${String(e)}`
+        );
+      },
+      onGiveUp: () => {
+        var _a, _b;
+        (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: cannot reconnect \u2014 recording stopped");
         this.callbacks.notify(
           "Cannot connect to the API. Recording stopped.",
           6e3
         );
         this.callbacks.stopRecording();
-        return;
       }
-      const delay = Math.min(
-        500 * this.consecutiveFailures,
-        3e3
-      );
-      await new Promise(
-        (resolve) => setTimeout(resolve, delay)
-      );
-      if (this.callbacks.isRecording()) {
-        void this.handleDisconnect();
-      }
-    }
+    });
   }
   // ── Watchdog (VX_E22_S11) ──
-  /** (Re)start the countdown; called on every server event. */
-  armWatchdog() {
-    this.clearWatchdog();
-    this.watchdogTimer = setTimeout(
-      () => this.handleWatchdogTimeout(),
-      _RealtimeSession.WATCHDOG_TIMEOUT_MS
-    );
-  }
-  clearWatchdog() {
-    if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
-      this.watchdogTimer = null;
-    }
-  }
   handleWatchdogTimeout() {
     var _a, _b, _c;
-    this.watchdogTimer = null;
-    if (!this.callbacks.isRecording()) return;
-    const secs = _RealtimeSession.WATCHDOG_TIMEOUT_MS / 1e3;
+    if (this.stopped || !this.callbacks.isRecording()) return;
+    const secs = WATCHDOG_TIMEOUT_MS / 1e3;
     vlog.warn(`Voxtral: no server events for ${secs}s \u2014 forcing reconnect (watchdog)`);
     (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(
       _a,
@@ -7419,9 +7954,9 @@ var _RealtimeSession = class _RealtimeSession {
   }
   // ── Delta / Done text processing ──
   handleDelta(editor, text) {
-    const isCumulative = this.prevRaw && text.startsWith(this.prevRaw);
-    const newText = isCumulative ? text.substring(this.prevRaw.length) : text;
-    this.prevRaw = isCumulative ? text : this.prevRaw + text;
+    const delta = parseDelta(this.prevRaw, text);
+    this.prevRaw = delta.prevRaw;
+    const newText = delta.text;
     if (!newText) return;
     this.pendingText += newText;
     this.turnDelta += newText.length;
@@ -7441,7 +7976,7 @@ var _RealtimeSession = class _RealtimeSession {
         this.commitFragment(editor, fragment);
       }
     }
-    if (matchCommand(this.pendingText.trim())) {
+    if (this.commands.matchCommand(this.pendingText.trim())) {
       this.clearCommandFlushTimer();
       this.commandFlushTimer = setTimeout(() => {
         this.commandFlushTimer = null;
@@ -7471,30 +8006,9 @@ var _RealtimeSession = class _RealtimeSession {
     return null;
   }
   /**
-   * Recognizes the "stop recording" voice command in normalized text.
-   * Shared by flushPending (full flush) and commitFragment (partial
-   * flush) so the pattern list isn't duplicated.
-   */
-  isStopCommand(sentence) {
-    const normalized = normalizeCommand(sentence);
-    const stopPatterns = [
-      "beeindig opname",
-      "beeindig de opname",
-      "beeindigt opname",
-      "beeindigt de opname",
-      "beeindigde opname",
-      "beeindigde de opname",
-      "stop opname",
-      "stopopname",
-      "stop de opname",
-      "stop recording"
-    ];
-    return stopPatterns.some((p) => normalized.includes(p));
-  }
-  /**
-   * Process and commit the accumulated pending text. Recognizes the
-   * "stop recording" voice command; otherwise hands the text to the
-   * tracker for command matching and insertion.
+   * Process and commit the accumulated pending text. Command matching
+   * (including the "stop recording" command, in any supported language —
+   * VX_E30_S2) happens inside commit(), via the tracker/table-insert path.
    */
   flushPending(editor) {
     const sentence = this.pendingText.trim();
@@ -7502,55 +8016,40 @@ var _RealtimeSession = class _RealtimeSession {
       this.pendingText = "";
       return;
     }
-    this.turnProcessed += this.pendingText.length;
     this.pendingText = "";
-    if (this.isStopCommand(sentence)) {
-      this.callbacks.stopRecording();
-      return;
-    }
     this.commit(editor, sentence + " ");
   }
   /**
    * Commit a leading fragment produced by the word/comma-boundary partial
-   * flush in handleDelta (VX_E22_S9). Mirrors flushPending's stop-command
-   * handling; turnProcessed only accounts for the flushed fragment here —
-   * the retained tail is counted later when it is itself flushed.
+   * flush in handleDelta (VX_E22_S9). The retained COMMAND_TAIL_CHARS tail
+   * (see handleDelta) guarantees a command phrase is never split across this
+   * boundary, so commit()'s command matching always sees it whole.
    */
   commitFragment(editor, fragment) {
-    this.turnProcessed += fragment.length;
     const trimmed = fragment.trim();
     if (!trimmed) return;
-    if (this.isStopCommand(trimmed)) {
-      this.callbacks.stopRecording();
-      return;
-    }
     this.commit(editor, trimmed + " ");
   }
   handleDone(editor, doneText) {
-    if (doneText && doneText.length > this.turnDelta) {
-      this.pendingText += doneText.substring(this.turnDelta);
+    if (doneText) {
+      const rawThisTurn = this.prevRaw.slice(this.prevRaw.length - this.turnDelta);
+      this.pendingText += doneTextRemainder(doneText, rawThisTurn);
     }
     this.clearCommandFlushTimer();
     const trimmed = this.pendingText.trim();
     if (trimmed) {
       let textToCommit = trimmed;
-      if (!/[.!?:,]$/.test(trimmed) && !matchCommand(trimmed)) {
+      if (!/[.!?:,]$/.test(trimmed) && !this.commands.matchCommand(trimmed)) {
         textToCommit = trimmed + ".";
       }
       this.commit(editor, textToCommit + " ");
       this.pendingText = "";
     }
     this.turnDelta = 0;
-    this.turnProcessed = 0;
-    if (this.pendingDoneResolve) {
-      const resolve = this.pendingDoneResolve;
-      this.pendingDoneResolve = null;
-      resolve();
-    }
+    this.done.signal();
   }
 };
 _RealtimeSession.COMMAND_FLUSH_DEBOUNCE_MS = 400;
-_RealtimeSession.WATCHDOG_TIMEOUT_MS = 6e4;
 // Pending-text length above which a partial flush may split at a plain
 // word boundary (a space); below it, a partial flush only fires on a
 // comma, a stronger natural commit point. Replaces the old unconditional
@@ -7562,9 +8061,6 @@ _RealtimeSession.FLUSH_THRESHOLD_CHARS = 60;
 // supported languages (~30 chars, "maak laatste commando ongedaan") plus
 // margin — see VX_E22_S9.
 _RealtimeSession.COMMAND_TAIL_CHARS = 40;
-// Cap the buffer so a long disconnect can't grow memory without bound.
-// 16kHz · 16-bit · mono = 32000 bytes/s, so this holds ~10s of audio.
-_RealtimeSession.MAX_AUDIO_BUFFER_BYTES = 32e4;
 var RealtimeSession = _RealtimeSession;
 
 // ../shared/src/dual-delay-session.ts
@@ -7574,6 +8070,7 @@ var _DualDelaySession = class _DualDelaySession {
     this.tracker = tracker;
     this.callbacks = callbacks;
     this.httpRequest = httpRequest;
+    this.kind = "dual-delay";
     this.fastTranscriber = null;
     this.slowTranscriber = null;
     // Session state
@@ -7587,26 +8084,49 @@ var _DualDelaySession = class _DualDelaySession {
     // Editor state
     this.insertOffset = 0;
     this.displayLen = 0;
-    this.slowCommitted = 0;
     this.commandJustRan = false;
+    // The editor this session dictates into, recorded by start(). stop() used
+    // to ask `callbacks.getEditor()` for whatever view was active at that
+    // moment, so finalizing after a note switch landed the text in the wrong
+    // note — the same defect as audit §2.2 A2, fixed structurally in
+    // VX_E31_S6 by giving all three sessions the same start-editor rule.
+    this.startEditor = null;
     // Remainder command debounce — prevents premature matching when
     // cumulative deltas haven't finished (e.g. "nieuw todo" matching
     // before the full "nieuw todo item" arrives)
     this.remainderTimer = null;
-    // Reconnection
-    this.consecutiveFailures = 0;
-    this.maxConsecutiveFailures = 5;
-    // Unlike RealtimeSession, this session has no reconnect audio buffer —
-    // audio sent while a stream is down is genuinely lost. Warn once per
-    // disconnected episode per stream (not per chunk) so this is visible
-    // without spamming the log.
-    this.fastAudioDropWarned = false;
-    this.slowAudioDropWarned = false;
-    // Resolved as soon as the slow stream's "done" event for the current
+    // Reconnection: one shared failure counter/backoff for both streams
+    // (a flaky network takes both down), same policy the single-stream
+    // session uses — see session-support.ts (VX_E31_S3).
+    this.reconnects = new ReconnectPolicy();
+    // Set by stop(); cleared by start(). A stream reconnect started just
+    // before stop() is still sitting in its connect() await, and this is what
+    // keeps it from handing a live socket back to a finished session
+    // (VX_E31_S3, audit §6.1 S2).
+    this.stopped = false;
+    // Watchdog per stream (VX_E31_S3, audit §6.1 S3): a half-open connection
+    // fires no onclose, so without this a dead fast or slow stream would stay
+    // silent for the rest of the session. Per stream rather than per session,
+    // so a dead fast stream is noticed while slow is still healthy.
+    this.fastWatchdog = new ConnectionWatchdog(
+      () => this.handleWatchdogTimeout("fast")
+    );
+    this.slowWatchdog = new ConnectionWatchdog(
+      () => this.handleWatchdogTimeout("slow")
+    );
+    // Reconnect audio buffer per stream (VX_E31_S3, audit §6.1 S3): the API
+    // closes the socket after every utterance, so audio spoken during the
+    // handshake window used to be dropped outright in this mode — the exact
+    // dropout the changelog claimed was fixed. The two streams reconnect
+    // independently, so each keeps its own buffer.
+    this.fastAudio = new ReconnectAudioBuffer();
+    this.slowAudio = new ReconnectAudioBuffer();
+    // Signalled as soon as the slow stream's "done" event for the current
     // turn arrives after stop() calls endAudio() — slow is the accuracy
     // source of truth used for finalization. stop() races this against a
-    // fixed ceiling (VX_E27_S1 item 6).
-    this.pendingDoneResolve = null;
+    // fixed ceiling (VX_E27_S1 item 6); the mechanism is shared with
+    // RealtimeSession (DoneSignal, session-support.ts, VX_E31_S6).
+    this.done = new DoneSignal();
     // One ephemeral-token manager shared by BOTH streams for the whole
     // session (VX_E22_S8) — the fast and slow connects fire near-
     // simultaneously on start()/reconnect, so getToken()'s in-flight dedupe
@@ -7614,13 +8134,13 @@ var _DualDelaySession = class _DualDelaySession {
     // the caller passes `httpRequest` (see RealtimeSession's identical note).
     this.tokenManager = null;
   }
-  /** Resolve a pending stop() waiting on the slow stream's final done event. */
-  signalDone() {
-    if (this.pendingDoneResolve) {
-      const resolve = this.pendingDoneResolve;
-      this.pendingDoneResolve = null;
-      resolve();
-    }
+  /**
+   * The command engine this session matches against — the tracker's, so the
+   * whole dictation path (this class, DictationTracker, TableInsertTracker)
+   * shares one instance instead of the module globals VX_E31_S10 removed.
+   */
+  get commands() {
+    return this.tracker.commands;
   }
   /** Transition to a new state with debug logging. */
   setState(newState) {
@@ -7633,21 +8153,24 @@ var _DualDelaySession = class _DualDelaySession {
     this.setState("connecting" /* Connecting */);
     this.fastText = "";
     this.slowText = "";
+    this.startEditor = editor;
     this.insertOffset = editor.posToOffset(editor.getCursor());
     this.displayLen = 0;
-    this.slowCommitted = 0;
     this.slowTurnDelta = 0;
     this.fastPrevRaw = "";
     this.slowPrevRaw = "";
     this.commandJustRan = false;
-    this.consecutiveFailures = 0;
-    this.fastAudioDropWarned = false;
-    this.slowAudioDropWarned = false;
+    this.stopped = false;
+    this.reconnects.reset();
+    this.fastAudio.reset();
+    this.slowAudio.reset();
+    this.fastWatchdog.clear();
+    this.slowWatchdog.clear();
     if (this.remainderTimer) {
       clearTimeout(this.remainderTimer);
       this.remainderTimer = null;
     }
-    this.tokenManager = this.httpRequest ? new RealtimeTokenManager(this.settings, this.httpRequest) : null;
+    this.tokenManager = createTokenManager(this.settings, this.httpRequest);
     await this.connectWebSockets(editor);
     this.setState("streaming" /* Streaming */);
   }
@@ -7656,45 +8179,66 @@ var _DualDelaySession = class _DualDelaySession {
   flushAfterSlot(editor) {
     this.insertOffset = editor.posToOffset(editor.getCursor());
   }
-  /** Send PCM audio data to both transcribers. */
+  /**
+   * Send PCM audio data to both transcribers.
+   *
+   * A stream that is down buffers instead of dropping (VX_E31_S3): the
+   * buffered chunks are replayed as soon as that stream reconnects, so the
+   * first words after the API's close-after-every-utterance survive here
+   * exactly like they do in single-stream mode.
+   */
   sendAudio(pcmData) {
     var _a, _b;
+    if (this.stopped) return;
     if ((_a = this.fastTranscriber) == null ? void 0 : _a.isConnected) {
-      this.fastAudioDropWarned = false;
+      this.fastAudio.noteDelivered();
       this.fastTranscriber.sendAudio(pcmData);
-    } else if (!this.fastAudioDropWarned) {
-      this.fastAudioDropWarned = true;
+    } else if (this.fastAudio.push(pcmData)) {
       vlog.warn(
-        "Voxtral: dropping audio \u2014 fast stream not connected (no reconnect buffer)"
+        "Voxtral: audio arriving while the fast stream is disconnected \u2014 buffering until reconnect"
       );
     }
     if ((_b = this.slowTranscriber) == null ? void 0 : _b.isConnected) {
-      this.slowAudioDropWarned = false;
+      this.slowAudio.noteDelivered();
       this.slowTranscriber.sendAudio(pcmData);
-    } else if (!this.slowAudioDropWarned) {
-      this.slowAudioDropWarned = true;
+    } else if (this.slowAudio.push(pcmData)) {
       vlog.warn(
-        "Voxtral: dropping audio \u2014 slow stream not connected (no reconnect buffer)"
+        "Voxtral: audio arriving while the slow stream is disconnected \u2014 buffering until reconnect"
       );
+    }
+  }
+  /** Replay a stream's buffered audio once its (new) connection is ready. */
+  flushAudioBuffer(stream) {
+    const transcriber = stream === "fast" ? this.fastTranscriber : this.slowTranscriber;
+    const buffer = stream === "fast" ? this.fastAudio : this.slowAudio;
+    if (!(transcriber == null ? void 0 : transcriber.isConnected) || buffer.length === 0) return;
+    for (const chunk of buffer.drain()) {
+      transcriber.sendAudio(chunk);
     }
   }
   /** Finalize the session: flush remaining text and close streams. */
   async stop() {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e;
+    this.stopped = true;
+    this.fastWatchdog.clear();
+    this.slowWatchdog.clear();
     this.setState("finalizing" /* Finalizing */);
+    if (this.fastTranscriber && !this.fastTranscriber.isConnected) {
+      this.fastTranscriber.close();
+      this.fastTranscriber = null;
+    }
+    if (this.slowTranscriber && !this.slowTranscriber.isConnected) {
+      this.slowTranscriber.close();
+      this.slowTranscriber = null;
+    }
     (_a = this.fastTranscriber) == null ? void 0 : _a.endAudio();
     (_b = this.slowTranscriber) == null ? void 0 : _b.endAudio();
     if (this.remainderTimer) {
       clearTimeout(this.remainderTimer);
       this.remainderTimer = null;
     }
-    const doneSignal = new Promise((resolve) => {
-      this.pendingDoneResolve = resolve;
-    });
-    const ceiling = new Promise((resolve) => setTimeout(resolve, 1e3));
-    await Promise.race([doneSignal, ceiling]);
-    this.pendingDoneResolve = null;
-    const editor = this.callbacks.getEditor();
+    await this.done.awaitDone();
+    const editor = (_c = this.startEditor) != null ? _c : this.callbacks.getEditor();
     if (editor) {
       this.executeRemainderCommand(editor);
       this.processSlowCommands(editor);
@@ -7713,15 +8257,17 @@ var _DualDelaySession = class _DualDelaySession {
         );
       }
     }
-    (_c = this.fastTranscriber) == null ? void 0 : _c.close();
-    (_d = this.slowTranscriber) == null ? void 0 : _d.close();
+    (_d = this.fastTranscriber) == null ? void 0 : _d.close();
+    (_e = this.slowTranscriber) == null ? void 0 : _e.close();
     this.fastTranscriber = null;
     this.slowTranscriber = null;
+    this.fastAudio.reset();
+    this.slowAudio.reset();
     this.fastText = "";
     this.slowText = "";
     this.displayLen = 0;
-    this.slowCommitted = 0;
     this.slowTurnDelta = 0;
+    this.startEditor = null;
     this.setState("idle" /* Idle */);
   }
   // ── WebSocket lifecycle ──
@@ -7729,142 +8275,170 @@ var _DualDelaySession = class _DualDelaySession {
   get transcriberOpts() {
     return this.tokenManager ? { tokenManager: this.tokenManager } : void 0;
   }
-  async connectWebSockets(editor) {
-    const fastDelay = this.settings.dualDelayFastMs;
-    const slowDelay = this.settings.dualDelaySlowMs;
-    this.fastTranscriber = new RealtimeTranscriber(
+  /**
+   * Build the fast-stream transcriber (immediate text feedback).
+   *
+   * Used for both the initial connect and every reconnect (VX_E31_S3) —
+   * the two used to be near-identical copies whose only real difference
+   * was a debug string, which is how the reconnect path ended up without
+   * the watchdog the initial path never had either.
+   */
+  createFastTranscriber(editor) {
+    let transcriber;
+    const isCurrent = () => this.fastTranscriber === transcriber;
+    transcriber = new RealtimeTranscriber(
       this.settings,
       {
         onSessionCreated: () => {
-          vlog.debug(
-            "Voxtral: Fast stream session created"
-          );
+          if (!isCurrent()) return;
+          vlog.debug("Voxtral: Fast stream session created");
+          this.fastWatchdog.arm();
         },
         onDelta: (text) => {
+          if (!isCurrent()) return;
+          this.fastWatchdog.arm();
           this.handleFastDelta(text);
           this.renderText(editor);
         },
         onDone: () => {
+          if (!isCurrent()) return;
+          this.fastWatchdog.arm();
           this.renderText(editor);
         },
         onError: (message) => {
-          vlog.error(
-            "Voxtral: Fast stream error:",
-            message
-          );
+          if (!isCurrent()) return;
+          vlog.error("Voxtral: Fast stream error:", message);
         },
         onDisconnect: () => {
+          if (!isCurrent()) return;
           void this.handleStreamDisconnect("fast");
         }
       },
-      fastDelay,
+      this.settings.dualDelayFastMs,
       this.transcriberOpts
     );
-    this.slowTranscriber = new RealtimeTranscriber(
+    return transcriber;
+  }
+  /** Build the slow-stream transcriber (accurate text + voice commands). */
+  createSlowTranscriber(editor) {
+    let transcriber;
+    const isCurrent = () => this.slowTranscriber === transcriber;
+    transcriber = new RealtimeTranscriber(
       this.settings,
       {
         onSessionCreated: () => {
-          vlog.debug(
-            "Voxtral: Slow stream session created"
-          );
+          if (!isCurrent()) return;
+          vlog.debug("Voxtral: Slow stream session created");
+          this.slowWatchdog.arm();
         },
         onDelta: (text) => {
+          if (!isCurrent()) return;
+          this.slowWatchdog.arm();
           this.handleSlowDelta(text);
           this.renderText(editor);
           this.processSlowCommands(editor);
         },
         onDone: () => {
+          if (!isCurrent()) return;
+          this.slowWatchdog.arm();
           this.renderText(editor);
           this.processSlowCommands(editor);
-          this.signalDone();
+          this.done.signal();
         },
         onError: (message) => {
-          vlog.error(
-            "Voxtral: Slow stream error:",
-            message
-          );
+          if (!isCurrent()) return;
+          vlog.error("Voxtral: Slow stream error:", message);
         },
         onDisconnect: () => {
+          if (!isCurrent()) return;
           void this.handleStreamDisconnect("slow");
         }
       },
-      slowDelay,
+      this.settings.dualDelaySlowMs,
       this.transcriberOpts
     );
+    return transcriber;
+  }
+  /**
+   * Dispose a stream's transcriber if stop() ran while its connect was in
+   * flight (VX_E31_S3). Returns true when the connection was abandoned, so
+   * the caller skips the audio replay. Without this the freshly opened
+   * socket would stay alive — with its keepalive and its callbacks into a
+   * session that has already finalized the text.
+   */
+  discardIfStopped(stream) {
+    if (!this.stopped) return false;
+    const transcriber = stream === "fast" ? this.fastTranscriber : this.slowTranscriber;
+    transcriber == null ? void 0 : transcriber.close();
+    if (stream === "fast") this.fastTranscriber = null;
+    else this.slowTranscriber = null;
+    return true;
+  }
+  async connectWebSockets(editor) {
+    this.fastTranscriber = this.createFastTranscriber(editor);
+    this.slowTranscriber = this.createSlowTranscriber(editor);
     await Promise.all([
       this.fastTranscriber.connect(),
       this.slowTranscriber.connect()
     ]);
-  }
-  async handleStreamDisconnect(stream) {
-    if (!this.callbacks.isRecording()) return;
-    const editor = this.callbacks.getEditor();
-    if (!editor) {
-      this.callbacks.stopRecording();
+    if (this.discardIfStopped("fast")) {
+      this.discardIfStopped("slow");
       return;
     }
-    this.setState("reconnecting" /* Reconnecting */);
-    vlog.debug(
-      `Voxtral: ${stream} stream ended, reconnecting...`
-    );
-    try {
-      if (stream === "fast") {
-        await this.reconnectFastStream(editor);
-      } else {
-        await this.reconnectSlowStream(editor);
-      }
-      this.consecutiveFailures = 0;
-      this.setState("streaming" /* Streaming */);
-    } catch (e) {
-      this.consecutiveFailures++;
-      vlog.error(
-        `Voxtral: ${stream} stream reconnect failed (${this.consecutiveFailures})`,
-        e
-      );
-      if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
+    this.flushAudioBuffer("fast");
+    this.flushAudioBuffer("slow");
+  }
+  async handleStreamDisconnect(stream) {
+    (stream === "fast" ? this.fastWatchdog : this.slowWatchdog).clear();
+    if (this.stopped) return;
+    let target = null;
+    await runReconnectLoop({
+      policy: this.reconnects,
+      prepare: () => {
+        if (this.stopped || !this.callbacks.isRecording()) return false;
+        target = this.callbacks.getEditor();
+        if (!target) {
+          this.callbacks.stopRecording();
+          return false;
+        }
+        this.setState("reconnecting" /* Reconnecting */);
+        vlog.debug(`Voxtral: ${stream} stream ended, reconnecting...`);
+        return true;
+      },
+      connect: async () => {
+        const editor = target;
+        if (!editor) return;
+        if (stream === "fast") {
+          await this.reconnectFastStream(editor);
+        } else {
+          await this.reconnectSlowStream(editor);
+        }
+      },
+      isActive: () => !this.stopped && this.callbacks.isRecording(),
+      onSuccess: () => {
+        if (!this.stopped) this.setState("streaming" /* Streaming */);
+      },
+      onFailure: (e, failures) => {
+        vlog.error(
+          `Voxtral: ${stream} stream reconnect failed (${failures})`,
+          e
+        );
+      },
+      onGiveUp: () => {
         this.callbacks.notify(
           "Cannot reconnect. Recording stopped.",
           6e3
         );
         this.callbacks.stopRecording();
-        return;
       }
-      const delay = Math.min(
-        500 * this.consecutiveFailures,
-        3e3
-      );
-      await new Promise(
-        (resolve) => setTimeout(resolve, delay)
-      );
-      if (this.callbacks.isRecording()) {
-        void this.handleStreamDisconnect(stream);
-      }
-    }
+    });
   }
   async reconnectFastStream(editor) {
-    const fastDelay = this.settings.dualDelayFastMs;
     this.fastPrevRaw = "";
-    this.fastTranscriber = new RealtimeTranscriber(
-      this.settings,
-      {
-        onSessionCreated: () => vlog.debug(
-          "Voxtral: Fast stream reconnected"
-        ),
-        onDelta: (text) => {
-          this.handleFastDelta(text);
-          this.renderText(editor);
-        },
-        onDone: () => this.renderText(editor),
-        onError: (message) => vlog.error(
-          "Voxtral: Fast stream error:",
-          message
-        ),
-        onDisconnect: () => void this.handleStreamDisconnect("fast")
-      },
-      fastDelay,
-      this.transcriberOpts
-    );
+    this.fastTranscriber = this.createFastTranscriber(editor);
     await this.fastTranscriber.connect();
+    if (this.discardIfStopped("fast")) return;
+    this.flushAudioBuffer("fast");
   }
   async reconnectSlowStream(editor) {
     if (this.remainderTimer) {
@@ -7885,58 +8459,55 @@ var _DualDelaySession = class _DualDelaySession {
         editor.getCursor()
       );
     }
-    this.slowCommitted = 0;
     this.slowText = "";
     this.fastText = "";
     this.slowTurnDelta = 0;
     this.slowPrevRaw = "";
     this.fastPrevRaw = "";
-    const slowDelay = this.settings.dualDelaySlowMs;
-    this.slowTranscriber = new RealtimeTranscriber(
-      this.settings,
-      {
-        onSessionCreated: () => vlog.debug(
-          "Voxtral: Slow stream reconnected"
-        ),
-        onDelta: (text) => {
-          this.handleSlowDelta(text);
-          this.renderText(editor);
-          this.processSlowCommands(editor);
-        },
-        onDone: () => {
-          this.renderText(editor);
-          this.processSlowCommands(editor);
-          this.signalDone();
-        },
-        onError: (message) => vlog.error(
-          "Voxtral: Slow stream error:",
-          message
-        ),
-        onDisconnect: () => void this.handleStreamDisconnect("slow")
-      },
-      slowDelay,
-      this.transcriberOpts
-    );
+    this.slowTranscriber = this.createSlowTranscriber(editor);
     await this.slowTranscriber.connect();
+    if (this.discardIfStopped("slow")) return;
+    this.flushAudioBuffer("slow");
+  }
+  // ── Watchdog (VX_E31_S3) ──
+  /**
+   * A stream went silent for WATCHDOG_TIMEOUT_MS while recording: the
+   * socket is half-open (no onclose will ever come), so close it
+   * deliberately and run that stream's normal reconnect path.
+   */
+  handleWatchdogTimeout(stream) {
+    var _a, _b;
+    if (this.stopped || !this.callbacks.isRecording()) return;
+    const secs = WATCHDOG_TIMEOUT_MS / 1e3;
+    vlog.warn(
+      `Voxtral: no ${stream}-stream events for ${secs}s \u2014 forcing reconnect (watchdog)`
+    );
+    (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(
+      _a,
+      `dual-delay: watchdog \u2014 no ${stream}-stream events for ${secs}s, forcing reconnect`
+    );
+    const transcriber = stream === "fast" ? this.fastTranscriber : this.slowTranscriber;
+    transcriber == null ? void 0 : transcriber.close();
+    void this.handleStreamDisconnect(stream);
   }
   // ── Delta handlers ──
   handleFastDelta(text) {
-    const isCumulative = this.fastPrevRaw && text.startsWith(this.fastPrevRaw);
-    let newPart = isCumulative ? text.substring(this.fastPrevRaw.length) : text;
-    this.fastPrevRaw = isCumulative ? text : this.fastPrevRaw + text;
+    const delta = parseDelta(this.fastPrevRaw, text);
+    this.fastPrevRaw = delta.prevRaw;
+    let newPart = delta.text;
     if (!newPart) return;
-    if (isSlotActive() && this.fastText === "") {
+    if (this.commands.isSlotActive() && this.fastText === "") {
       newPart = newPart.replace(/^\s+/, "");
       if (!newPart) return;
     }
     this.fastText += newPart;
   }
   handleSlowDelta(text) {
-    const isCumulative = this.slowPrevRaw && text.startsWith(this.slowPrevRaw);
-    let newPart = isCumulative ? text.substring(this.slowPrevRaw.length) : text;
-    this.slowPrevRaw = isCumulative ? text : this.slowPrevRaw + text;
+    const delta = parseDelta(this.slowPrevRaw, text);
+    this.slowPrevRaw = delta.prevRaw;
+    let newPart = delta.text;
     if (!newPart) return;
-    if (isSlotActive() && this.slowText === "") {
+    if (this.commands.isSlotActive() && this.slowText === "") {
       newPart = newPart.replace(/^\s+/, "");
       if (!newPart) return;
     }
@@ -7960,7 +8531,6 @@ var _DualDelaySession = class _DualDelaySession {
         const shift = slowText.length - this.displayLen;
         const newCursor = cursorOffset >= expectedEnd ? cursorOffset + shift : cursorOffset;
         editor.setCursor(editor.offsetToPos(newCursor));
-        this.slowCommitted += slowText.length;
         this.slowText = "";
         this.fastText = "";
         this.displayLen = 0;
@@ -8016,7 +8586,6 @@ var _DualDelaySession = class _DualDelaySession {
         editor.setCursor(from2);
         this.displayLen = 0;
       }
-      this.slowCommitted += this.slowText.length;
       this.slowText = "";
       this.fastText = "";
       this.insertOffset = editor.posToOffset(
@@ -8031,7 +8600,7 @@ var _DualDelaySession = class _DualDelaySession {
     const segmentText = segments ? segments.join("") : "";
     const remainder = this.slowText.substring(segmentText.length);
     if (!segments && remainder.trim()) {
-      const cmdMatch = matchCommand(remainder.trim());
+      const cmdMatch = this.commands.matchCommand(remainder.trim());
       if (cmdMatch && !cmdMatch.textBefore) {
         if (this.remainderTimer) clearTimeout(this.remainderTimer);
         this.remainderTimer = setTimeout(() => {
@@ -8047,7 +8616,6 @@ var _DualDelaySession = class _DualDelaySession {
       this.remainderTimer = null;
     }
     if (!segments) return;
-    const matchedLength = segmentText.length;
     const from = editor.offsetToPos(this.insertOffset);
     const to = editor.offsetToPos(
       this.insertOffset + this.displayLen
@@ -8056,7 +8624,7 @@ var _DualDelaySession = class _DualDelaySession {
     editor.setCursor(from);
     this.displayLen = 0;
     for (const segment of segments) {
-      const match = matchCommand(segment);
+      const match = this.commands.matchCommand(segment);
       if (match) {
         if (match.textBefore) {
           let before = match.textBefore;
@@ -8071,7 +8639,7 @@ var _DualDelaySession = class _DualDelaySession {
             before
           );
         }
-        executeCommand(editor, match.command);
+        this.commands.executeCommand(editor, match.command);
         (_b = (_a = this.callbacks).onCommandExecuted) == null ? void 0 : _b.call(_a, match.command.id);
         this.commandJustRan = true;
         if (match.command.id === "stopRecording") {
@@ -8080,14 +8648,13 @@ var _DualDelaySession = class _DualDelaySession {
             0
           );
         }
-        if (isSlotActive()) {
+        if (this.commands.isSlotActive()) {
           this.callbacks.updateStatusBar("slot");
         }
       } else {
         this.tracker.trackInsertAtCursor(editor, segment);
       }
     }
-    this.slowCommitted += matchedLength;
     this.slowText = remainder;
     this.fastText = "";
     this.insertOffset = editor.posToOffset(editor.getCursor());
@@ -8109,7 +8676,7 @@ var _DualDelaySession = class _DualDelaySession {
       this.processSlowCommands(editor);
       return;
     }
-    const cmdMatch = matchCommand(this.slowText.trim());
+    const cmdMatch = this.commands.matchCommand(this.slowText.trim());
     if (!cmdMatch || cmdMatch.textBefore) return;
     const from = editor.offsetToPos(this.insertOffset);
     const to = editor.offsetToPos(
@@ -8118,7 +8685,7 @@ var _DualDelaySession = class _DualDelaySession {
     editor.replaceRange("", from, to);
     editor.setCursor(from);
     this.displayLen = 0;
-    executeCommand(editor, cmdMatch.command);
+    this.commands.executeCommand(editor, cmdMatch.command);
     (_b = (_a = this.callbacks).onCommandExecuted) == null ? void 0 : _b.call(_a, cmdMatch.command.id);
     if (cmdMatch.command.id === "stopRecording") {
       setTimeout(
@@ -8126,11 +8693,10 @@ var _DualDelaySession = class _DualDelaySession {
         0
       );
     }
-    if (isSlotActive()) {
+    if (this.commands.isSlotActive()) {
       this.callbacks.updateStatusBar("slot");
     }
     this.commandJustRan = true;
-    this.slowCommitted += this.slowText.length;
     this.slowText = "";
     this.fastText = "";
     this.insertOffset = editor.posToOffset(
@@ -8140,6 +8706,646 @@ var _DualDelaySession = class _DualDelaySession {
 };
 _DualDelaySession.REMAINDER_DEBOUNCE_MS = 400;
 var DualDelaySession = _DualDelaySession;
+
+// ../shared/src/batch-dictation-session.ts
+var BatchDictationSession = class {
+  /**
+   * @param getSettings — read live, not snapshotted, so the per-note
+   *   language overlay the host resolves at recording start (VX_E27_S8)
+   *   reaches every transcribe/correct call.
+   * @param getContext — the session's `RequestContext` (vault vocabulary +
+   *   style, VX_E27_S7 / VX_E8_S4), also read live for the same reason.
+   *   Since VX_E31_S10 these travel beside the settings instead of as
+   *   transient fields on them.
+   */
+  constructor(getSettings, getContext, tracker, callbacks, httpRequest) {
+    this.getSettings = getSettings;
+    this.getContext = getContext;
+    this.tracker = tracker;
+    this.callbacks = callbacks;
+    this.httpRequest = httpRequest;
+    this.kind = "batch";
+    // Table-aware insertion for the chunk path: keeps dictation appending in
+    // the right table cell despite Obsidian's async table-widget cursor reset.
+    // The realtime sessions own one of these too.
+    this.inserter = new TableInsertTracker();
+    // The note this session dictates into, recorded by start() — the whole
+    // point of the class (audit §2.2 A2). Cleared by stop().
+    this.startEditor = null;
+    // Set by stop(): a late tap-to-send (the send button is removed on stop,
+    // but a queued call can still land) must not transcribe into a finished
+    // session. Mirrors the `stopped` flag in the realtime sessions.
+    this.stopped = false;
+  }
+  /**
+   * The command engine this session matches against — the tracker's, so the
+   * whole dictation path (this class, DictationTracker, TableInsertTracker)
+   * shares one instance instead of the module globals VX_E31_S10 removed.
+   */
+  get commands() {
+    return this.tracker.commands;
+  }
+  /** Begin a session in `editor`; the recorder is started by the host. */
+  // eslint-disable-next-line @typescript-eslint/require-await -- the interface is async (the realtime sessions connect here)
+  async start(editor) {
+    var _a, _b;
+    this.startEditor = editor;
+    this.stopped = false;
+    this.inserter.reset();
+    this.commands.resetUndo();
+    (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "batch: session starting");
+  }
+  /**
+   * Batch mode has no live PCM stream — the recorder keeps the audio and
+   * hands it over as a blob at each flush — so this is a deliberate no-op
+   * that keeps the session interchangeable with the realtime ones.
+   */
+  sendAudio() {
+  }
+  /** Nothing is buffered between chunks, so a closing slot needs no flush. */
+  flushAfterSlot() {
+  }
+  /**
+   * Transcribe one flushed chunk and insert it, without ending the session.
+   * `durationSec` is the recorded length of this chunk — the hallucination
+   * filter needs it to judge the words-per-second rate.
+   */
+  async sendChunk(blob, durationSec) {
+    if (this.stopped) return;
+    this.callbacks.updateStatusBar("processing");
+    const editor = this.startEditor;
+    if (blob.size === 0 || !editor) {
+      this.callbacks.updateStatusBar("recording");
+      return;
+    }
+    try {
+      const text = await this.transcribe(blob, durationSec, "chunk");
+      this.callbacks.updateStatusBar("recording");
+      if (text && this.insert(editor, text)) {
+        this.callbacks.stopRecording();
+      }
+    } catch (e) {
+      vlog.error("Voxtral: Chunk transcription failed", e);
+      this.callbacks.updateStatusBar("recording");
+      this.callbacks.notify(`Chunk failed: ${String(e)}`);
+    }
+  }
+  /**
+   * Finalize: transcribe and insert the final recording. Both arguments are
+   * optional so this still satisfies `TranscriptionSession.stop()`; without
+   * a blob the session simply closes (there is nothing left to transcribe).
+   */
+  async stop(finalBlob, durationSec = 0) {
+    var _a, _b;
+    this.stopped = true;
+    const editor = this.startEditor;
+    this.startEditor = null;
+    (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "batch: session stopping");
+    if (!finalBlob || finalBlob.size === 0) {
+      this.callbacks.notify("No audio recorded");
+      return;
+    }
+    if (!editor) {
+      this.callbacks.notify("No active note found");
+      return;
+    }
+    try {
+      const text = await this.transcribe(finalBlob, durationSec, "batch");
+      if (text) this.insert(editor, text);
+    } catch (e) {
+      vlog.error("Voxtral: Batch transcription failed", e);
+      this.callbacks.notify(`Transcription failed: ${String(e)}`);
+    }
+  }
+  // ── Pipeline ──
+  /** Transcribe → hallucination filter → command check → correction. */
+  async transcribe(blob, durationSec, label) {
+    const settings = this.getSettings();
+    const context = this.getContext();
+    const text = await transcribeBatch(blob, settings, this.httpRequest, false, context);
+    if (text && isLikelyHallucination(text, durationSec)) {
+      vlog.warn(`Voxtral: Discarding hallucinated ${label}`);
+      return "";
+    }
+    const hasCommand = text ? this.commands.matchCommand(text) !== null : false;
+    if (!settings.autoCorrect || !text || hasCommand) return text;
+    return await this.correct(text, settings, context);
+  }
+  /**
+   * Correct and apply spoken wikilinks. A failing correction (a timeout, a
+   * 5xx, an offline laptop) keeps the raw transcription rather than losing
+   * the chunk: the words are already spoken, and an uncorrected sentence is
+   * strictly better than an empty note plus an error notice.
+   */
+  async correct(text, settings, context) {
+    let corrected;
+    try {
+      corrected = await correctText(text, settings, this.httpRequest, { context });
+    } catch (e) {
+      vlog.error(
+        "Voxtral: correction failed \u2014 inserting the uncorrected transcription",
+        e
+      );
+      return text;
+    }
+    return settings.vaultWikilinks && context.vocabularyTerms.length ? applyVaultWikilinks(corrected, context.vocabularyTerms) : corrected;
+  }
+  /**
+   * Table-aware insert that also records the range for the manual "Correct
+   * dictated text" command (trackProcessText does that internally).
+   * Returns whether a stop-recording command was hit.
+   */
+  insert(editor, text) {
+    const { stop } = this.inserter.commit(
+      editor,
+      this.tracker,
+      text,
+      void 0,
+      (commandId) => {
+        var _a, _b;
+        return (_b = (_a = this.callbacks).onCommandExecuted) == null ? void 0 : _b.call(_a, commandId);
+      }
+    );
+    return stop;
+  }
+};
+
+// ../shared/src/transcription-session.ts
+function isChunkedSession(session) {
+  return session.kind === "batch";
+}
+
+// src/recording-controller.ts
+var RecordingController = class {
+  constructor(deps) {
+    this.deps = deps;
+    this.currentState = "idle";
+    // The session for this recording, whichever of the three modes it is
+    // (VX_E31_S6) — the controller only knows the `TranscriptionSession`
+    // interface, plus the one `isChunkedSession()` check that decides whether
+    // the recorder's blobs go anywhere.
+    this.session = null;
+    this.editor = null;
+    // Set when this session's realtime start fell back to batch after a
+    // token-mint failure (VX_E22_S8) — makes `effectiveMode` report "batch"
+    // for the rest of the session even though `settings.mode` is still
+    // "realtime", so stop()/sendChunk() (which both key off effectiveMode)
+    // treat it as the batch session it actually is. Reset at every start().
+    this.forcedBatch = false;
+    this.typingMuted = false;
+    this.typingResumeTimer = null;
+    this.focusPauseTimer = null;
+    // The in-flight start(), so a stop() during `starting` can await it
+    // instead of racing it (audit §4 B2).
+    this.startPromise = null;
+  }
+  /**
+   * The host's command engine (VX_E31_S10, audit §2.2 A4). Reached through
+   * the tracker so the controller, the tracker and the sessions can never
+   * end up on different instances — the slot this closes is the one
+   * dictation opened.
+   */
+  get commands() {
+    return this.deps.tracker.commands;
+  }
+  // ── State ──
+  get state() {
+    return this.currentState;
+  }
+  /**
+   * True from a successful start until stop() begins — `paused` included,
+   * exactly like the old `isRecording` boolean (which stayed true while
+   * `isPaused` was set).
+   */
+  isRecording() {
+    return this.currentState === "recording" || this.currentState === "paused";
+  }
+  isPaused() {
+    return this.currentState === "paused";
+  }
+  /** Whether the typing-mute cooldown currently has the mic muted. */
+  isTypingMuted() {
+    return this.typingMuted;
+  }
+  /** Whether this session's realtime start fell back to batch (VX_E22_S8). */
+  get sessionForcedBatch() {
+    return this.forcedBatch;
+  }
+  /** The editor the session started in (`null` outside a session). */
+  get currentEditor() {
+    return this.editor;
+  }
+  /**
+   * Effective mode for the current/next session: the user's chosen mode,
+   * unless this session's realtime start already fell back to batch after a
+   * token-mint failure. Realtime is available on every platform since
+   * VX_E22_S8, so there's no platform gate here beyond `settings.mode`.
+   */
+  get effectiveMode() {
+    if (this.forcedBatch) return "batch";
+    return this.deps.getSettings().mode === "realtime" ? "realtime" : "batch";
+  }
+  // ── Transitions ──
+  /** Ribbon/command entry point: start when idle, stop when live. */
+  async toggle() {
+    switch (this.currentState) {
+      case "idle":
+        await this.start();
+        return;
+      case "recording":
+      case "paused":
+        await this.stop();
+        return;
+      // A double click / double hotkey inside the start or stop window
+      // is a slip, not a request to do the opposite — ignore it. This
+      // is the guard the old `isRecording` check could not give (B2).
+      case "starting":
+      case "stopping":
+        vlog.debug(
+          `Voxtral: toggle ignored \u2014 recording is ${this.currentState}`
+        );
+        return;
+    }
+  }
+  /**
+   * Start a session. Runs from `idle` only; every other state is a logged
+   * no-op, so two rapid calls can never open two recorders.
+   */
+  async start() {
+    if (this.currentState !== "idle") {
+      vlog.debug(
+        `Voxtral: start ignored \u2014 recording is already ${this.currentState}`
+      );
+      return;
+    }
+    this.currentState = "starting";
+    const pending = this.runStart();
+    this.startPromise = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.startPromise === pending) this.startPromise = null;
+    }
+  }
+  async runStart() {
+    this.forcedBatch = false;
+    const editor = this.deps.prepareSession();
+    if (!editor) {
+      this.currentState = "idle";
+      return;
+    }
+    this.editor = editor;
+    try {
+      if (this.effectiveMode === "realtime") {
+        try {
+          await this.startRealtime(editor);
+        } catch (e) {
+          if (!(e instanceof RealtimeTokenError)) throw e;
+          vlog.warn(
+            "Voxtral: realtime token mint failed \u2014 falling back to batch mode for this session",
+            e
+          );
+          this.deps.notify(
+            `Realtime unavailable: ${e.message} \u2014 falling back to batch mode for this session.`
+          );
+          this.forcedBatch = true;
+          await this.startBatch(editor);
+          this.deps.addSendButton();
+        }
+      } else {
+        await this.startBatch(editor);
+        this.deps.addSendButton();
+      }
+      this.currentState = "recording";
+      this.deps.updateStatusBar("recording");
+      this.deps.onStarted(this.effectiveMode);
+    } catch (e) {
+      vlog.error("Voxtral: Failed to start recording", e);
+      this.deps.notify(`Could not start recording: ${String(e)}`);
+      this.currentState = "idle";
+      this.editor = null;
+      this.deps.updateStatusBar("idle");
+      this.deps.restoreGlobalLanguage();
+    }
+  }
+  /**
+   * Stop the session. During `starting` this awaits the in-flight start
+   * first, so the teardown always runs against a fully built session
+   * instead of racing it (audit §4 B2); during `stopping` (or `idle`) it
+   * is a logged no-op.
+   */
+  async stop() {
+    if (this.currentState === "starting") {
+      const pending = this.startPromise;
+      vlog.debug("Voxtral: stop requested while starting \u2014 awaiting the start");
+      if (pending) {
+        try {
+          await pending;
+        } catch (e) {
+        }
+      }
+    }
+    if (this.currentState !== "recording" && this.currentState !== "paused") {
+      vlog.debug(`Voxtral: stop ignored \u2014 recording is ${this.currentState}`);
+      return;
+    }
+    this.currentState = "stopping";
+    this.typingMuted = false;
+    this.clearTypingResumeTimer();
+    this.clearFocusPauseTimer();
+    this.deps.updateStatusBar("processing");
+    this.deps.removeSendButton();
+    try {
+      if (this.effectiveMode === "realtime") {
+        await this.stopRealtime();
+      } else {
+        await this.stopBatch();
+      }
+    } catch (e) {
+      vlog.error("Voxtral: Failed to stop recording", e);
+      this.deps.notify(`Error stopping recording: ${String(e)}`);
+    }
+    this.deps.restoreGlobalLanguage();
+    this.editor = null;
+    if (this.deps.getSettings().autoCorrect) {
+      this.deps.tracker.reset();
+    }
+    this.currentState = "idle";
+    this.deps.updateStatusBar("idle");
+    this.deps.onStopped();
+  }
+  /** Pause the mic without ending the session (focus loss). */
+  pause() {
+    if (this.currentState !== "recording") return;
+    this.currentState = "paused";
+    this.deps.recorder.pause();
+    this.deps.updateStatusBar("paused");
+    vlog.debug("Voxtral: Recording paused (app backgrounded)");
+  }
+  /** Resume a paused session (focus regained). */
+  resume() {
+    if (this.currentState !== "paused") return;
+    this.currentState = "recording";
+    this.deps.recorder.resume();
+    this.deps.updateStatusBar("recording");
+    this.deps.notify("Recording resumed");
+    vlog.debug("Voxtral: Recording resumed (app foregrounded)");
+  }
+  /** Release any pending timer (plugin unload). */
+  dispose() {
+    this.clearTypingResumeTimer();
+    this.clearFocusPauseTimer();
+  }
+  // ── Session lifecycle ──
+  async startRealtime(editor) {
+    var _a;
+    this.deps.tracker.reset();
+    this.commands.resetUndo();
+    try {
+      this.session = this.makeSession(
+        this.deps.getSettings().dualDelay ? "dual-delay" : "realtime"
+      );
+      await this.session.start(editor);
+      const deviceId = this.deps.getSettings().microphoneDeviceId || void 0;
+      await this.deps.recorder.start(
+        deviceId,
+        (pcmData) => {
+          var _a2;
+          return (_a2 = this.session) == null ? void 0 : _a2.sendAudio(pcmData);
+        },
+        this.deps.getSettings().noiseSuppression
+      );
+    } catch (e) {
+      try {
+        await ((_a = this.session) == null ? void 0 : _a.stop());
+      } catch (cleanupError) {
+        vlog.error("Voxtral: cleanup after failed start failed", cleanupError);
+      }
+      this.session = null;
+      await this.deps.recorder.stop();
+      throw e;
+    }
+    if (this.deps.recorder.fallbackUsed) {
+      this.deps.notify("Selected mic unavailable \u2014 using default");
+    }
+  }
+  async stopRealtime() {
+    var _a, _b;
+    const editor = (_a = this.currentEditor) != null ? _a : this.deps.resolveEditor();
+    await ((_b = this.session) == null ? void 0 : _b.stop());
+    this.session = null;
+    await this.deps.recorder.stop();
+    if (this.deps.getSettings().autoCorrect && editor) {
+      await this.deps.tracker.autoCorrectAfterStop(
+        editor,
+        this.deps.getRecordingSettings(),
+        this.deps.httpRequest,
+        this.deps.getRequestContext()
+      );
+    }
+  }
+  /**
+   * Batch mode (tap-to-send): the session owns the transcribe/correct/insert
+   * pipeline (`BatchDictationSession`), the controller owns the recorder.
+   * Starting the session first mirrors the realtime path, where nothing is
+   * recorded before there is somewhere for the text to go.
+   */
+  async startBatch(editor) {
+    this.session = this.makeSession("batch");
+    await this.session.start(editor);
+    const deviceId = this.deps.getSettings().microphoneDeviceId || void 0;
+    await this.deps.recorder.start(
+      deviceId,
+      void 0,
+      this.deps.getSettings().noiseSuppression
+    );
+    if (this.deps.recorder.fallbackUsed) {
+      this.deps.notify("Selected mic unavailable \u2014 using default");
+    }
+  }
+  async stopBatch() {
+    const session = this.session;
+    this.session = null;
+    const blob = await this.deps.recorder.stop();
+    if (session && isChunkedSession(session)) {
+      await session.stop(blob, this.deps.recorder.lastChunkDurationSec);
+    } else {
+      await (session == null ? void 0 : session.stop());
+    }
+  }
+  /**
+   * Tap-to-send: flush the audio recorded so far and hand it to the session,
+   * without ending the recording. Reached from the send button/ribbon, the
+   * "Send audio chunk" command and Enter-to-send.
+   */
+  async sendChunk() {
+    const session = this.session;
+    if (!this.isRecording() || !session || !isChunkedSession(session)) return;
+    this.deps.updateStatusBar("processing");
+    let blob;
+    try {
+      blob = await this.deps.recorder.flushChunk();
+    } catch (e) {
+      vlog.error("Voxtral: Chunk flush failed", e);
+      this.deps.notify(`Chunk failed: ${String(e)}`);
+      this.deps.updateStatusBar("recording");
+      return;
+    }
+    await session.sendChunk(blob, this.deps.recorder.lastChunkDurationSec);
+  }
+  /** Build the session for `kind` (injected factory in tests). */
+  makeSession(kind) {
+    const callbacks = this.deps.sessionCallbacks();
+    const settings = this.deps.getRecordingSettings();
+    const context = this.deps.getRequestContext();
+    if (this.deps.createSession) {
+      return this.deps.createSession(
+        kind,
+        settings,
+        context,
+        this.deps.tracker,
+        callbacks,
+        this.deps.httpRequest
+      );
+    }
+    switch (kind) {
+      case "dual-delay":
+        return new DualDelaySession(
+          settings,
+          this.deps.tracker,
+          callbacks,
+          this.deps.httpRequest
+        );
+      case "batch":
+        return new BatchDictationSession(
+          () => this.deps.getRecordingSettings(),
+          () => this.deps.getRequestContext(),
+          this.deps.tracker,
+          callbacks,
+          this.deps.httpRequest
+        );
+      default:
+        return new RealtimeSession(
+          settings,
+          this.deps.tracker,
+          callbacks,
+          this.deps.httpRequest
+        );
+    }
+  }
+  // ── Visibility (auto-pause on background) ──
+  /** Called on every `visibilitychange`; reads `isHidden()` itself. */
+  handleVisibilityChange() {
+    if (!this.isRecording()) return;
+    const behavior = this.deps.getSettings().focusBehavior;
+    if (this.deps.isHidden()) {
+      this.clearFocusPauseTimer();
+      if (behavior === "keep-recording") {
+        vlog.debug("Voxtral: App backgrounded, recording continues");
+      } else if (behavior === "pause-after-delay") {
+        const delaySec = this.deps.getSettings().focusPauseDelaySec;
+        vlog.debug(`Voxtral: App backgrounded, pausing in ${delaySec}s`);
+        this.focusPauseTimer = this.deps.setTimer(() => {
+          this.focusPauseTimer = null;
+          if (this.currentState === "recording" && this.deps.isHidden()) {
+            this.pause();
+          }
+        }, delaySec * 1e3);
+      } else {
+        this.pause();
+      }
+    } else {
+      this.clearFocusPauseTimer();
+      if (this.currentState === "paused") {
+        this.resume();
+      }
+    }
+  }
+  clearFocusPauseTimer() {
+    if (this.focusPauseTimer !== null) {
+      this.deps.clearTimer(this.focusPauseTimer);
+      this.focusPauseTimer = null;
+    }
+  }
+  // ── Typing mute (prevent keyboard noise from being transcribed) ──
+  /** Capture-phase keydown handler; also owns Enter-to-send and slots. */
+  handleTypingMute(e) {
+    var _a;
+    if (this.commands.isSlotActive()) {
+      const slot = this.commands.getActiveSlot();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        this.commands.cancelSlot();
+        this.deps.updateStatusBar("recording");
+        return;
+      }
+      if ((slot == null ? void 0 : slot.def.exitTrigger) === "voice") {
+        return;
+      }
+      const isEnterExit = (slot == null ? void 0 : slot.def.exitTrigger) === "enter" || (slot == null ? void 0 : slot.def.exitTrigger) === "enter-or-space";
+      const isSpaceExit = (slot == null ? void 0 : slot.def.exitTrigger) === "space" || (slot == null ? void 0 : slot.def.exitTrigger) === "enter-or-space";
+      if (e.key === "Enter" && isEnterExit || e.key === " " && isSpaceExit) {
+        e.preventDefault();
+        const editor = this.deps.resolveEditor();
+        if (editor) {
+          this.commands.closeSlot(editor);
+          (_a = this.session) == null ? void 0 : _a.flushAfterSlot(editor);
+        }
+        this.deps.updateStatusBar("recording");
+        return;
+      }
+      return;
+    }
+    if (this.currentState !== "recording") return;
+    if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta" || e.ctrlKey || e.metaKey) {
+      return;
+    }
+    if (e.key === "Enter" && this.deps.getSettings().enterToSend && this.effectiveMode === "batch" && !this.typingMuted && !this.typingResumeTimer) {
+      e.preventDefault();
+      void this.sendChunk();
+      return;
+    }
+    if (e.key === "Escape" || e.key === "Tab" || e.key === "Enter" || e.key === "Backspace" || e.key === "Delete" || e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End" || e.key === "PageUp" || e.key === "PageDown" || /^F\d{1,2}$/.test(e.key)) {
+      if (this.typingMuted && this.typingResumeTimer) {
+        this.clearTypingResumeTimer();
+        this.typingResumeTimer = this.deps.setTimer(
+          () => this.unmuteAfterCooldown(),
+          this.deps.getSettings().typingCooldownMs
+        );
+      }
+      return;
+    }
+    if (!this.typingMuted) {
+      this.typingMuted = true;
+      this.deps.recorder.mute();
+      this.deps.setIndicatorState("paused");
+    }
+    this.clearTypingResumeTimer();
+    this.typingResumeTimer = this.deps.setTimer(
+      () => this.unmuteAfterCooldown(),
+      this.deps.getSettings().typingCooldownMs
+    );
+  }
+  /**
+   * Typing-mute cooldown elapsed — mic is live again. Goes straight to the
+   * mobile indicator (not through `updateStatusBar`) so the desktop status
+   * bar text stays untouched, per VX_E27_S9's scope note.
+   */
+  unmuteAfterCooldown() {
+    this.typingResumeTimer = null;
+    if (this.currentState === "recording" && this.typingMuted) {
+      this.typingMuted = false;
+      this.deps.recorder.unmute();
+      this.deps.setIndicatorState("recording");
+    }
+  }
+  clearTypingResumeTimer() {
+    if (this.typingResumeTimer !== null) {
+      this.deps.clearTimer(this.typingResumeTimer);
+      this.typingResumeTimer = null;
+    }
+  }
+};
 
 // src/recording-indicator.ts
 var BASE_CLASS = "voxtral-rec-indicator";
@@ -8195,31 +9401,60 @@ var INDICATOR_STATE_MAP = {
   paused: "paused",
   reconnecting: "reconnecting"
 };
+var STATUS_BAR_CLASSES = [
+  "voxtral-recording",
+  "voxtral-processing",
+  "voxtral-paused",
+  "voxtral-reconnecting"
+];
+var STATUS_BAR_STATES = {
+  idle: { cls: null, text: () => null },
+  recording: {
+    cls: "voxtral-recording",
+    text: (recorder, commands) => {
+      var _a;
+      if (commands.isSlotActive()) {
+        const slot = commands.getActiveSlot();
+        return `\u25CF ${(_a = slot == null ? void 0 : slot.commandId) != null ? _a : "slot"} \u2014 type, then Enter`;
+      }
+      const mic = recorder.activeMicLabel;
+      const short = mic.length > 25 ? mic.slice(0, 22) + "..." : mic;
+      return `\u25CF ${short}`;
+    }
+  },
+  slot: {
+    cls: "voxtral-recording",
+    text: (_recorder, commands) => {
+      var _a;
+      const slot = commands.getActiveSlot();
+      return `\u25CF ${(_a = slot == null ? void 0 : slot.commandId) != null ? _a : "slot"} \u2014 type, then Enter`;
+    }
+  },
+  paused: { cls: "voxtral-paused", text: () => "\u23F8 Paused" },
+  processing: { cls: "voxtral-processing", text: () => "\u23F3 Processing..." },
+  reconnecting: {
+    // Not reachable via any current call site (see INDICATOR_STATE_MAP) —
+    // kept so the mapping stays total alongside the mobile indicator's
+    // "reconnecting" state.
+    cls: "voxtral-reconnecting",
+    text: () => "\u27F3 reconnecting..."
+  }
+};
 var VoxtralPlugin = class extends import_obsidian10.Plugin {
   constructor() {
     super(...arguments);
-    this.realtimeSession = null;
-    this.dualDelaySession = null;
-    // Set when this session's realtime start fell back to batch after a
-    // token-mint failure (VX_E22_S8) — see startRecording()'s
-    // RealtimeTokenError handling. Makes effectiveMode() report "batch" for
-    // the rest of the session even though settings.mode is still "realtime",
-    // so stopRecording()/sendChunk() (which both key off effectiveMode) treat
-    // it as the batch session it actually is. Reset at the top of every
-    // startRecording() call.
-    this.sessionForcedBatch = false;
-    this.tracker = new DictationTracker();
-    // Table-aware insertion for the batch/chunk path (batch mode, on any
-    // platform — realtime mode uses RealtimeSession/DualDelaySession's own
-    // TableInsertTracker instead). Keeps dictation appending in the right
-    // table cell despite Obsidian's async table-widget cursor reset.
-    this.batchInserter = new TableInsertTracker();
-    this.isRecording = false;
-    this.isPaused = false;
-    this.isTypingMuted = false;
-    // `window.setTimeout` (Obsidian/DOM runtime) returns a numeric handle.
-    this.typingResumeTimer = null;
-    this.focusPauseTimer = null;
+    /**
+     * The plugin's single command engine (VX_E31_S10, audit §2.2 A4). Created
+     * here rather than as module state in `voice-commands.ts`, and handed to
+     * everything that matches or executes voice commands: the dictation
+     * tracker (and through it the sessions and the table inserter), the
+     * recording controller, the help panel and the settings tab.
+     */
+    this.commands = new CommandEngine();
+    /** The vault's templates, per plugin instance (VX_E31_S10) — wired into
+     *  `this.commands`' pre-match hook by `setupTemplates()`. */
+    this.templates = new TemplateRegistry();
+    this.tracker = new DictationTracker(this.commands);
     this.statusBarEl = null;
     // Handle for the transient command-feedback flash (status bar text reverts
     // to the recording display once this fires) — kept so an overlapping
@@ -8232,16 +9467,12 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     // there's no status bar there. Lifecycle shares addSendButton/
     // removeSendButton (see below) so cleanup can't be forgotten.
     this.recordingIndicator = new RecordingIndicator();
-    this.chunkIndex = 0;
     // "Listen back" playback (E26): play decoded audio via the Web Audio API. A
     // blob: URL in an HTMLAudioElement fails on the mobile WebView ("no supported
     // source"), so we decode the bytes and play a buffer source instead — a single
     // context/source so Stop and a new read just replace the current one.
     // Owned by PlaybackController (VX_E27_S2) — see playback-controller.ts.
     this.playback = new PlaybackController();
-    this.consecutiveFailures = 0;
-    this.maxConsecutiveFailures = 5;
-    this.currentEditor = null;
     // Per-note language override (VX_E27_S8): resolved once at recording
     // start from the active note's `voxtral-language` frontmatter and held
     // fixed for the session (mid-recording note/frontmatter changes are out
@@ -8252,10 +9483,6 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     // active note) and held for the session, mirroring `activeLanguage`'s
     // lifecycle — see `recordingSettings`. Empty when `vaultVocabulary` is off.
     this.sessionVocabularyTerms = [];
-    // Same idea for file transcription (VX_E27_S2 pipeline), collected once per
-    // `.transcribe()` call from the output-target note (if any) — see
-    // `fileTranscriptSettings`.
-    this.fileTranscriptVocabularyTerms = [];
     // Per-note style override (VX_E8_S4): resolved once at recording start
     // from the active note's `voxtral-style` frontmatter and held fixed for
     // the session, mirroring `activeLanguage`'s lifecycle exactly (including
@@ -8263,9 +9490,6 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     // no (valid) `voxtral-style` value — free text, so unlike `activeLanguage`
     // there's no "invalid value" notice to surface.
     this.sessionStyleInstruction = void 0;
-    // Same idea for file transcription, mirroring
-    // `fileTranscriptVocabularyTerms`'s per-call lifecycle.
-    this.fileTranscriptStyleInstruction = void 0;
     /** Platform adapter: wraps Obsidian's requestUrl as HttpRequestFn */
     this.httpRequest = async (options) => {
       const response = await (0, import_obsidian10.requestUrl)({
@@ -8291,82 +9515,36 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     };
   }
   /**
-   * Whether realtime mode is available on this platform. Always true since
-   * VX_E22_S8: realtime now works on mobile too, via the ephemeral-token
-   * WebSocket-subprotocol route (RealtimeTokenManager +
-   * connectCloudSubprotocol() in shared/src/mistral-api.ts) — the desktop
-   * header route needs Node's `require()`, which mobile's webview never
-   * has, but the token route doesn't need it. Kept as a getter (rather
-   * than removed outright) since other code still reads it.
-   */
-  get canRealtime() {
-    return true;
-  }
-  /**
-   * Effective mode for the current/next recording session: the user's
-   * chosen mode, unless this session's realtime start already fell back to
-   * batch after a token-mint failure (see `sessionForcedBatch` and
-   * startRecording()'s RealtimeTokenError handling).
-   */
-  get effectiveMode() {
-    if (this.sessionForcedBatch) return "batch";
-    if (this.settings.mode === "realtime" && this.canRealtime) {
-      return "realtime";
-    }
-    return "batch";
-  }
-  /**
    * Settings for the current recording session (VX_E27_S8): a shallow copy
    * with `language` swapped for the resolved per-note override, or
    * `this.settings` unchanged when there's no active override. Every
    * transcription/correction call tied to a recording session should read
    * through this getter (not `this.settings` directly) so the override
    * reaches the API without ever mutating the persisted settings object.
+   *
+   * `language` is the only thing overlaid here: it is a real, persisted
+   * setting that the per-note value shadows. The session's vocabulary and
+   * style are NOT settings and since VX_E31_S10 no longer ride along on a
+   * copy of them — see `recordingContext`.
    */
   get recordingSettings() {
-    const base = this.activeLanguage !== null ? { ...this.settings, language: this.activeLanguage } : this.settings;
-    const withVocab = this.withVocabulary(base, this.sessionVocabularyTerms);
-    return this.withStyle(withVocab, this.sessionStyleInstruction);
+    return this.activeLanguage !== null ? { ...this.settings, language: this.activeLanguage } : this.settings;
   }
   /**
-   * Settings for the current file-transcription call (VX_E27_S7): same
-   * shallow-copy-overlay pattern as `recordingSettings`, but scoped to
-   * `fileTranscriptVocabularyTerms` (collected per `.transcribe()` call, not
-   * per recording session — file transcription has no "session").
+   * The `RequestContext` for the current recording session (VX_E31_S10):
+   * the vault vocabulary (VX_E27_S7) and style instruction (VX_E8_S4)
+   * resolved once in `prepareRecordingSession()` and cleared again by
+   * `restoreGlobalLanguage()`. Built from the same two session fields the
+   * old `withVocabulary`/`withStyle` overlays read, so the request bodies
+   * are unchanged — the values just travel beside the settings instead of
+   * on a copy of them, which is what makes `saveData(VoxtralSettings)`
+   * unable to accept them at all.
    */
-  get fileTranscriptSettings() {
-    const withVocab = this.withVocabulary(this.settings, this.fileTranscriptVocabularyTerms);
-    return this.withStyle(withVocab, this.fileTranscriptStyleInstruction);
-  }
-  /**
-   * Overlay `vocabularyTerms` onto a shallow copy of `settings` when there
-   * are terms to add (VX_E27_S7) — `settings` is returned unchanged
-   * otherwise, so callers with no active vault-vocabulary session never pay
-   * for a copy. `vocabularyTerms` is never set on `this.settings` itself, so
-   * it's never persisted by `saveSettings()`.
-   */
-  withVocabulary(settings, terms) {
-    return terms.length > 0 ? { ...settings, vocabularyTerms: terms } : settings;
-  }
-  /**
-   * Overlay `styleInstruction` onto a shallow copy of `settings` when a
-   * per-note style was resolved (VX_E8_S4) — `settings` is returned
-   * unchanged otherwise, mirroring `withVocabulary`. `styleInstruction` is
-   * never set on `this.settings` itself, so it's never persisted by
-   * `saveSettings()`.
-   */
-  withStyle(settings, style) {
-    return style !== void 0 ? { ...settings, styleInstruction: style } : settings;
-  }
-  /**
-   * Spoken wikilinks (VX_E27_S7, stage 2): after a correction pass, wrap
-   * exact vault-term matches in `[[...]]`. Local-only string post-processing
-   * (nothing extra is sent to the API) — a no-op unless both `vaultWikilinks`
-   * is on and vocabulary terms were actually collected for this call.
-   */
-  applyWikilinksIfEnabled(text, settings) {
-    var _a;
-    return settings.vaultWikilinks && ((_a = settings.vocabularyTerms) == null ? void 0 : _a.length) ? applyVaultWikilinks(text, settings.vocabularyTerms) : text;
+  get recordingContext() {
+    return {
+      vocabularyTerms: this.sessionVocabularyTerms,
+      styleInstruction: this.sessionStyleInstruction
+    };
   }
   /**
    * Resolve the effective language for `file`'s `voxtral-language`
@@ -8415,12 +9593,12 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     return {
       updateStatusBar: (state) => this.updateStatusBar(state),
       stopRecording: () => {
-        void this.stopRecording();
+        void this.recording.stop();
       },
-      isRecording: () => this.isRecording,
+      isRecording: () => this.recording.isRecording(),
       getEditor: () => {
         var _a;
-        return this.currentEditor || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) || null;
+        return this.recording.currentEditor || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) || null;
       },
       notify: (msg, dur) => new import_obsidian10.Notice(msg, dur),
       onCommandExecuted: (commandId) => this.handleCommandExecuted(commandId),
@@ -8436,19 +9614,60 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       `Voxtral: plugin loaded (debug logging on), mode=${this.settings.mode}`
     );
     this.recorder = new AudioRecorder();
+    this.recording = new RecordingController({
+      recorder: this.recorder,
+      tracker: this.tracker,
+      httpRequest: this.httpRequest,
+      getSettings: () => this.settings,
+      getRecordingSettings: () => this.recordingSettings,
+      getRequestContext: () => this.recordingContext,
+      sessionCallbacks: () => this.sessionCallbacks,
+      prepareSession: () => this.prepareRecordingSession(),
+      restoreGlobalLanguage: () => {
+        this.restoreGlobalLanguage();
+      },
+      resolveEditor: () => {
+        var _a, _b;
+        return (_b = (_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) != null ? _b : null;
+      },
+      updateStatusBar: (state) => this.updateStatusBar(state),
+      setIndicatorState: (state) => {
+        this.recordingIndicator.setState(state);
+      },
+      notify: (message, durationMs) => {
+        new import_obsidian10.Notice(message, durationMs);
+      },
+      addSendButton: () => {
+        this.addSendButton();
+      },
+      removeSendButton: () => {
+        this.removeSendButton();
+      },
+      onStarted: (mode) => {
+        this.onRecordingStarted(mode);
+      },
+      onStopped: () => {
+        new import_obsidian10.Notice("Recording stopped");
+      },
+      isHidden: () => activeDocument.hidden,
+      setTimer: (callback, ms) => window.setTimeout(callback, ms),
+      clearTimer: (handle) => {
+        window.clearTimeout(handle);
+      }
+    });
     this.fileTranscriptionService = new FileTranscriptionService({
       app: this.app,
-      getSettings: () => this.fileTranscriptSettings,
+      getSettings: () => this.settings,
       httpRequest: this.httpRequest,
       updateStatusBar: (state) => this.updateStatusBar(state),
       saveSettings: () => this.saveSettings()
     });
     this.registerView(
       VIEW_TYPE_VOXTRAL_HELP,
-      (leaf) => new VoxtralHelpView(leaf, this)
+      (leaf) => new VoxtralHelpView(leaf, this.commands, this)
     );
     this.addRibbonIcon("mic", "Voxtral: start/stop recording", () => {
-      void this.toggleRecording();
+      void this.recording.toggle();
     });
     if (!import_obsidian10.Platform.isMobile) {
       this.statusBarEl = this.addStatusBarItem();
@@ -8464,7 +9683,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       name: "Start/stop recording",
       icon: "mic",
       callback: () => {
-        void this.toggleRecording();
+        void this.recording.toggle();
       }
     });
     this.addCommand({
@@ -8472,7 +9691,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       name: "Send audio chunk (tap-to-send)",
       icon: "send",
       callback: () => {
-        void this.sendChunk();
+        void this.recording.sendChunk();
       }
     });
     this.addCommand({
@@ -8582,12 +9801,12 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     );
     this.addSettingTab(new VoxtralSettingTab(this.app, this));
     this.registerDomEvent(activeDocument, "visibilitychange", () => {
-      this.handleVisibilityChange();
+      this.recording.handleVisibilityChange();
     });
     this.registerDomEvent(
       activeDocument,
       "keydown",
-      (e) => this.handleTypingMute(e),
+      (e) => this.recording.handleTypingMute(e),
       { capture: true }
     );
     this.app.workspace.onLayoutReady(() => {
@@ -8628,9 +9847,10 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     }
   }
   onunload() {
-    if (this.isRecording) {
-      void this.stopRecording();
+    if (this.recording.isRecording()) {
+      void this.recording.stop();
     }
+    this.recording.dispose();
     this.playback.stopPlayback();
     this.removeSendButton();
     if (this.commandFeedbackTimer !== null) {
@@ -8667,9 +9887,8 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
         ...this.settings.customCommands
       ];
     }
-    setLanguage(this.settings.language);
-    loadCustomCommands(this.settings.customCommands);
-    loadCustomCommandTriggers(this.settings.customCommands);
+    this.commands.setLanguage(this.settings.language);
+    this.commands.loadCustomCommands(this.settings.customCommands);
     this.setupTemplates();
     if (apiKeyMigrated) {
       await this.saveSettings();
@@ -8681,19 +9900,18 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
   }
   async saveSettings() {
     await this.saveData(stripApiKeyValue(this.settings));
-    setLanguage(this.settings.language);
-    loadCustomCommands(this.settings.customCommands);
-    loadCustomCommandTriggers(this.settings.customCommands);
+    this.commands.setLanguage(this.settings.language);
+    this.commands.loadCustomCommands(this.settings.customCommands);
     this.setupTemplates();
     this.refreshHelpView();
   }
   // ── Templates ──
   /** Scan templates folder and register the pre-match hook */
   setupTemplates() {
-    scanTemplates(this.app, this.settings.templatesFolder);
-    setPreMatchHook((editor, normalizedText, rawText) => {
+    this.templates.scan(this.app, this.settings.templatesFolder);
+    this.commands.setPreMatchHook((editor, normalizedText, rawText) => {
       const lang = this.recordingSettings.language;
-      const tmplMatch = matchTemplate(normalizedText, lang);
+      const tmplMatch = this.templates.match(normalizedText, lang);
       if (tmplMatch) {
         if (tmplMatch.textBefore) {
           const cmdWords = normalizedText.length - tmplMatch.textBefore.length;
@@ -8733,7 +9951,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       "send",
       "Send chunk",
       () => {
-        void this.sendChunk();
+        void this.recording.sendChunk();
       }
     );
     this.sendRibbonEl.addClass("voxtral-send-button");
@@ -8744,7 +9962,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
           "send",
           "Send chunk",
           () => {
-            void this.sendChunk();
+            void this.recording.sendChunk();
           }
         );
         this.mobileActionEl.addClass("voxtral-mobile-send");
@@ -8766,133 +9984,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     }
     this.recordingIndicator.detach();
   }
-  // ── Visibility (auto-pause on background) ──
-  handleVisibilityChange() {
-    if (!this.isRecording) return;
-    const behavior = this.settings.focusBehavior;
-    if (activeDocument.hidden) {
-      this.clearFocusPauseTimer();
-      if (behavior === "keep-recording") {
-        vlog.debug("Voxtral: App backgrounded, recording continues");
-      } else if (behavior === "pause-after-delay") {
-        const delaySec = this.settings.focusPauseDelaySec;
-        console.debug(
-          `Voxtral: App backgrounded, pausing in ${delaySec}s`
-        );
-        this.focusPauseTimer = window.setTimeout(() => {
-          if (this.isRecording && activeDocument.hidden) {
-            this.pauseRecording();
-          }
-        }, delaySec * 1e3);
-      } else {
-        this.pauseRecording();
-      }
-    } else {
-      this.clearFocusPauseTimer();
-      if (this.isPaused) {
-        this.resumeRecording();
-      }
-    }
-  }
-  pauseRecording() {
-    this.isPaused = true;
-    this.recorder.pause();
-    this.updateStatusBar("paused");
-    vlog.debug("Voxtral: Recording paused (app backgrounded)");
-  }
-  resumeRecording() {
-    this.isPaused = false;
-    this.recorder.resume();
-    this.updateStatusBar("recording");
-    new import_obsidian10.Notice("Recording resumed");
-    vlog.debug("Voxtral: Recording resumed (app foregrounded)");
-  }
-  clearFocusPauseTimer() {
-    if (this.focusPauseTimer) {
-      window.clearTimeout(this.focusPauseTimer);
-      this.focusPauseTimer = null;
-    }
-  }
-  // ── Typing mute (prevent keyboard noise from being transcribed) ──
-  handleTypingMute(e) {
-    if (isSlotActive()) {
-      const slot = getActiveSlot();
-      if (e.key === "Escape") {
-        e.preventDefault();
-        cancelSlot();
-        this.updateStatusBar("recording");
-        return;
-      }
-      if ((slot == null ? void 0 : slot.def.exitTrigger) === "voice") {
-        return;
-      }
-      const isEnterExit = (slot == null ? void 0 : slot.def.exitTrigger) === "enter" || (slot == null ? void 0 : slot.def.exitTrigger) === "enter-or-space";
-      const isSpaceExit = (slot == null ? void 0 : slot.def.exitTrigger) === "space" || (slot == null ? void 0 : slot.def.exitTrigger) === "enter-or-space";
-      if (e.key === "Enter" && isEnterExit || e.key === " " && isSpaceExit) {
-        e.preventDefault();
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
-        if (view) {
-          closeSlot(view.editor);
-          if (this.realtimeSession) {
-            this.realtimeSession.flushAfterSlot(view.editor);
-          }
-          if (this.dualDelaySession) {
-            this.dualDelaySession.flushAfterSlot(view.editor);
-          }
-        }
-        this.updateStatusBar("recording");
-        return;
-      }
-      return;
-    }
-    if (!this.isRecording || this.isPaused) return;
-    if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta" || e.ctrlKey || e.metaKey) {
-      return;
-    }
-    if (e.key === "Enter" && this.settings.enterToSend && this.effectiveMode === "batch" && !this.isTypingMuted && !this.typingResumeTimer) {
-      e.preventDefault();
-      void this.sendChunk();
-      return;
-    }
-    if (e.key === "Escape" || e.key === "Tab" || e.key === "Enter" || e.key === "Backspace" || e.key === "Delete" || e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End" || e.key === "PageUp" || e.key === "PageDown" || e.key.startsWith("F") && e.key.length <= 3) {
-      if (this.isTypingMuted && this.typingResumeTimer) {
-        window.clearTimeout(this.typingResumeTimer);
-        this.typingResumeTimer = window.setTimeout(() => {
-          this.typingResumeTimer = null;
-          if (this.isRecording && this.isTypingMuted && !this.isPaused) {
-            this.isTypingMuted = false;
-            this.recorder.unmute();
-            this.recordingIndicator.setState("recording");
-          }
-        }, this.settings.typingCooldownMs);
-      }
-      return;
-    }
-    if (!this.isTypingMuted) {
-      this.isTypingMuted = true;
-      this.recorder.mute();
-      this.recordingIndicator.setState("paused");
-    }
-    if (this.typingResumeTimer) {
-      window.clearTimeout(this.typingResumeTimer);
-    }
-    this.typingResumeTimer = window.setTimeout(() => {
-      this.typingResumeTimer = null;
-      if (this.isRecording && this.isTypingMuted && !this.isPaused) {
-        this.isTypingMuted = false;
-        this.recorder.unmute();
-        this.recordingIndicator.setState("recording");
-      }
-    }, this.settings.typingCooldownMs);
-  }
-  // ── Recording toggle ──
-  async toggleRecording() {
-    if (this.isRecording) {
-      await this.stopRecording();
-    } else {
-      await this.startRecording();
-    }
-  }
+  // ── Recording session prologue/epilogue (drives RecordingController) ──
   /**
    * If text is selected when dictation starts, delete it and collapse the
    * cursor to where the selection began — mirroring how typing replaces a
@@ -8906,19 +9998,25 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     editor.replaceRange("", from, to);
     editor.setCursor(from);
   }
-  async startRecording() {
-    this.sessionForcedBatch = false;
+  /**
+   * Obsidian-side prologue for a recording session (VX_E31_S1), run by
+   * `RecordingController.start()` before any recorder/session work: the
+   * key check, the target editor, and the per-note language/style/
+   * vocabulary overlay. Returns the editor to dictate into, or `null` when
+   * the session must not start — the reason is shown here, and the
+   * controller stays in `idle`.
+   */
+  prepareRecordingSession() {
     if (!this.settings.apiKey && !isLocalMode(this.settings)) {
       new import_obsidian10.Notice("Please set your API key in the plugin settings.");
-      return;
+      return null;
     }
     const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
     if (!view) {
       new import_obsidian10.Notice("Open a note first to start dictating.");
-      return;
+      return null;
     }
     const editor = view.editor;
-    this.currentEditor = editor;
     this.replaceSelectionBeforeDictation(editor);
     const resolved = this.resolveEffectiveLanguageForFile(view.file);
     this.activeLanguage = resolved.language;
@@ -8927,74 +10025,52 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
         `Unknown voxtral-language '${resolved.invalidValue}' \u2014 using ${this.settings.language}`
       );
     }
-    setLanguage(this.activeLanguage);
+    this.commands.setLanguage(this.activeLanguage);
     this.refreshHelpView(this.activeLanguage);
     this.sessionStyleInstruction = this.resolveEffectiveStyleForFile(view.file);
     this.sessionVocabularyTerms = this.resolveEffectiveVocabulary(view.file);
-    try {
-      if (this.effectiveMode === "realtime") {
-        try {
-          await this.startRealtimeRecording(editor);
-        } catch (e) {
-          if (!(e instanceof RealtimeTokenError)) throw e;
-          vlog.warn(
-            "Voxtral: realtime token mint failed \u2014 falling back to batch mode for this session",
-            e
-          );
-          new import_obsidian10.Notice(
-            `Realtime unavailable: ${e.message} \u2014 falling back to batch mode for this session.`
-          );
-          this.sessionForcedBatch = true;
-          await this.startBatchRecording();
-          this.addSendButton();
-        }
+    return editor;
+  }
+  /**
+   * Obsidian-side epilogue, run by `RecordingController` once the session
+   * is live: the help-panel auto-open and the active-microphone notice.
+   * `mode` is the controller's effective mode, so a realtime session that
+   * fell back to batch (VX_E22_S8) shows the batch explainer.
+   */
+  onRecordingStarted(mode) {
+    const shouldAutoOpenHelp = import_obsidian10.Platform.isMobile ? this.settings.autoOpenHelpMobile : this.settings.autoOpenHelpDesktop;
+    if (shouldAutoOpenHelp) {
+      void this.openHelpPanel({ keepEditorFocus: true, skipIfOpen: true });
+    }
+    const micName = this.recorder.activeMicLabel;
+    if (mode === "batch") {
+      const enterHint = this.settings.enterToSend ? " Press Enter (when not typing) or tap send to transcribe chunks." : " Tap send to transcribe chunks while you keep talking.";
+      if (import_obsidian10.Platform.isMobile && !this.settings.dismissMobileBatchNotice) {
+        const frag = activeDocument.createDocumentFragment();
+        frag.createSpan({
+          text: `Recording started (${micName}). Tap the send button (\u2191) to transcribe chunks while you keep talking.`
+        });
+        frag.createEl("br");
+        const dismiss = frag.createEl("a", {
+          text: "Don\u2019t show again",
+          href: "#",
+          cls: "voxtral-dismiss-link"
+        });
+        dismiss.addEventListener("click", (e) => {
+          e.preventDefault();
+          this.settings.dismissMobileBatchNotice = true;
+          void this.saveSettings();
+        });
+        new import_obsidian10.Notice(frag, 8e3);
       } else {
-        await this.startBatchRecording();
-        this.addSendButton();
-      }
-      this.isRecording = true;
-      this.chunkIndex = 0;
-      this.consecutiveFailures = 0;
-      this.updateStatusBar("recording");
-      const shouldAutoOpenHelp = import_obsidian10.Platform.isMobile ? this.settings.autoOpenHelpMobile : this.settings.autoOpenHelpDesktop;
-      if (shouldAutoOpenHelp) {
-        void this.openHelpPanel({ keepEditorFocus: true, skipIfOpen: true });
-      }
-      const micName = this.recorder.activeMicLabel;
-      if (this.effectiveMode === "batch") {
-        const enterHint = this.settings.enterToSend ? " Press Enter (when not typing) or tap send to transcribe chunks." : " Tap send to transcribe chunks while you keep talking.";
-        if (import_obsidian10.Platform.isMobile && !this.settings.dismissMobileBatchNotice) {
-          const frag = activeDocument.createDocumentFragment();
-          frag.createSpan({
-            text: `Recording started (${micName}). Tap the send button (\u2191) to transcribe chunks while you keep talking.`
-          });
-          frag.createEl("br");
-          const dismiss = frag.createEl("a", {
-            text: "Don\u2019t show again",
-            href: "#",
-            cls: "voxtral-dismiss-link"
-          });
-          dismiss.addEventListener("click", (e) => {
-            e.preventDefault();
-            this.settings.dismissMobileBatchNotice = true;
-            void this.saveSettings();
-          });
-          new import_obsidian10.Notice(frag, 8e3);
-        } else {
-          new import_obsidian10.Notice(
-            `Voxtral: Recording started (${micName})
+        new import_obsidian10.Notice(
+          `Voxtral: Recording started (${micName})
 ` + enterHint.trim(),
-            6e3
-          );
-        }
-      } else {
-        new import_obsidian10.Notice(`Recording started (${micName})`);
+          6e3
+        );
       }
-    } catch (e) {
-      vlog.error("Voxtral: Failed to start recording", e);
-      new import_obsidian10.Notice(`Could not start recording: ${String(e)}`);
-      this.updateStatusBar("idle");
-      this.restoreGlobalLanguage();
+    } else {
+      new import_obsidian10.Notice(`Recording started (${micName})`);
     }
   }
   /**
@@ -9005,207 +10081,11 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
    * fails to start.
    */
   restoreGlobalLanguage() {
-    setLanguage(this.settings.language);
+    this.commands.setLanguage(this.settings.language);
     this.refreshHelpView();
     this.activeLanguage = null;
     this.sessionVocabularyTerms = [];
     this.sessionStyleInstruction = void 0;
-  }
-  async stopRecording() {
-    this.isRecording = false;
-    this.isPaused = false;
-    this.isTypingMuted = false;
-    if (this.typingResumeTimer) {
-      window.clearTimeout(this.typingResumeTimer);
-      this.typingResumeTimer = null;
-    }
-    this.clearFocusPauseTimer();
-    this.updateStatusBar("processing");
-    this.removeSendButton();
-    try {
-      if (this.effectiveMode === "realtime") {
-        await this.stopRealtimeRecording();
-      } else {
-        await this.stopBatchRecording();
-      }
-    } catch (e) {
-      vlog.error("Voxtral: Failed to stop recording", e);
-      new import_obsidian10.Notice(`Error stopping recording: ${String(e)}`);
-    }
-    this.restoreGlobalLanguage();
-    this.currentEditor = null;
-    if (this.settings.autoCorrect) {
-      this.tracker.reset();
-    }
-    this.updateStatusBar("idle");
-    new import_obsidian10.Notice("Recording stopped");
-  }
-  // ── Tap-to-send: flush current audio chunk without stopping ──
-  async sendChunk() {
-    if (!this.isRecording || this.effectiveMode !== "batch") {
-      return;
-    }
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
-    if (!view) return;
-    const editor = view.editor;
-    this.chunkIndex++;
-    try {
-      this.updateStatusBar("processing");
-      const blob = await this.recorder.flushChunk();
-      if (blob.size === 0) {
-        this.updateStatusBar("recording");
-        return;
-      }
-      let text = await transcribeBatch(blob, this.recordingSettings, this.httpRequest);
-      if (text && isLikelyHallucination(
-        text,
-        this.recorder.lastChunkDurationSec
-      )) {
-        vlog.warn("Voxtral: Discarding hallucinated chunk");
-        this.updateStatusBar("recording");
-        return;
-      }
-      const hasCommand = text ? matchCommand(text) !== null : false;
-      if (this.settings.autoCorrect && text && !hasCommand) {
-        text = await correctText(text, this.recordingSettings, this.httpRequest);
-        text = this.applyWikilinksIfEnabled(text, this.recordingSettings);
-      }
-      this.updateStatusBar("recording");
-      if (text) {
-        const { stop: stopRequested } = this.batchInserter.commit(
-          editor,
-          this.tracker,
-          text,
-          void 0,
-          (commandId) => this.handleCommandExecuted(commandId)
-        );
-        if (stopRequested) {
-          await this.stopRecording();
-          return;
-        }
-      }
-    } catch (e) {
-      vlog.error("Voxtral: Chunk transcription failed", e);
-      this.updateStatusBar("recording");
-      new import_obsidian10.Notice(`Chunk failed: ${String(e)}`);
-    }
-  }
-  // ── Realtime recording (delegates to session classes) ──
-  async startRealtimeRecording(editor) {
-    var _a, _b;
-    this.tracker.reset();
-    resetCommandUndo();
-    try {
-      if (this.settings.dualDelay) {
-        this.dualDelaySession = new DualDelaySession(
-          this.recordingSettings,
-          this.tracker,
-          this.sessionCallbacks,
-          this.httpRequest
-        );
-        await this.dualDelaySession.start(editor);
-      } else {
-        this.realtimeSession = new RealtimeSession(
-          this.recordingSettings,
-          this.tracker,
-          this.sessionCallbacks,
-          this.httpRequest
-        );
-        await this.realtimeSession.start(editor);
-      }
-      const deviceId = this.settings.microphoneDeviceId || void 0;
-      await this.recorder.start(deviceId, (pcmData) => {
-        if (this.dualDelaySession) {
-          this.dualDelaySession.sendAudio(pcmData);
-        } else if (this.realtimeSession) {
-          this.realtimeSession.sendAudio(pcmData);
-        }
-      }, this.settings.noiseSuppression);
-    } catch (e) {
-      try {
-        await ((_a = this.dualDelaySession) == null ? void 0 : _a.stop());
-        await ((_b = this.realtimeSession) == null ? void 0 : _b.stop(editor));
-      } catch (cleanupError) {
-        vlog.error(
-          "Voxtral: cleanup after failed start failed",
-          cleanupError
-        );
-      }
-      this.dualDelaySession = null;
-      this.realtimeSession = null;
-      await this.recorder.stop();
-      throw e;
-    }
-    if (this.recorder.fallbackUsed) {
-      new import_obsidian10.Notice("Selected mic unavailable \u2014 using default");
-    }
-  }
-  async stopRealtimeRecording() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
-    if (this.dualDelaySession) {
-      await this.dualDelaySession.stop();
-      this.dualDelaySession = null;
-    } else if (this.realtimeSession) {
-      const editor = view == null ? void 0 : view.editor;
-      if (editor) {
-        await this.realtimeSession.stop(editor);
-      }
-      this.realtimeSession = null;
-    }
-    await this.recorder.stop();
-    if (this.settings.autoCorrect && view) {
-      await this.tracker.autoCorrectAfterStop(view.editor, this.recordingSettings, this.httpRequest);
-    }
-  }
-  // ── Batch recording ──
-  async startBatchRecording() {
-    this.batchInserter.reset();
-    resetCommandUndo();
-    const deviceId = this.settings.microphoneDeviceId || void 0;
-    await this.recorder.start(deviceId, void 0, this.settings.noiseSuppression);
-    if (this.recorder.fallbackUsed) {
-      new import_obsidian10.Notice("Selected mic unavailable \u2014 using default");
-    }
-  }
-  async stopBatchRecording() {
-    const blob = await this.recorder.stop();
-    if (blob.size === 0) {
-      new import_obsidian10.Notice("No audio recorded");
-      return;
-    }
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
-    if (!view) {
-      new import_obsidian10.Notice("No active note found");
-      return;
-    }
-    const editor = view.editor;
-    try {
-      let text = await transcribeBatch(blob, this.recordingSettings, this.httpRequest);
-      if (text && isLikelyHallucination(
-        text,
-        this.recorder.lastChunkDurationSec
-      )) {
-        vlog.warn("Voxtral: Discarding hallucinated batch");
-        return;
-      }
-      const hasCommand = text ? matchCommand(text) !== null : false;
-      if (this.settings.autoCorrect && text && !hasCommand) {
-        text = await correctText(text, this.recordingSettings, this.httpRequest);
-        text = this.applyWikilinksIfEnabled(text, this.recordingSettings);
-      }
-      if (text) {
-        this.batchInserter.commit(
-          editor,
-          this.tracker,
-          text,
-          void 0,
-          (commandId) => this.handleCommandExecuted(commandId)
-        );
-      }
-    } catch (e) {
-      vlog.error("Voxtral: Batch transcription failed", e);
-      new import_obsidian10.Notice(`Transcription failed: ${String(e)}`);
-    }
   }
   // ── Text correction ──
   async correctSelection(editor) {
@@ -9331,7 +10211,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     const now = /* @__PURE__ */ new Date();
     const pad = (n) => String(n).padStart(2, "0");
     const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-    const fileName = `voxtral-logs-${ts}.md`;
+    const path = uniqueNotePath(this.app, "", `voxtral-logs-${ts}`);
     const content = `# Voxtral Transcribe \u2014 Log Export
 
 Exported: ${now.toISOString()}
@@ -9341,7 +10221,7 @@ Entries: ${count}
 ${getLogText()}
 \`\`\`
 `;
-    const file = await this.app.vault.create(fileName, content);
+    const file = await this.app.vault.create(path, content);
     await this.app.workspace.getLeaf(true).openFile(file);
     new import_obsidian10.Notice(`${count} log entries saved to ${file.path}`);
   }
@@ -9372,12 +10252,18 @@ ${getLogText()}
       editor = view.editor;
       noteFile = view.file;
     }
-    this.fileTranscriptVocabularyTerms = this.resolveEffectiveVocabulary(noteFile);
-    this.fileTranscriptStyleInstruction = this.resolveEffectiveStyleForFile(noteFile);
+    const context = {
+      vocabularyTerms: this.resolveEffectiveVocabulary(noteFile),
+      // Per-note style override (VX_E8_S4): same output-target note as the
+      // vocabulary collection above — "newNote" output has no note yet, so
+      // no frontmatter to read.
+      styleInstruction: this.resolveEffectiveStyleForFile(noteFile)
+    };
     const target = editor;
     await this.fileTranscriptionService.transcribe(
       file,
-      target ? (text) => target.replaceSelection(text + "\n") : null
+      target ? (text) => target.replaceSelection(text + "\n") : null,
+      context
     );
   }
   // ── Watch folder (VX_E27_S14) ──
@@ -9425,12 +10311,17 @@ ${getLogText()}
    * Start transcription for a watch-folder file into a new linked note —
    * there is no output-target note yet, so this mirrors the "newNote" case
    * in `transcribeFileFromMenu` (`resolveEffectiveVocabulary`/
-   * `resolveEffectiveStyleForFile` called with `null`).
+   * `resolveEffectiveStyleForFile` called with `null`). A sync can drop
+   * several files at once in auto mode — each one's context travels with
+   * its own `transcribe()` call, and the service queues them (VX_E31_S4)
+   * instead of a still-running file picking up the next file's context.
    */
   startWatchFolderTranscription(file) {
-    this.fileTranscriptVocabularyTerms = this.resolveEffectiveVocabulary(null);
-    this.fileTranscriptStyleInstruction = this.resolveEffectiveStyleForFile(null);
-    void this.fileTranscriptionService.transcribe(file, null);
+    const context = {
+      vocabularyTerms: this.resolveEffectiveVocabulary(null),
+      styleInstruction: this.resolveEffectiveStyleForFile(null)
+    };
+    void this.fileTranscriptionService.transcribe(file, null, context);
   }
   /**
    * Whether a "(transcript)" note already exists for `file` — the
@@ -9503,12 +10394,16 @@ ${getLogText()}
     }
     const editor = view.editor;
     editor.setCursor({ line: ref.endLine, ch: editor.getLine(ref.endLine).length });
-    this.fileTranscriptVocabularyTerms = this.resolveEffectiveVocabulary(note);
-    this.fileTranscriptStyleInstruction = this.resolveEffectiveStyleForFile(note);
+    const context = {
+      vocabularyTerms: this.resolveEffectiveVocabulary(note),
+      // Per-note style override (VX_E8_S4): the embed's own note is the
+      // output-target note here too (see the vocabulary collection above).
+      styleInstruction: this.resolveEffectiveStyleForFile(note)
+    };
     await this.fileTranscriptionService.transcribe(target, (text) => {
       editor.replaceSelection(`
 ${text}`);
-    });
+    }, context);
   }
   // ── Help panel host (read/write the per-platform auto-open setting) ──
   /** HelpPanelHost: effective language — per-note override during recording, else the global setting. */
@@ -9584,7 +10479,7 @@ ${text}`);
     this.statusBarEl.removeClass("voxtral-processing", "voxtral-paused");
     this.commandFeedbackTimer = window.setTimeout(() => {
       this.commandFeedbackTimer = null;
-      this.updateStatusBar(this.isRecording ? "recording" : "idle");
+      this.updateStatusBar(this.recording.isRecording() ? "recording" : "idle");
     }, 1500);
   }
   /**
@@ -9595,9 +10490,9 @@ ${text}`);
    */
   performVoiceUndo(editorOverride) {
     var _a, _b, _c;
-    const editor = (_c = (_b = editorOverride != null ? editorOverride : this.currentEditor) != null ? _b : (_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) != null ? _c : null;
+    const editor = (_c = (_b = editorOverride != null ? editorOverride : this.recording.currentEditor) != null ? _b : (_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) != null ? _c : null;
     if (!editor) return;
-    const result = undoLastCommand(editor);
+    const result = this.commands.undoLastCommand(editor);
     switch (result) {
       case "reverted":
         new import_obsidian10.Notice("Undid last voice command");
@@ -9617,7 +10512,7 @@ ${text}`);
    */
   performCorrectionUndo(editorOverride) {
     var _a, _b, _c;
-    const editor = (_c = (_b = editorOverride != null ? editorOverride : this.currentEditor) != null ? _b : (_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) != null ? _c : null;
+    const editor = (_c = (_b = editorOverride != null ? editorOverride : this.recording.currentEditor) != null ? _b : (_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) != null ? _c : null;
     if (!editor) return;
     const result = this.tracker.undoLastCorrection(editor);
     switch (result) {
@@ -9634,83 +10529,17 @@ ${text}`);
   }
   // ── Status bar ──
   updateStatusBar(state) {
-    var _a, _b;
     this.recordingIndicator.setState(INDICATOR_STATE_MAP[state]);
     if (!this.statusBarEl) return;
-    switch (state) {
-      case "idle":
-        this.statusBarEl.empty();
-        (0, import_obsidian10.setIcon)(this.statusBarEl, "mic");
-        this.statusBarEl.removeClass(
-          "voxtral-recording",
-          "voxtral-processing",
-          "voxtral-paused",
-          "voxtral-reconnecting"
-        );
-        break;
-      case "recording": {
-        if (isSlotActive()) {
-          const slot = getActiveSlot();
-          const label = (_a = slot == null ? void 0 : slot.commandId) != null ? _a : "slot";
-          this.statusBarEl.setText(`\u25CF ${label} \u2014 type, then Enter`);
-          this.statusBarEl.addClass("voxtral-recording");
-          this.statusBarEl.removeClass(
-            "voxtral-processing",
-            "voxtral-paused",
-            "voxtral-reconnecting"
-          );
-          break;
-        }
-        const mic = this.recorder.activeMicLabel;
-        const short = mic.length > 25 ? mic.slice(0, 22) + "..." : mic;
-        this.statusBarEl.setText(`\u25CF ${short}`);
-        this.statusBarEl.addClass("voxtral-recording");
-        this.statusBarEl.removeClass(
-          "voxtral-processing",
-          "voxtral-paused",
-          "voxtral-reconnecting"
-        );
-        break;
-      }
-      case "slot": {
-        const slot = getActiveSlot();
-        const label = (_b = slot == null ? void 0 : slot.commandId) != null ? _b : "slot";
-        this.statusBarEl.setText(`\u25CF ${label} \u2014 type, then Enter`);
-        this.statusBarEl.addClass("voxtral-recording");
-        this.statusBarEl.removeClass(
-          "voxtral-processing",
-          "voxtral-paused",
-          "voxtral-reconnecting"
-        );
-        break;
-      }
-      case "paused":
-        this.statusBarEl.setText("\u23F8 Paused");
-        this.statusBarEl.addClass("voxtral-paused");
-        this.statusBarEl.removeClass(
-          "voxtral-recording",
-          "voxtral-processing",
-          "voxtral-reconnecting"
-        );
-        break;
-      case "processing":
-        this.statusBarEl.setText("\u23F3 Processing...");
-        this.statusBarEl.addClass("voxtral-processing");
-        this.statusBarEl.removeClass(
-          "voxtral-recording",
-          "voxtral-paused",
-          "voxtral-reconnecting"
-        );
-        break;
-      case "reconnecting":
-        this.statusBarEl.setText("\u27F3 reconnecting...");
-        this.statusBarEl.addClass("voxtral-reconnecting");
-        this.statusBarEl.removeClass(
-          "voxtral-recording",
-          "voxtral-processing",
-          "voxtral-paused"
-        );
-        break;
+    const spec = STATUS_BAR_STATES[state];
+    this.statusBarEl.removeClass(...STATUS_BAR_CLASSES);
+    if (spec.cls) this.statusBarEl.addClass(spec.cls);
+    const text = spec.text(this.recorder, this.commands);
+    if (text === null) {
+      this.statusBarEl.empty();
+      (0, import_obsidian10.setIcon)(this.statusBarEl, "mic");
+    } else {
+      this.statusBarEl.setText(text);
     }
   }
 };

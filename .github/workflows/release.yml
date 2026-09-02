@@ -13,7 +13,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Extract release notes for this version
         # Pull just this version's section out of CHANGELOG.md (the tag is the
         # bare version, e.g. "1.4.2") for use as the release body. Falls back to
@@ -28,13 +28,13 @@ jobs:
               f { print }
             ' CHANGELOG.md > RELEASE_NOTES.md
           fi
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2.4.0
         with:
           subject-path: |
             main.js
             manifest.json
             styles.css
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           body_path: RELEASE_NOTES.md
           generate_release_notes: true

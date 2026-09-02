@@ -4,6 +4,98 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.13.0] - 2026-09-02
+
+- **Sharper plugin description and README opening.** The directory listing
+  now leads with what you get ("Your notes, done when you stop talking")
+  and names the engine, and the README opens with the problem, a
+  three-step start and one clear next step.
+- **Batch mode keeps your words when a correction fails.** In tap-to-send
+  mode, a failed correction request used to drop the whole chunk with a
+  "Chunk failed" notice; the raw transcription is now inserted instead, as
+  realtime mode already did. Batch, realtime and dual-delay dictation now
+  share one session machinery under the hood.
+- **Small dictation fixes.** Realtime recording now checks the actual
+  microphone sample rate and resamples to 16 kHz when the platform ignores
+  the requested rate, instead of silently sending mismatched audio. Realtime
+  dictation no longer occasionally duplicates a word when the final
+  transcription re-punctuates the streamed text. The correction pass after
+  stopping scales its timeout with the dictated length, corrects sections
+  concurrently, and no longer re-corrects everything when triggered twice;
+  if every correction fails, the dictated text stays available for a manual
+  "Correct dictated text". Typing a capital F now mutes the microphone like
+  any other letter. Exporting logs twice within a second no longer fails.
+- **Stopping a recording is now reliable, and batch text lands in the note
+  you started in.** Stopping realtime dictation while no note was focused
+  (settings open, a non-markdown view) used to skip closing the connection;
+  it now always closes and flushes. Batch mode (tap-to-send) now inserts
+  into the note where the recording started, even if you switched notes
+  in the meantime, matching realtime mode. A recorder that never reports
+  its final chunk no longer leaves the status bar stuck on "Processing".
+  Realtime dictation also stops buffering an unused audio file in memory
+  during long sessions.
+- **File transcriptions run one at a time.** Several files arriving at once
+  (for example through the watch folder) are queued with a notice instead
+  of running in parallel and sharing settings; each file keeps its own
+  vocabulary and style.
+- **A double click on the microphone no longer opens the microphone twice.**
+  Clicking the ribbon icon (or pressing the hotkey) again while a recording
+  was still starting up used to start a second capture and leak the first
+  one, leaving the microphone open. Recording start/stop is now driven by an
+  explicit state machine that ignores a second start and lets a stop wait
+  for an in-flight start to finish.
+- **Dual-delay mode gets the same dropout protection as single-stream
+  realtime.** A silently dead connection is now detected per stream within
+  a minute and reconnected, and audio spoken during a reconnect is buffered
+  and replayed, so the "no longer drops out" fix from 1.12.1 now covers
+  both realtime modes. Two lifecycle leaks are closed as well: a connection
+  attempt that times out is now really cancelled (a late server reply no
+  longer opens a second, orphaned connection with its own keep-alive), and
+  stopping while a reconnect is in flight no longer leaves a live
+  connection behind.
+- **Log export now includes the realtime connection log, and never your
+  text.** WebSocket events (connect, reconnect, streaming errors) used to go
+  only to the developer console, so "Export logs to file" missed exactly
+  what a dropout investigation needs; they now land in the exportable log.
+  No log line contains transcript text anymore (only lengths), error
+  details are kept instead of being flattened to `{}`, and the export
+  redaction also covers quoted text with escaped quotes.
+- **Complete README.** The README now carries a full command reference
+  (every palette command and every voice command by category, with example
+  phrases), a settings reference per settings section with defaults, short
+  sections for listen back, undo auto-correction, log export, test
+  connection, update highlights and local server mode, and a troubleshooting
+  section listing the built-in diagnostics.
+- **Your API key is never sent over an unencrypted connection.** An API
+  base URL of the form `http://<remote host>` is now refused by every call
+  that carries the key (models, voices, transcription, correction, speech,
+  realtime token), with a clear message in the settings tab and in "Test
+  connection". Plain `http://` stays allowed for local addresses (localhost,
+  private-network ranges, `.local`), so a local vLLM or Ollama server keeps
+  working.
+- **The spoken stop command now works in every language in realtime mode.**
+  Single-stream realtime dictation only recognized "stop opname" / "stop
+  recording" (Dutch and English) through a separate hard-coded list; in the
+  other eleven languages the command was matched but never acted on, so the
+  recording kept running. The session now uses the same command matcher as
+  batch and dual-delay mode. A sentence that merely contains the words
+  ("we should improve the stop recording button") no longer stops the
+  recording either.
+- **Built-in voice commands are read-only in settings.** The table and
+  callout commands showed Edit and Delete buttons, but every edit or
+  deletion was silently undone at the next restart, because built-ins are
+  refreshed from the plugin's defaults on load. They now show why, and
+  "Reset built-ins" remains available; add a custom command to use your own
+  trigger.
+- **Correct privacy note in the help panel.** The panel said your API key is
+  stored in `data.json`; since 1.8.1 it lives in Obsidian's secret storage on
+  this device and `data.json` only holds a reference. The note now says so in
+  all thirteen languages.
+- **README fixes.** No `Ctrl+Space` shortcut exists (assign one under
+  Settings → Hotkeys); "Correct entire note" is "Correct dictated text";
+  Enter = tap-to-send is off by default; auto-correction is Off / Light /
+  Standard; building from source installs from the repository root.
+
 ## [1.12.2] - 2026-08-19
 
 - **"Correct selected text" now works on long selections.** The command
