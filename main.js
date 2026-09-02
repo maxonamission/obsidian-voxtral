@@ -9225,8 +9225,14 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       return;
     }
     try {
-      new import_obsidian10.Notice("Correcting...");
-      const corrected = await correctText(selection, this.settings, this.httpRequest);
+      if (selection.length > 1e4) {
+        new import_obsidian10.Notice("Correcting... This can take a few minutes for long text.");
+      } else {
+        new import_obsidian10.Notice("Correcting...");
+      }
+      const corrected = await correctText(selection, this.settings, this.httpRequest, {
+        timeoutMs: correctionTimeoutMs(selection.length)
+      });
       if (corrected) {
         editor.replaceSelection(corrected);
         new import_obsidian10.Notice("Selection corrected");

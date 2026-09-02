@@ -4,6 +4,14 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.12.2] - 2026-08-19
+
+- **"Correct selected text" now works on long selections.** The command
+  timed out on long text — such as the transcript of an hour-long
+  conversation. It now uses the same length-scaled correction budget as
+  file transcription (up to 20 minutes for very long text), and says up
+  front when a long correction may take a few minutes.
+
 ## [1.12.1] - 2026-08-19
 
 - **Realtime dictation no longer drops out mid-session.** Two causes fixed:
