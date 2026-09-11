@@ -5015,6 +5015,93 @@ function flattenForSpeech(markdown) {
   t = t.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   return t;
 }
+function textFromParagraph(lines, line) {
+  if (lines.length === 0) return "";
+  const at = Math.min(Math.max(line, 0), lines.length - 1);
+  let start = at;
+  if (lines[at].trim() === "") {
+    while (start < lines.length && lines[start].trim() === "") start++;
+    if (start >= lines.length) return "";
+  } else {
+    while (start > 0 && lines[start - 1].trim() !== "") start--;
+  }
+  return lines.slice(start).join("\n").trim();
+}
+
+// src/tts-chunker.ts
+var MIN_CHUNK_CHARS = 200;
+var MAX_CHUNK_CHARS = 1e3;
+var SENTENCE = /[^.!?…]+[.!?…]*\s*/g;
+function splitForSpeech(text) {
+  const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim()).filter((p) => p.length > 0);
+  const pieces = [];
+  for (const paragraph of paragraphs) {
+    if (paragraph.length <= MAX_CHUNK_CHARS) {
+      pieces.push(paragraph);
+      continue;
+    }
+    pieces.push(...splitLongParagraph(paragraph));
+  }
+  return mergeShortPieces(pieces);
+}
+function splitLongParagraph(paragraph) {
+  var _a;
+  const sentences = (_a = paragraph.match(SENTENCE)) != null ? _a : [paragraph];
+  const out = [];
+  let current = "";
+  for (const sentence of sentences) {
+    for (const part of splitLongSentence(sentence.trim())) {
+      if (current === "") {
+        current = part;
+      } else if (current.length + 1 + part.length <= MAX_CHUNK_CHARS) {
+        current = `${current} ${part}`;
+      } else {
+        out.push(current);
+        current = part;
+      }
+    }
+  }
+  if (current !== "") out.push(current);
+  return out;
+}
+function splitLongSentence(sentence) {
+  if (sentence.length <= MAX_CHUNK_CHARS) return [sentence];
+  const out = [];
+  let current = "";
+  for (const word of sentence.split(/\s+/)) {
+    if (current === "") {
+      current = word;
+    } else if (current.length + 1 + word.length <= MAX_CHUNK_CHARS) {
+      current = `${current} ${word}`;
+    } else {
+      out.push(current);
+      current = word;
+    }
+  }
+  if (current !== "") out.push(current);
+  return out;
+}
+function mergeShortPieces(pieces) {
+  const out = [];
+  let current = "";
+  for (const piece of pieces) {
+    if (current === "") {
+      current = piece;
+      continue;
+    }
+    const merged = `${current}
+
+${piece}`;
+    if (current.length < MIN_CHUNK_CHARS && merged.length <= MAX_CHUNK_CHARS) {
+      current = merged;
+    } else {
+      out.push(current);
+      current = piece;
+    }
+  }
+  if (current !== "") out.push(current);
+  return out;
+}
 
 // src/file-transcription-service.ts
 var import_obsidian7 = require("obsidian");
@@ -6104,13 +6191,128 @@ function uniqueNotePath(app, folder, base) {
 
 // src/playback-controller.ts
 var import_obsidian8 = require("obsidian");
+var MAX_CACHED_CHUNKS = 12;
+var SKIP_BACK_RESTART_THRESHOLD_S = 2;
 var PlaybackController = class {
   constructor() {
     this.ttsCtx = null;
-    this.ttsSource = null;
+    /** The chunk currently sounding (single-buffer playback, or the
+     * "current" chunk of a queue once promoted from `scheduledSource`). */
+    this.currentSource = null;
+    this.state = "idle";
+    this.stateChangeListener = null;
+    this.progressChangeListener = null;
+    /** Monotonic id of the current "listen back" attempt, bumped by every
+     * `stopPlayback()`. Callers that kick off an async fetch keep the id they
+     * got from `beginLoading()` and hand it back to `playAudioBytes()`/
+     * `playChunks()`, so audio from a synthesis the user has already stopped
+     * (or replaced) is dropped instead of starting playback after the fact. */
+    this.generation = 0;
+    // ── Chunk queue (VX_E26_S4) ──
+    this.queueChunks = [];
+    this.queueSynthesize = null;
+    /** Decoded audio per chunk TEXT (see MAX_CACHED_CHUNKS on why not index). */
+    this.queueCache = /* @__PURE__ */ new Map();
+    /** Index of the chunk currently current (playing, or about to be once
+     * its synthesis/decode finishes). `-1` outside a running queue — that's
+     * what makes `getProgress()` return `null`. */
+    this.queueIndex = -1;
+    /** `ctx.currentTime` at which `currentSource.start()` was called — the
+     * reference point for `skipBackward()`'s "more than 2s played" rule.
+     * `suspend()` freezes `ctx.currentTime` itself, so pause time is
+     * excluded automatically without any bookkeeping here. */
+    this.currentChunkStartTime = 0;
+    /** The next chunk's source, already armed with `start(when)` while the
+     * current one is still playing (see `prefetchAhead`) — not yet
+     * "current". Kept separate from `currentSource` so `skipForward()`/
+     * `skipBackward()` can stop both the audible and the pre-armed source. */
+    this.scheduledSource = null;
+    this.scheduledIndex = -1;
+    this.scheduledStartTime = 0;
+    /** `ctx.currentTime` to hand the next chunk's `start()` call — the
+     * previous chunk's start time plus its buffer duration, updated every
+     * time a chunk gets armed. Chunks are always armed in index order, so a
+     * single running value is enough (a skip resets it explicitly). */
+    this.nextStartTime = 0;
+    /** Set when the current chunk finished playing before the next one had
+     * finished synthesizing (synthesis slower than that chunk's audio — the
+     * unavoidable-gap case). Whichever `prefetchAhead()` call finally arms
+     * that chunk promotes it immediately instead of waiting for an `ended`
+     * event that already fired. */
+    this.pendingAdvance = false;
+    /** Bumped by every `jumpTo()`. An async step that started before the
+     * latest jump (a slow fetch for the previous target, or a prefetch armed
+     * for the position we just left) checks this and bails, so tapping skip
+     * twice in quick succession can't leave two sources sounding at once. */
+    this.jumpSeq = 0;
   }
-  async playAudioBytes(bytes) {
+  /** Current playback state. */
+  getState() {
+    return this.state;
+  }
+  /** Current position in a running chunk queue, or `null` outside one. */
+  getProgress() {
+    if (this.queueIndex < 0 || this.queueChunks.length === 0) return null;
+    return { index: this.queueIndex, total: this.queueChunks.length };
+  }
+  /** Registers the single subscriber notified on every state transition
+   * (not called for a no-op "change" to the same state). A later call
+   * replaces the previous subscriber; a single one is all we need. */
+  onStateChange(listener) {
+    this.stateChangeListener = listener;
+  }
+  /**
+   * Registers the single subscriber notified whenever `getProgress()`'s
+   * result changes — separate from `onStateChange()` because moving to the
+   * next chunk mid-queue (see `promoteScheduled`) doesn't change the
+   * "playing" state itself, and the status bar's "3/12" counter still
+   * needs to advance when that happens.
+   */
+  onProgressChange(listener) {
+    this.progressChangeListener = listener;
+  }
+  setState(next) {
+    var _a;
+    if (this.state === next) return;
+    this.state = next;
+    (_a = this.stateChangeListener) == null ? void 0 : _a.call(this, next);
+  }
+  /** Updates `queueIndex` and notifies `onProgressChange()` — the single
+   * place every queue-index write goes through, so the counter can't fall
+   * out of sync with it. */
+  setQueueIndex(index) {
+    var _a;
+    if (this.queueIndex === index) return;
+    this.queueIndex = index;
+    (_a = this.progressChangeListener) == null ? void 0 : _a.call(this, this.getProgress());
+  }
+  /**
+   * Marks playback as "loading" ahead of an async fetch (the TTS network
+   * call) that will eventually hand bytes to `playAudioBytes()` or
+   * `playChunks()`. Without this, the loading state would only start once
+   * decoding itself begins, leaving the status bar blank while the
+   * "Generating audio…" notice is up. Tears down any current playback
+   * first, mirroring `playAudioBytes()`'s own replace-in-place behavior.
+   */
+  beginLoading() {
     this.stopPlayback();
+    this.setState("loading");
+    return this.generation;
+  }
+  /** True while `generation` is still the attempt in progress, i.e. nothing
+   * stopped or replaced playback since `beginLoading()` handed it out. */
+  isCurrent(generation) {
+    return this.generation === generation;
+  }
+  /**
+   * Decode `bytes` and play them, replacing any current playback. Pass the
+   * id returned by `beginLoading()` as `generation` to have bytes from a
+   * stopped or superseded attempt discarded instead of played.
+   */
+  async playAudioBytes(bytes, generation) {
+    if (generation !== void 0 && !this.isCurrent(generation)) return;
+    this.stopPlayback();
+    this.setState("loading");
     const ctx = new AudioContext();
     this.ttsCtx = ctx;
     try {
@@ -6124,10 +6326,11 @@ var PlaybackController = class {
       source.buffer = buffer;
       source.connect(ctx.destination);
       source.addEventListener("ended", () => {
-        if (this.ttsSource === source) this.stopPlayback();
+        if (this.currentSource === source) this.stopPlayback();
       });
-      this.ttsSource = source;
+      this.currentSource = source;
       source.start();
+      this.setState("playing");
     } catch (e) {
       vlog.error("Voxtral: audio playback failed", e);
       const head = Array.from(new Uint8Array(bytes.slice(0, 8))).map((b) => b.toString(16).padStart(2, "0")).join(" ");
@@ -6135,20 +6338,410 @@ var PlaybackController = class {
       this.stopPlayback();
     }
   }
-  /** Stop "listen back" playback and release the audio context. */
-  stopPlayback() {
-    if (this.ttsSource) {
+  /**
+   * Play `chunks` (from `splitForSpeech()`) as a queue: synthesize/decode
+   * the first chunk, start it, and resolve — the rest is fetched and
+   * scheduled on its own from there (see `prefetchAhead`). Throws only if
+   * the FIRST chunk fails to synthesize or decode, so callers keep their
+   * existing single-request error handling for that case; a later chunk
+   * failing shows its own Notice and stops the queue instead (see
+   * `handleChunkFailure`) without rejecting this promise.
+   *
+   * The cache carries over when `chunks` is the same queue as before (by
+   * content, not just reference) — e.g. the user retries the same "read
+   * selection aloud" after a chunk failed partway through — so a retry
+   * only re-fetches what actually failed. Anything else (a genuinely new
+   * selection) clears it: reusing an old buffer under the same numeric
+   * index would otherwise play the wrong text.
+   */
+  async playChunks(chunks, synthesize, generation) {
+    var _a;
+    if (generation !== void 0 && !this.isCurrent(generation)) return;
+    this.stopPlayback();
+    this.queueChunks = chunks;
+    this.queueSynthesize = synthesize;
+    this.pendingAdvance = false;
+    if (chunks.length === 0) return;
+    this.setState("loading");
+    const ctx = new AudioContext();
+    this.ttsCtx = ctx;
+    let buffer = (_a = this.queueCache.get(chunks[0])) != null ? _a : null;
+    if (!buffer) {
       try {
-        this.ttsSource.stop();
+        const bytes = await synthesize(chunks[0]);
+        if (this.ttsCtx !== ctx) return;
+        buffer = await ctx.decodeAudioData(bytes.slice(0));
+        if (this.ttsCtx !== ctx) return;
       } catch (e) {
+        if (this.ttsCtx === ctx) this.stopPlayback();
+        throw e;
       }
-      this.ttsSource.disconnect();
-      this.ttsSource = null;
+      this.cacheBuffer(chunks[0], buffer);
     }
+    if (ctx.state === "suspended") await ctx.resume();
+    if (this.ttsCtx !== ctx) return;
+    const startTime = ctx.currentTime;
+    this.startCurrentSource(ctx, 0, startTime, buffer);
+    this.nextStartTime = startTime + buffer.duration;
+    void this.prefetchAhead(ctx, 1);
+  }
+  /** Jump to the next chunk; past the last one, stop the queue (idle). */
+  skipForward() {
+    if (!this.ttsCtx || this.queueIndex < 0) return;
+    const ctx = this.ttsCtx;
+    const next = this.queueIndex + 1;
+    if (next >= this.queueChunks.length) {
+      this.stopPlayback();
+      return;
+    }
+    this.jumpTo(ctx, next);
+  }
+  /**
+   * Restart the current chunk if more than `SKIP_BACK_RESTART_THRESHOLD_S`
+   * seconds of it have played, otherwise jump to the previous one. Before
+   * the first chunk there is no previous one, so it restarts chunk 0
+   * instead.
+   */
+  skipBackward() {
+    if (!this.ttsCtx || this.queueIndex < 0) return;
+    const ctx = this.ttsCtx;
+    const elapsed = ctx.currentTime - this.currentChunkStartTime;
+    if (this.queueIndex === 0 || elapsed > SKIP_BACK_RESTART_THRESHOLD_S) {
+      this.jumpTo(ctx, this.queueIndex);
+    } else {
+      this.jumpTo(ctx, this.queueIndex - 1);
+    }
+  }
+  /**
+   * Suspend playback in place (no restart): freezes the AudioContext clock,
+   * which keeps the current position without any offset tracking. No-op
+   * outside the "playing" state. The state is set synchronously, on the
+   * call itself, rather than once the `suspend()` promise resolves — the
+   * promise settles only after the audio thread has actually stopped, and
+   * waiting for it would leave the pause icon lagging behind the click.
+   * Applies to the whole queue: freezing `ctx` also freezes whatever's
+   * already armed on `scheduledSource`, so a chunk boundary just before a
+   * pause still lands on the right scheduled time once resumed.
+   */
+  pause() {
+    if (this.state !== "playing" || !this.ttsCtx) return;
+    this.setState("paused");
+    void this.ttsCtx.suspend();
+  }
+  /** Resume playback from where it was paused. No-op outside "paused". */
+  resume() {
+    if (this.state !== "paused" || !this.ttsCtx) return;
+    this.setState("playing");
+    void this.ttsCtx.resume();
+  }
+  /** Pauses when playing, resumes when paused; no-op in any other state. */
+  togglePause() {
+    if (this.state === "playing") {
+      this.pause();
+    } else if (this.state === "paused") {
+      this.resume();
+    }
+  }
+  /** Stop "listen back" playback and release the audio context. Also
+   * invalidates any in-flight attempt (see `generation`). Deliberately
+   * leaves `queueChunks`/`queueCache` alone: a chunk-failure notice needs
+   * the cache to survive a stop (see `handleChunkFailure`), and a fresh
+   * `playChunks()` call resets both itself. */
+  stopPlayback() {
+    this.generation++;
+    this.stopSources();
+    this.pendingAdvance = false;
+    this.setQueueIndex(-1);
     if (this.ttsCtx) {
       void this.ttsCtx.close();
       this.ttsCtx = null;
     }
+    this.setState("idle");
+  }
+  /** Stops and disconnects both the audible and the pre-armed source
+   * without touching the context, generation, or queue state — the shared
+   * teardown step for `skipForward()`/`skipBackward()` (which replace
+   * playback in place, on the same context) and `stopPlayback()`. */
+  stopSources() {
+    if (this.scheduledSource) {
+      try {
+        this.scheduledSource.stop();
+      } catch (e) {
+      }
+      this.scheduledSource.disconnect();
+      this.scheduledSource = null;
+    }
+    this.scheduledIndex = -1;
+    if (this.currentSource) {
+      try {
+        this.currentSource.stop();
+      } catch (e) {
+      }
+      this.currentSource.disconnect();
+      this.currentSource = null;
+    }
+  }
+  /**
+   * Creates, connects and arms a chunk's source at `startTime` on `ctx`.
+   * The `ended` listener is what paces the queue (see `onChunkEnded`) —
+   * scheduling itself never waits on it, which is what keeps chunk
+   * boundaries gap-free: `start(startTime)` is called as soon as the
+   * buffer is ready, not when the previous chunk's `ended` fires.
+   */
+  armSource(ctx, index, startTime, buffer) {
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.addEventListener("ended", () => {
+      if (this.currentSource !== source && this.scheduledSource !== source) return;
+      this.onChunkEnded(ctx, index);
+    });
+    source.start(startTime);
+    return source;
+  }
+  /** Arms `index` as the CURRENT chunk immediately (bootstrap for
+   * `playChunks()`'s first chunk, and every `skipForward()`/
+   * `skipBackward()` target). */
+  startCurrentSource(ctx, index, startTime, buffer) {
+    this.currentSource = this.armSource(ctx, index, startTime, buffer);
+    this.setQueueIndex(index);
+    this.currentChunkStartTime = startTime;
+    this.setState("playing");
+  }
+  /**
+   * Fetch (cache or synthesize+decode) and arm `index` ahead of time,
+   * scheduled at `nextStartTime` — while the chunk before it is still
+   * playing, not once it ends. This is prefetch depth 1: the next call to
+   * `prefetchAhead()` for the chunk after this one is only made once
+   * *this* chunk's own `ended` fires (via `onChunkEnded()`), so there is
+   * never more than one synthesis request in flight.
+   */
+  async prefetchAhead(ctx, index) {
+    if (index < 0 || index >= this.queueChunks.length) return;
+    const startTime = this.nextStartTime;
+    const seq = this.jumpSeq;
+    const buffer = await this.resolveBuffer(ctx, index);
+    if (buffer === null) return;
+    if (this.ttsCtx !== ctx) return;
+    if (seq !== this.jumpSeq) return;
+    this.scheduledSource = this.armSource(ctx, index, startTime, buffer);
+    this.scheduledIndex = index;
+    this.scheduledStartTime = startTime;
+    this.nextStartTime = startTime + buffer.duration;
+    if (this.pendingAdvance) {
+      this.pendingAdvance = false;
+      this.promoteScheduled();
+      void this.prefetchAhead(ctx, index + 1);
+    }
+  }
+  /** Cache hit, or synthesize+decode `index` and cache it. `null` if the
+   * queue was superseded mid-fetch, or if the chunk failed (a Notice was
+   * already shown and the queue already stopped). */
+  async resolveBuffer(ctx, index) {
+    const text = this.queueChunks[index];
+    const cached = this.queueCache.get(text);
+    if (cached) return cached;
+    if (!this.queueSynthesize) return null;
+    try {
+      const bytes = await this.queueSynthesize(text);
+      if (this.ttsCtx !== ctx) return null;
+      const buffer = await ctx.decodeAudioData(bytes.slice(0));
+      if (this.ttsCtx !== ctx) return null;
+      this.cacheBuffer(text, buffer);
+      return buffer;
+    } catch (e) {
+      if (this.ttsCtx !== ctx) return null;
+      this.handleChunkFailure(index, e);
+      return null;
+    }
+  }
+  /** Runs when a chunk's source actually finishes playing: promotes the
+   * next chunk to current if it's already armed, ends the queue past the
+   * last chunk, or — if the next chunk isn't ready yet — records that it
+   * should be promoted the moment it is (see `pendingAdvance`). */
+  onChunkEnded(ctx, endedIndex) {
+    if (this.ttsCtx !== ctx) return;
+    const nextIndex = endedIndex + 1;
+    if (nextIndex >= this.queueChunks.length) {
+      this.stopPlayback();
+      return;
+    }
+    if (this.scheduledSource && this.scheduledIndex === nextIndex) {
+      this.promoteScheduled();
+      void this.prefetchAhead(ctx, nextIndex + 1);
+    } else {
+      this.pendingAdvance = true;
+    }
+  }
+  /** Moves the pre-armed `scheduledSource` into `currentSource`. */
+  promoteScheduled() {
+    if (!this.scheduledSource || this.scheduledIndex < 0) return;
+    this.currentSource = this.scheduledSource;
+    this.currentChunkStartTime = this.scheduledStartTime;
+    this.setQueueIndex(this.scheduledIndex);
+    this.scheduledSource = null;
+    this.scheduledIndex = -1;
+    this.setState("playing");
+  }
+  /** Stop the current/scheduled sources on the same context and arm
+   * `index` as the new current chunk, fetching it first if it isn't
+   * cached. Shared by `skipForward()` and `skipBackward()`. */
+  jumpTo(ctx, index) {
+    this.stopSources();
+    this.pendingAdvance = false;
+    this.setQueueIndex(index);
+    this.currentChunkStartTime = ctx.currentTime;
+    this.setState("loading");
+    void this.runJump(ctx, index, ++this.jumpSeq);
+  }
+  async runJump(ctx, index, seq) {
+    const buffer = await this.resolveBuffer(ctx, index);
+    if (buffer === null) return;
+    if (this.ttsCtx !== ctx) return;
+    if (seq !== this.jumpSeq) return;
+    const startTime = ctx.currentTime;
+    this.startCurrentSource(ctx, index, startTime, buffer);
+    this.nextStartTime = startTime + buffer.duration;
+    void this.prefetchAhead(ctx, index + 1);
+  }
+  /** A chunk failed (after `synthesizeSpeech`'s own retries) after the
+   * first one already played: notice the user, stop the queue, and leave
+   * the cache as-is (only the failed chunk's synthesis is lost). */
+  handleChunkFailure(index, e) {
+    vlog.error("Voxtral: listen back chunk failed", e);
+    new import_obsidian8.Notice(
+      `Listen back failed at paragraph ${index + 1} of ${this.queueChunks.length}: ${String(e)}`
+    );
+    this.stopPlayback();
+  }
+  /**
+   * Cache `buffer` under the chunk's text, evicting while the cache exceeds
+   * `MAX_CACHED_CHUNKS`. Text keys aren't positions, so distance is looked
+   * up in the current chunk list: anything no longer in it (a paragraph
+   * from an earlier passage) counts as infinitely far and goes first, then
+   * whatever sits farthest from the chunk playing now. The playing chunk is
+   * never evicted.
+   */
+  cacheBuffer(text, buffer) {
+    this.queueCache.set(text, buffer);
+    const playing = this.queueChunks[this.queueIndex];
+    while (this.queueCache.size > MAX_CACHED_CHUNKS) {
+      let evictKey = null;
+      let evictDistance = -1;
+      for (const key of this.queueCache.keys()) {
+        if (key === playing) continue;
+        const position = this.queueChunks.indexOf(key);
+        const distance = position === -1 ? Infinity : Math.abs(position - this.queueIndex);
+        if (distance > evictDistance) {
+          evictDistance = distance;
+          evictKey = key;
+        }
+      }
+      if (evictKey === null) break;
+      this.queueCache.delete(evictKey);
+    }
+  }
+};
+
+// src/playback-mobile-controls.ts
+var INACTIVE_CLASS = "voxtral-mobile-playback-inactive";
+var SKIP_BACK_LABEL = "Skip back one paragraph";
+var STOP_LABEL = "Stop playback";
+var SKIP_FORWARD_LABEL = "Skip forward one paragraph";
+var PAUSE_LABEL = "Pause playback";
+var RESUME_LABEL = "Resume playback";
+function toggleIcon(state) {
+  return state === "paused" ? "play" : "pause";
+}
+function toggleLabel(state) {
+  return state === "paused" ? RESUME_LABEL : PAUSE_LABEL;
+}
+var PlaybackMobileControls = class {
+  constructor(setIcon2) {
+    this.setIcon = setIcon2;
+    this.skipBackEl = null;
+    this.toggleEl = null;
+    this.skipForwardEl = null;
+    /** Only present while paused — see the note on contextual stopping above. */
+    this.stopEl = null;
+    /** Kept so `applyState()` can create the stop action on a later pause,
+     * long after `attach()` ran. */
+    this.host = null;
+    this.handlers = null;
+  }
+  /** Whether the three actions are currently in the DOM. */
+  get isAttached() {
+    return this.toggleEl !== null;
+  }
+  /**
+   * Create the three actions in `host`, in skip-back / toggle / skip-forward
+   * order, and set their initial icon/label from `state`. Idempotent —
+   * detaches any previous set first (mirrors `RecordingIndicator.attach()`'s
+   * own detach-first pattern), so re-attaching after an
+   * `active-leaf-change` never leaves a stray set behind.
+   */
+  attach(host, handlers, state) {
+    this.detach();
+    this.host = host;
+    this.handlers = handlers;
+    this.skipBackEl = host.addAction("skip-back", SKIP_BACK_LABEL, handlers.skipBack);
+    this.toggleEl = host.addAction(toggleIcon(state), toggleLabel(state), handlers.toggle);
+    this.skipForwardEl = host.addAction(
+      "skip-forward",
+      SKIP_FORWARD_LABEL,
+      handlers.skipForward
+    );
+    this.applyState(state);
+  }
+  /**
+   * Update the toggle action's icon/label for the new state, and its
+   * "inactive" marker while loading. No-op when not attached (e.g.
+   * desktop, or after detach/unload) — safe to call unconditionally from
+   * the same `onStateChange` switchboard that drives the desktop status
+   * bar.
+   */
+  setState(state) {
+    if (!this.toggleEl) return;
+    this.applyState(state);
+  }
+  applyState(state) {
+    const toggleEl = this.toggleEl;
+    if (!toggleEl) return;
+    this.setIcon(toggleEl, toggleIcon(state));
+    toggleEl.setAttribute("aria-label", toggleLabel(state));
+    if (state === "loading") {
+      toggleEl.addClass(INACTIVE_CLASS);
+    } else {
+      toggleEl.removeClass(INACTIVE_CLASS);
+    }
+    this.applyStopAction(state);
+  }
+  /** Adds the stop action when entering "paused" and removes it again on
+   * every other state, so it is visible exactly while paused. */
+  applyStopAction(state) {
+    var _a;
+    if (state === "paused") {
+      if (this.stopEl || !this.host || !this.handlers) return;
+      this.stopEl = this.host.addAction("square", STOP_LABEL, this.handlers.stop);
+      return;
+    }
+    (_a = this.stopEl) == null ? void 0 : _a.remove();
+    this.stopEl = null;
+  }
+  /** Remove all three actions from the DOM, if present. Safe to call
+   * repeatedly. */
+  detach() {
+    var _a, _b, _c, _d;
+    (_a = this.skipBackEl) == null ? void 0 : _a.remove();
+    (_b = this.toggleEl) == null ? void 0 : _b.remove();
+    (_c = this.skipForwardEl) == null ? void 0 : _c.remove();
+    (_d = this.stopEl) == null ? void 0 : _d.remove();
+    this.skipBackEl = null;
+    this.toggleEl = null;
+    this.skipForwardEl = null;
+    this.stopEl = null;
+    this.host = null;
+    this.handlers = null;
   }
 };
 
@@ -9473,6 +10066,26 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     // context/source so Stop and a new read just replace the current one.
     // Owned by PlaybackController (VX_E27_S2) — see playback-controller.ts.
     this.playback = new PlaybackController();
+    // Second, desktop-only status bar item (VX_E26_S3, extended VX_E26_S4
+    // with skip + a paragraph counter): pause/resume + stop controls for
+    // "listen back", shown only while playback is loading, playing or
+    // paused. Deliberately NOT the same item as `statusBarEl`, which shows
+    // the recording/command-feedback display and would collide with it —
+    // see updateTtsStatusBar().
+    this.ttsStatusBarEl = null;
+    this.ttsPauseBtn = null;
+    this.ttsSkipBackBtn = null;
+    this.ttsSkipForwardBtn = null;
+    this.ttsCounterEl = null;
+    // Mobile counterpart of the strip above (VX_E26_S5): Obsidian has no
+    // status bar on mobile, so this attaches skip-back/pause/skip-forward
+    // actions to the active MarkdownView's header instead, while playback is
+    // loading, playing or paused. See playback-mobile-controls.ts.
+    this.playbackMobileControls = new PlaybackMobileControls(
+      (el, icon) => {
+        (0, import_obsidian10.setIcon)(el, icon);
+      }
+    );
     // Per-note language override (VX_E27_S8): resolved once at recording
     // start from the active note's `voxtral-language` frontmatter and held
     // fixed for the session (mid-recording note/frontmatter changes are out
@@ -9678,6 +10291,92 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       });
       this.updateStatusBar("idle");
     }
+    if (!import_obsidian10.Platform.isMobile) {
+      this.ttsStatusBarEl = this.addStatusBarItem();
+      this.ttsStatusBarEl.addClass("voxtral-tts-status");
+      this.ttsStatusBarEl.hidden = true;
+      this.ttsSkipBackBtn = this.ttsStatusBarEl.createEl("button", {
+        cls: "voxtral-tts-btn"
+      });
+      this.ttsSkipBackBtn.setAttribute("aria-label", "Skip back one paragraph");
+      (0, import_obsidian10.setIcon)(this.ttsSkipBackBtn, "skip-back");
+      this.registerDomEvent(this.ttsSkipBackBtn, "click", () => {
+        this.playback.skipBackward();
+      });
+      this.ttsPauseBtn = this.ttsStatusBarEl.createEl("button", {
+        cls: "voxtral-tts-btn"
+      });
+      this.ttsPauseBtn.setAttribute("aria-label", "Pause playback");
+      (0, import_obsidian10.setIcon)(this.ttsPauseBtn, "pause");
+      this.registerDomEvent(this.ttsPauseBtn, "click", () => {
+        this.playback.togglePause();
+      });
+      this.ttsSkipForwardBtn = this.ttsStatusBarEl.createEl("button", {
+        cls: "voxtral-tts-btn"
+      });
+      this.ttsSkipForwardBtn.setAttribute("aria-label", "Skip forward one paragraph");
+      (0, import_obsidian10.setIcon)(this.ttsSkipForwardBtn, "skip-forward");
+      this.registerDomEvent(this.ttsSkipForwardBtn, "click", () => {
+        this.playback.skipForward();
+      });
+      this.ttsCounterEl = this.ttsStatusBarEl.createSpan({
+        cls: "voxtral-tts-counter"
+      });
+      const ttsStopBtn = this.ttsStatusBarEl.createEl("button", {
+        cls: "voxtral-tts-btn"
+      });
+      ttsStopBtn.setAttribute("aria-label", "Stop playback");
+      (0, import_obsidian10.setIcon)(ttsStopBtn, "square");
+      this.registerDomEvent(ttsStopBtn, "click", () => {
+        this.playback.stopPlayback();
+      });
+      this.playback.onStateChange((state) => this.updateTtsStatusBar(state));
+      this.playback.onProgressChange(() => this.updateTtsStatusBar(this.playback.getState()));
+    }
+    if (import_obsidian10.Platform.isMobile) {
+      const playbackHandlers = {
+        skipBack: () => {
+          this.playback.skipBackward();
+        },
+        toggle: () => {
+          this.playback.togglePause();
+        },
+        skipForward: () => {
+          this.playback.skipForward();
+        },
+        // Contextual stop (VX_E26_S7): the action only exists while
+        // paused, so this handler is only ever reachable from there.
+        stop: () => {
+          this.playback.stopPlayback();
+        }
+      };
+      const applyPlaybackMobileState = (state) => {
+        if (state === "idle") {
+          this.playbackMobileControls.detach();
+          return;
+        }
+        if (this.playbackMobileControls.isAttached) {
+          this.playbackMobileControls.setState(state);
+          return;
+        }
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+        if (!view) {
+          return;
+        }
+        this.playbackMobileControls.attach(view, playbackHandlers, state);
+      };
+      this.playback.onStateChange((state) => {
+        applyPlaybackMobileState(state);
+      });
+      this.registerEvent(
+        this.app.workspace.on("active-leaf-change", () => {
+          const state = this.playback.getState();
+          if (state === "idle") return;
+          this.playbackMobileControls.detach();
+          applyPlaybackMobileState(state);
+        })
+      );
+    }
     this.addCommand({
       id: "toggle-recording",
       name: "Start/stop recording",
@@ -9766,11 +10465,15 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       }
     });
     this.addCommand({
+      // The id still says "selection" while the command now reads from the
+      // cursor when there is none (VX_E26_S10). Deliberate: removing a
+      // command id makes Obsidian silently drop whatever hotkey a user
+      // bound to it, and this plugin is published.
       id: "read-selection-aloud",
-      name: "Read selection aloud",
+      name: "Read aloud",
       icon: "volume-2",
       editorCallback: (editor) => {
-        void this.readSelectionAloud(editor);
+        void this.readAloud(editor);
       }
     });
     this.addCommand({
@@ -9782,6 +10485,14 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       }
     });
     this.addCommand({
+      id: "toggle-playback-pause",
+      name: "Pause or resume playback",
+      icon: "pause",
+      callback: () => {
+        this.playback.togglePause();
+      }
+    });
+    this.addCommand({
       id: "stop-playback",
       name: "Stop playback",
       icon: "square",
@@ -9789,12 +10500,29 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
         this.playback.stopPlayback();
       }
     });
+    this.addCommand({
+      id: "skip-forward-playback",
+      name: "Skip forward one paragraph",
+      icon: "skip-forward",
+      callback: () => {
+        this.playback.skipForward();
+      }
+    });
+    this.addCommand({
+      id: "skip-back-playback",
+      name: "Skip back one paragraph",
+      icon: "skip-back",
+      callback: () => {
+        this.playback.skipBackward();
+      }
+    });
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor) => {
-        if (!this.settings.ttsEnabled || !editor.getSelection()) return;
+        if (!this.settings.ttsEnabled) return;
+        const hasSelection = editor.getSelection() !== "";
         menu.addItem(
-          (item) => item.setTitle("Read selection aloud").setIcon("volume-2").onClick(() => {
-            void this.readSelectionAloud(editor);
+          (item) => item.setTitle(hasSelection ? "Read selection aloud" : "Read aloud from here").setIcon("volume-2").onClick(() => {
+            void this.readAloud(editor);
           })
         );
       })
@@ -9852,6 +10580,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     }
     this.recording.dispose();
     this.playback.stopPlayback();
+    this.playbackMobileControls.detach();
     this.removeSendButton();
     if (this.commandFeedbackTimer !== null) {
       window.clearTimeout(this.commandFeedbackTimer);
@@ -10146,13 +10875,29 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     }
   }
   // ── Listen back (TTS, E26 — experimental) ──
-  async readSelectionAloud(editor) {
+  /**
+   * The default read-aloud action (VX_E26_S10): a selection when there is
+   * one, otherwise everything from the cursor's paragraph to the end of the
+   * note. Selecting first used to be mandatory, which is the wrong way round
+   * for proofreading — you want to listen on from where you are, and stop
+   * when you've heard enough. Reading on is affordable because chunks are
+   * only synthesized just ahead of playback (VX_E26_S4), so stopping early
+   * costs at most one unheard paragraph.
+   */
+  async readAloud(editor) {
     const selection = editor.getSelection();
-    if (!selection) {
-      new import_obsidian10.Notice("Select some text to read aloud.");
+    if (selection) {
+      await this.readTextAloud(selection);
       return;
     }
-    await this.readTextAloud(selection);
+    const lines = [];
+    for (let i = 0; i <= editor.lastLine(); i++) lines.push(editor.getLine(i));
+    const text = textFromParagraph(lines, editor.getCursor().line);
+    if (!text) {
+      new import_obsidian10.Notice("Nothing to read aloud from here.");
+      return;
+    }
+    await this.readTextAloud(text);
   }
   async readParagraphAloud(editor) {
     const paragraph = this.getCurrentParagraph(editor);
@@ -10190,13 +10935,23 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       new import_obsidian10.Notice("Nothing to read aloud.");
       return;
     }
+    const chunks = splitForSpeech(text);
+    if (chunks.length === 0) {
+      new import_obsidian10.Notice("Nothing to read aloud.");
+      return;
+    }
     const progress = new import_obsidian10.Notice("Generating audio\u2026", 0);
+    const attempt = this.playback.beginLoading();
     try {
-      const audio = await synthesizeSpeech(text, this.settings, this.httpRequest);
-      await this.playback.playAudioBytes(audio);
+      await this.playback.playChunks(
+        chunks,
+        (chunkText) => synthesizeSpeech(chunkText, this.settings, this.httpRequest),
+        attempt
+      );
     } catch (e) {
       vlog.error("Voxtral: speech synthesis failed", e);
       new import_obsidian10.Notice(`Listen back failed: ${String(e)}`);
+      if (this.playback.isCurrent(attempt)) this.playback.stopPlayback();
     } finally {
       progress.hide();
     }
@@ -10540,6 +11295,42 @@ ${text}`);
       (0, import_obsidian10.setIcon)(this.statusBarEl, "mic");
     } else {
       this.statusBarEl.setText(text);
+    }
+  }
+  /**
+   * Reflects PlaybackController's state onto the "listen back" status bar
+   * item (VX_E26_S3; VX_E26_S4 adds skip + the counter): hidden at "idle",
+   * otherwise shows skip back/forward, pause/resume, a "3/12" paragraph
+   * counter, and stop. The pause button is disabled while "loading"
+   * (synthesis/decode in flight, nothing to pause yet) and swaps its
+   * icon/label between pause and play depending on whether playback is
+   * running or paused. Skip is disabled only while the very first chunk is
+   * still loading — `getProgress()` is `null` until then, since there is
+   * nothing yet to skip to or from; a later chunk still being fetched (a
+   * skip in flight, or a slow prefetch) leaves the previous position's
+   * counter up and skip enabled.
+   */
+  updateTtsStatusBar(state) {
+    if (!this.ttsStatusBarEl || !this.ttsPauseBtn) return;
+    this.ttsStatusBarEl.hidden = state === "idle";
+    if (state === "idle") return;
+    const progress = this.playback.getProgress();
+    if (this.ttsSkipBackBtn) this.ttsSkipBackBtn.disabled = progress === null;
+    if (this.ttsSkipForwardBtn) this.ttsSkipForwardBtn.disabled = progress === null;
+    if (this.ttsCounterEl) {
+      this.ttsCounterEl.setText(progress ? `${progress.index + 1}/${progress.total}` : "");
+    }
+    this.ttsPauseBtn.disabled = state === "loading";
+    this.ttsPauseBtn.empty();
+    if (state === "paused") {
+      (0, import_obsidian10.setIcon)(this.ttsPauseBtn, "play");
+      this.ttsPauseBtn.setAttribute("aria-label", "Resume playback");
+    } else {
+      (0, import_obsidian10.setIcon)(this.ttsPauseBtn, "pause");
+      this.ttsPauseBtn.setAttribute(
+        "aria-label",
+        state === "loading" ? "Generating audio\u2026" : "Pause playback"
+      );
     }
   }
 };

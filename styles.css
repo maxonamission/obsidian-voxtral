@@ -15,6 +15,77 @@
    styling for an unreachable state is left for whenever it becomes
    reachable rather than speculatively added now. */
 
+/* ── "Listen back" playback controls (VX_E26_S3, skip + counter VX_E26_S4) ──
+   Second, desktop-only status bar item: skip back, pause/resume, skip
+   forward, a "3/12" paragraph counter, and stop — hidden while idle.
+   Icon-only buttons styled to sit flush in the status bar, matching
+   Obsidian's own status-bar-button look rather than a full <button> chrome. */
+
+.voxtral-tts-status {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+
+/* An author `display: flex` outranks the user-agent `[hidden] { display: none }`
+   rule, so the hidden state needs its own rule or the strip never hides. */
+.voxtral-tts-status[hidden] {
+	display: none;
+}
+
+/* Obsidian styles bare <button> elements for dialogs: an input-height box with
+   its own padding, background and shadow, and icons at the default --icon-size.
+   In the status bar that reads as oversized next to the 12px item text, so the
+   chrome is reset here and the icon is pinned to the same scale Obsidian uses
+   for its own status-bar icons. */
+.voxtral-tts-btn {
+	--icon-size: var(--icon-xs);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: auto;
+	height: auto;
+	min-height: 0;
+	padding: 0;
+	border: none;
+	border-radius: 0;
+	background: none;
+	box-shadow: none;
+	font-size: inherit;
+	line-height: 1;
+	color: var(--icon-color, var(--text-muted));
+	cursor: pointer;
+}
+
+.voxtral-tts-btn:hover:not(:disabled) {
+	color: var(--icon-color-hover, var(--text-normal));
+}
+
+.voxtral-tts-btn:disabled {
+	color: var(--text-faint);
+	cursor: default;
+}
+
+.voxtral-tts-counter {
+	padding: 0 2px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+/* ── Mobile view-header playback controls (VX_E26_S5) ──
+   Mobile counterpart of the status bar strip above: skip-back/pause/
+   skip-forward actions in the active MarkdownView's header, shown only
+   while playback is loading, playing or paused (no status bar to live in
+   on mobile — see main.ts's applyPlaybackMobileState). The toggle action is
+   marked, not disabled, while audio is still loading: Obsidian's header
+   actions aren't form controls, so a `disabled` attribute has no effect. */
+
+.voxtral-mobile-playback-inactive {
+	opacity: 0.5;
+}
+
 /* ── Help panel (side view) ── */
 
 .voxtral-help-view {

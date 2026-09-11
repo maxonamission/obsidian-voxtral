@@ -4,6 +4,45 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.14.0] - 2026-09-11
+
+- **Read aloud now starts where you are.** "Read selection aloud" has become
+  "Read aloud": with text selected it reads that, and otherwise it reads on
+  from the paragraph your cursor is in to the end of the note, until you stop
+  it. Right-clicking without a selection offers "Read aloud from here". Audio
+  is only generated just ahead of what you're hearing, so stopping early
+  doesn't pay for the rest of the note. The command keeps its identifier, so
+  any hotkey you assigned to it still works.
+- **Listen back can now pause.** Playback of a read-aloud selection or
+  paragraph can be paused and resumed in place — no need to start over,
+  and no extra API call. On desktop, a status bar control shows while
+  audio is generating or playing, with pause/resume and stop buttons; the
+  new "Pause or resume playback" command works everywhere, including on
+  mobile where there's no status bar.
+- **Listen back starts sooner and reads paragraph by paragraph.** A
+  read-aloud selection is now split into paragraphs and synthesized one at
+  a time, so the voice starts after the first paragraph instead of after
+  the whole passage. New "Skip forward one paragraph" and "Skip back one
+  paragraph" commands (and buttons in the desktop status bar, with a
+  paragraph counter) move through it; skipping back restarts the current
+  paragraph if you are more than two seconds into it. Paragraphs you
+  already heard are kept in memory, so going back costs no extra API call.
+- **Listen back is now controllable on mobile.** Since there's no status bar
+  on mobile, skip-back, pause/resume and skip-forward now show as actions
+  in the note's header while something is playing, and disappear again
+  once it stops. Switching notes mid-playback moves the controls to the
+  new note. Pause, and a stop button appears next to them for when you are
+  done rather than just interrupting.
+- **Editing a paragraph no longer re-synthesizes the whole passage.** Listen
+  back remembers audio per paragraph instead of per position, so changing one
+  paragraph and listening again only regenerates that paragraph. The same
+  applies to listening to an overlapping selection. Up to twelve paragraphs
+  are kept at a time. Fewer API calls, less data over the wire, and less
+  compute spent on audio you already had.
+- **Smaller playback buttons in the status bar.** The desktop controls now
+  match the scale of the rest of the status bar instead of rendering as
+  full-size buttons.
+
 ## [1.13.0] - 2026-09-02
 
 - **Sharper plugin description and README opening.** The directory listing
