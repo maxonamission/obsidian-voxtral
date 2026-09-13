@@ -4,6 +4,12 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.14.2] - 2026-09-13
+
+- **Read aloud is reachable from the menu in reading view.** The right-click
+  item only existed while editing; the note's own menu now offers "Read
+  aloud" in both modes.
+
 ## [1.14.1] - 2026-09-13
 
 - **Read aloud now works in reading view too.** The command was only offered

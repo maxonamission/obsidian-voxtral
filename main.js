@@ -10541,6 +10541,18 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
         );
       })
     );
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (!this.settings.ttsEnabled) return;
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+        if (!view || view.file !== file) return;
+        menu.addItem(
+          (item) => item.setTitle("Read aloud").setIcon("volume-2").onClick(() => {
+            void this.readAloudFromActiveView();
+          })
+        );
+      })
+    );
     this.addSettingTab(new VoxtralSettingTab(this.app, this));
     this.registerDomEvent(activeDocument, "visibilitychange", () => {
       this.recording.handleVisibilityChange();
