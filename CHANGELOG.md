@@ -4,6 +4,15 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.14.1] - 2026-09-13
+
+- **Read aloud now works in reading view too.** The command was only offered
+  while editing a note, which is the opposite of when you want to listen to
+  one. It now shows up in both modes.
+- **A note's properties are no longer read out.** Starting at the top of a
+  note used to mean hearing its front matter (tags, status, dates) before the
+  prose began. The block is skipped now.
+
 ## [1.14.0] - 2026-09-11
 
 - **Read aloud now starts where you are.** "Read selection aloud" has become

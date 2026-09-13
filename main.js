@@ -4994,8 +4994,17 @@ function combineVocabulary(explicit, customRaw, collected) {
 }
 
 // src/tts-text.ts
+function stripFrontMatter(markdown) {
+  var _a;
+  const lines = markdown.split("\n");
+  if (((_a = lines[0]) == null ? void 0 : _a.trim()) !== "---") return markdown;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === "---") return lines.slice(i + 1).join("\n");
+  }
+  return markdown;
+}
 function flattenForSpeech(markdown) {
-  let t = markdown;
+  let t = stripFrontMatter(markdown);
   t = t.replace(/```[\s\S]*?```/g, " ");
   t = t.replace(/~~~[\s\S]*?~~~/g, " ");
   t = t.replace(/!\[\[[^\]]*?\]\]/g, " ");
@@ -10472,8 +10481,13 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       id: "read-selection-aloud",
       name: "Read aloud",
       icon: "volume-2",
-      editorCallback: (editor) => {
-        void this.readAloud(editor);
+      // Not an editorCallback — the same trap VX_E27_S12 documents for
+      // embedded-audio transcription: reading view has no active editor,
+      // so an editorCallback hides the command in exactly the mode where
+      // listening to a note is most natural. The MarkdownView still
+      // exposes `.editor`, backed by the same source document.
+      callback: () => {
+        void this.readAloudFromActiveView();
       }
     });
     this.addCommand({
@@ -10884,6 +10898,17 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
    * only synthesized just ahead of playback (VX_E26_S4), so stopping early
    * costs at most one unheard paragraph.
    */
+  /** Resolve the editor of the active note (also in reading view, which has
+   * no "active editor" of its own) and read from there. */
+  async readAloudFromActiveView() {
+    var _a;
+    const editor = (_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor;
+    if (!editor) {
+      new import_obsidian10.Notice("Open a note to read aloud.");
+      return;
+    }
+    await this.readAloud(editor);
+  }
   async readAloud(editor) {
     const selection = editor.getSelection();
     if (selection) {
