@@ -4,6 +4,13 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.14.3] - 2026-09-14
+
+- **A vocabulary term typed with a full stop no longer speaks it.** Writing
+  your terms as "Moniek. Jurre." used to send "Moniek." to the transcription
+  service, which then put the dot in the transcript. Trailing punctuation is
+  removed; an abbreviation like "B.V." keeps its dot.
+
 ## [1.14.2] - 2026-09-13
 
 - **Read aloud is reachable from the menu in reading view.** The right-click

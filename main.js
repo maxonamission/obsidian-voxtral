@@ -2983,12 +2983,17 @@ async function listVoices(apiKey, httpRequest, baseUrl) {
 }
 var CONTEXT_BIAS_MAX_TERMS = 100;
 var CONTEXT_BIAS_MAX_TERM_LENGTH = 40;
+function stripTermPunctuation(term) {
+  return /\..*\.$/.test(term) ? term : term.replace(/[.;:!?]+$/, "");
+}
 function buildContextBias(terms) {
   if (!terms || terms.length === 0) return [];
   const seen = /* @__PURE__ */ new Set();
   const result = [];
   for (const raw of terms) {
-    const term = raw.trim().replace(/\s+/g, "_").replace(/,/g, "");
+    const term = stripTermPunctuation(
+      raw.trim().replace(/\s+/g, "_").replace(/,/g, "")
+    );
     if (!term) continue;
     if (term.length > CONTEXT_BIAS_MAX_TERM_LENGTH) continue;
     if (!/\p{L}/u.test(term)) continue;
