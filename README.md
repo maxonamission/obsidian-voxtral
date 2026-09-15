@@ -49,6 +49,7 @@ We built this for people who think out loud: researchers, consultants, anyone wh
 - **Long recordings, handled** — files over the single-request limit are split and transcribed in parts automatically, each part appearing as it finishes (with a Cancel button); part length is configurable
 - **Readable layout** — transcripts are broken into paragraphs rather than one long block
 - **Speaker labels (optional)** — turn on diarization to label who said what (`**Speaker 1:** …`)
+- **Terms for this recording** — before a file is transcribed, a dialog shows the names and jargon that will be sent as context bias, grouped by where they came from: your custom vocabulary, the note's `voxtral-vocabulary` frontmatter, name-like words from the file name, and the note's headings and links. Switch off what does not belong, add terms that only apply to this recording, and the chosen list is remembered for the next recording on that note — see [Per-note vocabulary](#per-note-vocabulary-and-the-global-custom-vocabulary-list). Automatic watch-folder transcriptions never show it
 - **Quality heads-up** — an optional pre-flight check warns about likely problems (very short, silent, or low-bitrate audio) before spending an API call
 - **Watch folder (optional, off by default)** — point it at a vault folder (e.g. a phone auto-sync folder) and a new audio file there is offered for transcription with a notice, or transcribed automatically if you switch the mode — automatic sends every new recording in the folder to the API without asking, so each one costs an API call
 
@@ -145,6 +146,9 @@ voxtral-vocabulary:
 ```
 
 - These terms are **always** sent — with corrections and as transcription context bias — regardless of the "Vault vocabulary" setting above, which only gates *automatic* collection from the vault. You typed them for exactly this purpose.
+
+**Terms for this recording (file transcription).** Before a file is transcribed, a dialog shows every term that will be sent as context bias, grouped by source: your custom vocabulary, the target note's `voxtral-vocabulary` frontmatter, name-like words from the file name ("Interview Jurre en Wouter" offers Jurre and Wouter), and the note's headings, links and backlinks (when Vault vocabulary is on). Switch off what does not belong, type names and jargon that only apply to this recording, and tick "Remember" to add the typed terms to your custom vocabulary. With "Save the list in the note" on (the default), the chosen terms minus your custom vocabulary are written into the transcript note's `voxtral-vocabulary` frontmatter, or merged into the note you insert into, so the next recording for that note starts from them. Terms you type, keep from the file name, or give to speakers in the review step also go into a learned vocabulary that the dialog offers again; a term you switch off loses weight and disappears. Terms are ranked (your own first, collected last) and capped at 100 only after ranking. The dialog is on by default for transcriptions you start yourself; "Don't ask again" or the setting under File transcription turns it off, and the automatic watch folder never shows it and never sends file-name terms unseen.
+
 - Resolved the same way and at the same moment as `voxtral-language`/`voxtral-style` — once, from the output-target note, and held for that recording session or file transcription.
 - There's also a global **Custom vocabulary** setting (Settings → Voxtral Transcribe) for terms you always want available, regardless of which note you're in — your own name, recurring jargon, project codenames. Same always-on rule applies, and the same privacy trade-off: these terms are shared with the API on every call.
 - Order when combined with the vault vocabulary's automatic collection: this note's `voxtral-vocabulary` terms first, then the global custom terms, then collected vault terms — deduped and capped like the rest of the vocabulary list.
@@ -319,6 +323,7 @@ Settings are grouped into eight collapsible sections in Settings → Voxtral Tra
 | Chunk length for long recordings | 10 minutes | Part length used when splitting recordings over the single-request limit |
 | Speaker labels (diarization) | Off | Label different speakers in a transcribed file |
 | Review before inserting | Off | Preview the transcript and rename detected speakers before it lands in the note |
+| Ask for terms before transcribing a file | On | Show the names and jargon that go along as context bias (custom list, frontmatter, file name, note links), switch terms off or add some for this recording; never shown for automatic watch-folder transcriptions |
 | Watch folder | Empty (off) | Vault folder to watch for new audio recordings |
 | New audio in watch folder | Offer with a notice | Offer, or transcribe automatically (each automatic transcription costs an API call) |
 
@@ -355,6 +360,7 @@ Settings are grouped into eight collapsible sections in Settings → Voxtral Tra
 | Correction model | `mistral-small-latest` | Model for text correction |
 | Vault vocabulary | Off | Send vault term names (headings, link texts, titles, aliases, tags) as correction and transcription context |
 | Custom vocabulary | Empty | Your own terms (names, jargon, abbreviations), always sent regardless of vault vocabulary |
+| Learned vocabulary | Empty | Terms confirmed in the "Terms for this recording" dialog or given to speakers in the review step; offered again for later recordings, clearable here |
 | Auto-link vault terms (experimental) | Off | Wrap exact matches of vault terms in `[[wikilinks]]` after correction; requires Vault vocabulary |
 | Correction system prompt | Empty (default prompt) | Override the correction step's system prompt |
 | Debug logging | Off | Record verbose diagnostic logs for "Export logs to file" |

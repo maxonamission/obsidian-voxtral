@@ -4,6 +4,89 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.15.0] - 2026-09-15
+
+- **Fixed: unticking a term in "Terms for this recording" did nothing when
+  the same term also appeared in a lower-ranked group.** The term was still
+  sent as context bias, and still learned or forgotten as if you had kept it.
+  A term now belongs to the highest-ranked group it appears in; its copy
+  further down is shown disabled and now follows that group's checkbox
+  (tick, untick, or the group's All/None), and its tooltip names the group it
+  is included under.
+- **A part the API refuses is retried as two halves.** With a long chunk
+  length (for example 20 minutes) the service could refuse a part; the
+  plugin then uploaded it five more times with backoff before giving up and
+  leaving a hole. A refusal (too large or any other client error) is no
+  longer retried: the part is split in two and each half is transcribed,
+  down to one-minute slices, and the note shows "Part 2 (1/2)" and
+  "Part 2 (2/2)". Rate limits and server errors are still retried as before.
+- **See and choose the terms before a file is transcribed.** A new dialog
+  "Terms for this recording" shows every name and jargon term that will be
+  sent as context bias, grouped by where it came from (your custom list,
+  the note's frontmatter, the file name, the note and its links), lets you
+  switch terms off, type terms just for this recording, and remember typed
+  terms in your custom vocabulary. New: name-like words in the file name
+  ("Interview Jurre en Wouter" gives Jurre and Wouter) are offered as terms.
+  The list is now ranked (your own terms first, collected terms last) and
+  capped only after ranking, so a long link list can no longer push your
+  own terms out. On by default for transcriptions you start yourself; the
+  automatic watch folder never shows it and never sends file-name terms
+  unseen. Switch it off under File transcription if you prefer the old
+  silent behaviour.
+- **The plugin remembers the terms you confirm.** The list chosen for a
+  recording (minus your custom vocabulary) is written into the transcript
+  note's `voxtral-vocabulary` frontmatter, or merged into the note you
+  insert into, so the next recording for that note starts from it. Terms
+  you type, keep from the file name, or give to speakers in the review
+  step also land in a learned vocabulary that the dialog offers again for
+  later recordings; a term you switch off loses weight. The learned list
+  can be cleared under Advanced.
+- **The debug log records how many context-bias terms were sent,** and when a
+  long transcription was cancelled and after which part. The terms themselves
+  are not written down: they are names and jargon from your own notes, and the
+  log is a file you might paste into a bug report.
+
+- **Long recordings need far less memory to split.** A file that has to be
+  split was first decoded at its original sample rate and only then reduced to
+  16 kHz mono, so two hours of 48 kHz stereo needed about 2.8 GB before
+  anything could be sent, and large files failed with "Array buffer allocation
+  failed". The audio is now decoded straight to 16 kHz, and when a recording is
+  already 16 kHz mono the extra conversion step is skipped entirely.
+- **A WAV recording is split without decoding it first.** A WAV already
+  contains raw audio, so the plugin now reads its header and cuts the parts
+  straight from the file. That removes the copy and the conversion buffer that
+  a long recording needed, which is what ran out of memory on large files.
+  32-bit float recordings (what a Zoom H5studio or H2essential writes) are
+  levelled first: those files have no fixed maximum, so without that step a
+  loud passage would clip and a quietly recorded one would arrive as near
+  silence.
+- **A memory failure now says what to do.** Instead of a raw error it explains
+  that a long recording is decoded in full, and suggests converting to 16 kHz
+  mono or splitting the recording.
+- **The language setting now also applies when speaker recognition is on.** It
+  used to be dropped for those requests, on the assumption that the API could not
+  take both. It can: only the timestamps that diarization needs were ever the
+  constraint. On a 90-minute Dutch recording this changed nothing measurable, so
+  treat it as the setting doing what it says rather than as a quality fix.
+- **A very large WAV recording no longer fails before transcription even
+  starts.** A 2 GB file never got past being read into memory: one buffer that
+  size isn't reliably allocatable. On desktop, a large WAV is now read
+  straight from disk in pieces instead — never as a single buffer — so a
+  long field recording can be split and transcribed regardless of size.
+- **A WAV recording is now split at 16 kHz instead of its original sample
+  rate.** The fast path that splits a WAV without decoding it was still
+  cutting parts at the recording's own rate, so a 48 kHz recording uploaded
+  three times more data than the model actually uses (511 MB for a 2 GB
+  recording, where 170 MB was enough). Each part now goes through a
+  proper low-pass filter before being reduced to 16 kHz — simply keeping
+  every third sample was rejected earlier because it turns high frequencies
+  into low-frequency noise right in the band speech recognition depends on.
+- **A file too large for a phone or tablet now says what to do about it.**
+  There is no way to read a large file in pieces on mobile yet, so the
+  message now says the same recording works on desktop, or suggests making a
+  compressed copy (m4a or mp3) — a fraction of the size, at no real cost to
+  recognition quality.
+
 ## [1.14.3] - 2026-09-14
 
 - **A vocabulary term typed with a full stop no longer speaks it.** Writing

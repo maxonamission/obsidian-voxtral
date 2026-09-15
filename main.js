@@ -22,7 +22,7 @@ __export(main_exports, {
   default: () => VoxtralPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 
 // ../shared/src/types.ts
 var NO_VOCABULARY_TERMS = [];
@@ -67,12 +67,14 @@ var DEFAULT_SETTINGS = {
   chunkSeconds: 600,
   fileTranscriptDiarize: false,
   fileTranscriptReview: false,
+  fileTranscriptTermPreflight: true,
   ttsEnabled: false,
   ttsVoice: "en_paul_neutral",
   // a confirmed preset id; the live list is fetched (shared/src/tts.ts)
   vaultVocabulary: false,
   vaultWikilinks: false,
   customVocabularyTerms: "",
+  learnedVocabulary: [],
   localCorrectionUrl: "",
   localCorrectionModel: "ministral-3:3b",
   lastSeenVersion: "",
@@ -3038,7 +3040,8 @@ Content-Disposition: form-data; name="timestamp_granularities"\r
 \r
 segment\r
 `;
-  } else if (settings.language) {
+  }
+  if (settings.language) {
     extraFields += `--${boundary}\r
 Content-Disposition: form-data; name="language"\r
 \r
@@ -3152,12 +3155,22 @@ function buildCustomCommandGuard2(settings) {
 function buildVocabularyGuard2(context) {
   return buildVocabularyGuard(context.vocabularyTerms);
 }
-async function correctText(text, settings, httpRequest, opts) {
-  var _a, _b, _c;
-  const context = (_a = opts == null ? void 0 : opts.context) != null ? _a : EMPTY_REQUEST_CONTEXT;
+function resolveChatEndpoint(settings) {
+  var _a, _b;
   const local = isLocalMode(settings);
-  const localUrl = local ? (_b = settings.localCorrectionUrl) == null ? void 0 : _b.trim() : void 0;
-  if (local && !localUrl) {
+  const localUrl = local ? (_a = settings.localCorrectionUrl) == null ? void 0 : _a.trim() : void 0;
+  if (local && !localUrl) return null;
+  const base = local && localUrl ? localUrl : resolveBaseUrl(settings);
+  if (!local) assertKeySafeBaseUrl(base);
+  const model = local ? ((_b = settings.localCorrectionModel) == null ? void 0 : _b.trim()) || "ministral-3:3b" : settings.correctModel;
+  const headers = local ? { "Content-Type": "application/json" } : authHeaders(settings.apiKey, { "Content-Type": "application/json" });
+  return { base, model, headers };
+}
+async function correctText(text, settings, httpRequest, opts) {
+  var _a;
+  const context = (_a = opts == null ? void 0 : opts.context) != null ? _a : EMPTY_REQUEST_CONTEXT;
+  const endpoint = resolveChatEndpoint(settings);
+  if (!endpoint) {
     vlog.debug(
       "Voxtral: correction skipped in local mode \u2014 no local correction endpoint configured"
     );
@@ -3165,10 +3178,7 @@ async function correctText(text, settings, httpRequest, opts) {
   }
   const basePrompt = settings.systemPrompt || (settings.correctionIntensity === "light" ? LIGHT_CORRECT_PROMPT : DEFAULT_CORRECT_PROMPT);
   const systemPrompt = basePrompt + buildCustomCommandGuard2(settings) + buildVocabularyGuard2(context) + buildStyleGuard(context.styleInstruction);
-  const base = local && localUrl ? localUrl : resolveBaseUrl(settings);
-  if (!local) assertKeySafeBaseUrl(base);
-  const model = local ? ((_c = settings.localCorrectionModel) == null ? void 0 : _c.trim()) || "ministral-3:3b" : settings.correctModel;
-  const headers = local ? { "Content-Type": "application/json" } : authHeaders(settings.apiKey, { "Content-Type": "application/json" });
+  const { base, model, headers } = endpoint;
   const body = {
     model,
     messages: [
@@ -3810,6 +3820,14 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("Ask for terms before transcribing a file").setDesc(
+      "Show which names and jargon will be sent as context bias for this recording (your custom list, the note's frontmatter, the file name, the note's links) and let you switch terms off or add some just for this recording. Off: the default selection is sent without asking. Never shown for automatic watch-folder transcriptions."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.fileTranscriptTermPreflight).onChange(async (value) => {
+        this.plugin.settings.fileTranscriptTermPreflight = value;
+        await this.plugin.saveSettings();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("Watch folder").setDesc(
       "Vault folder to watch for new audio recordings \u2014 for example an auto-sync folder from your phone. Leave empty to turn this off."
     ).addText(
@@ -4027,6 +4045,17 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
       (text) => text.setPlaceholder("Voxtral, your name, project codenames\u2026").setValue(this.plugin.settings.customVocabularyTerms).onChange(async (value) => {
         this.plugin.settings.customVocabularyTerms = value;
         await this.plugin.saveSettings();
+      })
+    );
+    const learned = this.plugin.settings.learnedVocabulary;
+    const learnedPreview = learned.slice(0, 12).map((e) => e.term).join(", ");
+    new import_obsidian.Setting(containerEl).setName("Learned vocabulary").setDesc(
+      learned.length === 0 ? 'Terms you confirm in the "Terms for this recording" dialog or as speaker names in the review step are remembered here and offered again for later recordings. Nothing learned yet.' : `${learned.length} term(s) remembered from earlier recordings, most recent first: ${learnedPreview}${learned.length > 12 ? ", \u2026" : ""}. A term you switch off in the dialog loses weight and disappears.`
+    ).addButton(
+      (btn) => btn.setButtonText("Clear").setDisabled(learned.length === 0).onClick(async () => {
+        this.plugin.settings.learnedVocabulary = [];
+        await this.plugin.saveSettings();
+        this.rerenderSection("advanced");
       })
     );
     new import_obsidian.Setting(containerEl).setName("Auto-link vault terms (experimental)").setDesc(
@@ -4809,6 +4838,23 @@ function mimeForExtension(extension) {
 function isTooLargeError(message) {
   return /\b413\b|too large/i.test(message);
 }
+function isPermanentRequestError(message) {
+  if (isTooLargeError(message)) return true;
+  const m = /\b(?:status|HTTP)\s*(4\d\d)\b/i.exec(message);
+  if (!m) return false;
+  return !["408", "425", "429"].includes(m[1]);
+}
+function isMemoryError(message) {
+  return /array buffer allocation failed|allocation failed|out of memory|RangeError/i.test(
+    message
+  );
+}
+function memoryErrorNotice(fileName, isMobile, step) {
+  if (isMobile) {
+    return `${fileName} is too large to process on this device. The same file works on desktop, or make a compressed copy (m4a or mp3) \u2014 a fraction of the size, at no real cost to recognition quality.`;
+  }
+  return `Not enough memory to process ${fileName} \u2014 it stopped at: ${step}. Convert the recording to 16 kHz mono first, or split it into shorter files.`;
+}
 
 // src/embed-resolution.ts
 var DEFAULT_PROXIMITY_LINES = 5;
@@ -4982,7 +5028,7 @@ function collectVaultVocabulary(app, activeFile) {
   return capByChars(terms, MAX_CHARS);
 }
 function parseCustomTerms(customRaw) {
-  return customRaw.split(/[,\n]/).map((term) => term.trim()).filter((term) => term.length > 0);
+  return customRaw.split(/[,\n]/).map((term) => stripTermPunctuation(term.trim())).filter((term) => term.length > 0);
 }
 function combineVocabulary(explicit, customRaw, collected) {
   const ordered = [...explicit != null ? explicit : [], ...parseCustomTerms(customRaw), ...collected];
@@ -4996,6 +5042,417 @@ function combineVocabulary(explicit, customRaw, collected) {
     if (result.length >= MAX_TERMS) break;
   }
   return result;
+}
+
+// ../shared/src/term-candidates.ts
+var TERM_SOURCE_ORDER = [
+  "explicit",
+  "custom",
+  "learned",
+  "filename",
+  "neighborhood"
+];
+var TERM_SOURCE_LABELS = {
+  explicit: "Note frontmatter (voxtral-vocabulary)",
+  custom: "Custom vocabulary",
+  learned: "Confirmed in earlier recordings",
+  filename: "From the file name",
+  neighborhood: "From the note and its links"
+};
+var FILENAME_STOPWORDS = /* @__PURE__ */ new Set([
+  "interview",
+  "opname",
+  "recording",
+  "record",
+  "meeting",
+  "vergadering",
+  "gesprek",
+  "notitie",
+  "notities",
+  "note",
+  "notes",
+  "audio",
+  "voice",
+  "memo",
+  "memos",
+  "new",
+  "nieuw",
+  "nieuwe",
+  "untitled",
+  "naamloos",
+  "overleg",
+  "call",
+  "sessie",
+  "session",
+  "transcript",
+  "transcriptie",
+  "deel",
+  "part",
+  "test",
+  "kopie",
+  "copy",
+  "final",
+  "def",
+  "versie",
+  "version",
+  "met",
+  "and",
+  "the",
+  "van",
+  "voor",
+  "over",
+  "een",
+  "het",
+  "der",
+  "des",
+  "von",
+  "und",
+  "januari",
+  "februari",
+  "maart",
+  "april",
+  "mei",
+  "juni",
+  "juli",
+  "augustus",
+  "september",
+  "oktober",
+  "november",
+  "december",
+  "january",
+  "february",
+  "march",
+  "may",
+  "june",
+  "july",
+  "august",
+  "october"
+]);
+function extractFilenameTerms(basename) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const raw of basename.split(/[\s_\-.,;:()[\]{}+&/\\#@0-9]+/)) {
+    const token = raw.trim();
+    if (token.length < 3) continue;
+    if (!/^\p{Lu}[\p{L}']*$/u.test(token)) continue;
+    if (/^[IVXLC]+$/.test(token)) continue;
+    const key = token.toLowerCase();
+    if (FILENAME_STOPWORDS.has(key)) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(token);
+  }
+  return result;
+}
+function assembleTerms(groups, extra = [], cap = CONTEXT_BIAS_MAX_TERMS) {
+  const ordered = [...extra];
+  for (const source of TERM_SOURCE_ORDER) {
+    for (const group of groups) {
+      if (group.source === source) ordered.push(...group.terms);
+    }
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const raw of ordered) {
+    const term = raw.trim();
+    if (!term) continue;
+    const key = term.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(term);
+    if (result.length >= cap) break;
+  }
+  return result;
+}
+function parseTypedTerms(text) {
+  return text.split(/[,\n]/).map((t) => t.trim()).filter((t) => t.length > 0);
+}
+
+// ../shared/src/learned-vocabulary.ts
+var LEARNED_MAX_ENTRIES = 200;
+var LEARNED_CONTEXT_MAX = 30;
+function recordLearnedTerms(list, confirmed, demoted = [], now = /* @__PURE__ */ new Date()) {
+  const byKey = /* @__PURE__ */ new Map();
+  for (const entry of list) byKey.set(entry.term.toLowerCase(), { ...entry });
+  const stamp = now.toISOString().slice(0, 10);
+  for (const raw of confirmed) {
+    const term = raw.trim();
+    if (!term) continue;
+    const key = term.toLowerCase();
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.lastUsed = stamp;
+    } else {
+      byKey.set(key, { term, count: 1, lastUsed: stamp });
+    }
+  }
+  for (const raw of demoted) {
+    const key = raw.trim().toLowerCase();
+    const existing = byKey.get(key);
+    if (!existing) continue;
+    existing.count -= 1;
+    if (existing.count <= 0) byKey.delete(key);
+  }
+  return [...byKey.values()].sort((a, b) => b.lastUsed.localeCompare(a.lastUsed) || b.count - a.count).slice(0, LEARNED_MAX_ENTRIES);
+}
+function learnedTermsForContext(list, max = LEARNED_CONTEXT_MAX) {
+  return [...list].sort((a, b) => b.lastUsed.localeCompare(a.lastUsed) || b.count - a.count).slice(0, max).map((e) => e.term);
+}
+
+// src/term-preflight.ts
+function collectTermGroups(opts) {
+  var _a, _b;
+  const { app, settings, audioFile, noteFile } = opts;
+  const groups = [];
+  const add = (source, terms) => {
+    if (terms && terms.length > 0) groups.push({ source, terms });
+  };
+  add(
+    "explicit",
+    noteFile ? resolveVocabularyOverride(
+      (_b = (_a = app.metadataCache.getFileCache(noteFile)) == null ? void 0 : _a.frontmatter) == null ? void 0 : _b["voxtral-vocabulary"]
+    ) : void 0
+  );
+  add("custom", parseCustomTerms(settings.customVocabularyTerms));
+  add("learned", learnedTermsForContext(settings.learnedVocabulary));
+  if (opts.includeFilename) add("filename", extractFilenameTerms(audioFile.basename));
+  if (settings.vaultVocabulary && noteFile) add("neighborhood", collectVaultVocabulary(app, noteFile));
+  return groups;
+}
+function defaultTermSelection(groups) {
+  return assembleTerms(groups);
+}
+function noteVocabularyTerms(chosen, customBefore) {
+  const already = new Set(customBefore.map((t) => t.toLowerCase()));
+  return chosen.filter((t) => !already.has(t.toLowerCase()));
+}
+
+// src/term-preflight-modal.ts
+var import_obsidian5 = require("obsidian");
+
+// src/term-selection.ts
+function ownedTermsByGroup(groups) {
+  const claimed = /* @__PURE__ */ new Set();
+  const owned = /* @__PURE__ */ new Map();
+  for (const group of groups) {
+    const terms = /* @__PURE__ */ new Set();
+    for (const term of group.terms) {
+      const key = term.toLowerCase();
+      if (claimed.has(key)) continue;
+      claimed.add(key);
+      terms.add(term);
+    }
+    owned.set(group, terms);
+  }
+  return owned;
+}
+function coveringGroup(groups) {
+  const owner = /* @__PURE__ */ new Map();
+  for (const group of groups) {
+    for (const term of group.terms) {
+      const key = term.toLowerCase();
+      if (!owner.has(key)) owner.set(key, group);
+    }
+  }
+  return owner;
+}
+function selectedGroups(groups, kept) {
+  return groups.map((group) => ({
+    source: group.source,
+    terms: group.terms.filter((term) => {
+      var _a;
+      return (_a = kept.get(group)) == null ? void 0 : _a.has(term);
+    })
+  }));
+}
+
+// src/term-preflight-modal.ts
+var TermPreflightModal = class extends import_obsidian5.Modal {
+  constructor(app, fileName, groups, resolveResult) {
+    super(app);
+    this.resolved = false;
+    this.typedText = "";
+    this.rememberTyped = false;
+    this.saveInNote = true;
+    this.dontAskAgain = false;
+    this.countEl = null;
+    this.recordingName = fileName;
+    this.termGroups = groups;
+    this.resolveResult = resolveResult;
+    this.owned = ownedTermsByGroup(groups);
+    this.covering = coveringGroup(groups);
+    this.keptByGroup = new Map(groups.map((g) => [g, new Set(this.owned.get(g))]));
+  }
+  chosenTerms() {
+    return assembleTerms(selectedGroups(this.termGroups, this.keptByGroup), parseTypedTerms(this.typedText));
+  }
+  refreshCounter() {
+    if (!this.countEl) return;
+    const wire = buildContextBias(this.chosenTerms()).length;
+    this.countEl.setText(
+      `${wire} of at most ${CONTEXT_BIAS_MAX_TERMS} terms will be sent as context bias.`
+    );
+  }
+  onOpen() {
+    var _a, _b;
+    const { contentEl } = this;
+    contentEl.addClass("voxtral-terms-modal");
+    this.containerEl.addClass("voxtral-terms-modal-container");
+    contentEl.createEl("h3", { text: "Terms for this recording" });
+    contentEl.createEl("p", {
+      cls: "voxtral-terms-intro",
+      text: `Names and jargon sent along with "${this.recordingName}" so the transcription spells them the way you do. Switch off what does not belong to this recording.`
+    });
+    if (this.termGroups.length === 0) {
+      contentEl.createEl("p", {
+        cls: "voxtral-terms-empty",
+        text: "No terms were found for this recording yet. Type the names and jargon you expect below."
+      });
+    }
+    const mirrorsByTerm = /* @__PURE__ */ new Map();
+    const updateMirrors = (key, checked) => {
+      var _a2;
+      for (const el of (_a2 = mirrorsByTerm.get(key)) != null ? _a2 : []) el.checked = checked;
+    };
+    for (const group of this.termGroups) {
+      const ownedTerms = (_a = this.owned.get(group)) != null ? _a : /* @__PURE__ */ new Set();
+      const box = contentEl.createDiv({ cls: "voxtral-terms-group" });
+      const head = box.createDiv({ cls: "voxtral-terms-group-head" });
+      head.createSpan({ text: `${TERM_SOURCE_LABELS[group.source]} (${group.terms.length})` });
+      const toggleAll = head.createEl("button", {
+        text: ownedTerms.size === 0 ? "All" : "None",
+        cls: "voxtral-terms-group-toggle"
+      });
+      toggleAll.disabled = ownedTerms.size === 0;
+      const list = box.createDiv({ cls: "voxtral-terms-list" });
+      const boxes = [];
+      for (const term of group.terms) {
+        const key = term.toLowerCase();
+        const isOwned = ownedTerms.has(term);
+        const label = list.createEl("label", {
+          cls: isOwned ? "voxtral-term-chip" : "voxtral-term-chip voxtral-term-chip-covered"
+        });
+        const input = label.createEl("input", { type: "checkbox" });
+        input.checked = true;
+        label.appendText(term);
+        if (!isOwned) {
+          input.disabled = true;
+          const owner = this.covering.get(key);
+          label.setAttribute(
+            "title",
+            owner ? `Already included under ${TERM_SOURCE_LABELS[owner.source]}` : "Already included above"
+          );
+          const mirrors = (_b = mirrorsByTerm.get(key)) != null ? _b : [];
+          mirrors.push(input);
+          mirrorsByTerm.set(key, mirrors);
+          continue;
+        }
+        input.addEventListener("change", () => {
+          const set = this.keptByGroup.get(group);
+          if (!set) return;
+          if (input.checked) set.add(term);
+          else set.delete(term);
+          updateMirrors(key, input.checked);
+          toggleAll.setText(set.size === 0 ? "All" : "None");
+          this.refreshCounter();
+        });
+        boxes.push(input);
+      }
+      toggleAll.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        const set = this.keptByGroup.get(group);
+        if (!set) return;
+        const turnOn = set.size === 0;
+        set.clear();
+        if (turnOn) for (const t of ownedTerms) set.add(t);
+        for (const b of boxes) b.checked = turnOn;
+        for (const t of ownedTerms) updateMirrors(t.toLowerCase(), turnOn);
+        toggleAll.setText(turnOn ? "None" : "All");
+        this.refreshCounter();
+      });
+    }
+    new import_obsidian5.Setting(contentEl).setName("Only for this recording").setDesc("Names and jargon you expect to hear, separated by commas or new lines.").addTextArea((area) => {
+      area.setPlaceholder("Names, places, jargon");
+      area.onChange((value) => {
+        this.typedText = value;
+        this.refreshCounter();
+      });
+      area.inputEl.addEventListener("focus", () => {
+        window.setTimeout(() => area.inputEl.scrollIntoView({ block: "center" }), 300);
+      });
+    });
+    new import_obsidian5.Setting(contentEl).setName("Save the list in the note").setDesc("Write these terms (except the custom vocabulary) into the note's frontmatter, so the next recording for this note starts with them.").addToggle(
+      (toggle) => toggle.setValue(true).onChange((value) => {
+        this.saveInNote = value;
+      })
+    );
+    new import_obsidian5.Setting(contentEl).setName("Remember the typed terms").setDesc("Add them to the custom vocabulary setting so every later recording gets them too.").addToggle(
+      (toggle) => toggle.setValue(false).onChange((value) => {
+        this.rememberTyped = value;
+      })
+    );
+    this.countEl = contentEl.createEl("p", { cls: "voxtral-terms-counter" });
+    this.refreshCounter();
+    new import_obsidian5.Setting(contentEl).setName("Don't ask again").setDesc("Send the default selection without this dialog. You can turn it back on in settings.").addToggle(
+      (toggle) => toggle.setValue(false).onChange((value) => {
+        this.dontAskAgain = value;
+      })
+    );
+    this.renderActions(contentEl);
+  }
+  renderActions(parent) {
+    new import_obsidian5.Setting(parent).setClass("voxtral-terms-actions").addButton((btn) => btn.setButtonText("Cancel").onClick(() => this.finish(false))).addButton(
+      (btn) => btn.setButtonText("Transcribe").setCta().onClick(() => this.finish(true))
+    );
+  }
+  finish(proceed) {
+    this.resolved = true;
+    const learnable = /* @__PURE__ */ new Set(["filename", "explicit", "learned"]);
+    const confirmed = proceed ? [...parseTypedTerms(this.typedText)] : [];
+    const demoted = [];
+    if (proceed) {
+      for (const group of this.termGroups) {
+        if (!learnable.has(group.source)) continue;
+        const kept = this.keptByGroup.get(group);
+        const ownedTerms = this.owned.get(group);
+        for (const term of group.terms) {
+          if (!(ownedTerms == null ? void 0 : ownedTerms.has(term))) continue;
+          if (kept == null ? void 0 : kept.has(term)) confirmed.push(term);
+          else if (group.source !== "explicit") demoted.push(term);
+        }
+      }
+    }
+    this.resolveResult({
+      proceed,
+      terms: proceed ? this.chosenTerms() : [],
+      rememberTerms: proceed && this.rememberTyped ? parseTypedTerms(this.typedText) : [],
+      dontAskAgain: this.dontAskAgain,
+      confirmedTerms: confirmed,
+      demotedTerms: demoted,
+      saveInNote: proceed && this.saveInNote
+    });
+    this.close();
+  }
+  onClose() {
+    this.contentEl.empty();
+    if (!this.resolved) {
+      this.resolveResult({
+        proceed: false,
+        terms: [],
+        rememberTerms: [],
+        dontAskAgain: this.dontAskAgain,
+        confirmedTerms: [],
+        demotedTerms: [],
+        saveInNote: false
+      });
+    }
+  }
+};
+function chooseTermsForRecording(app, fileName, groups) {
+  return new Promise((resolve) => {
+    new TermPreflightModal(app, fileName, groups, resolve).open();
+  });
 }
 
 // src/tts-text.ts
@@ -5118,7 +5575,315 @@ ${piece}`;
 }
 
 // src/file-transcription-service.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
+
+// src/byte-source.ts
+function bufferSource(bytes) {
+  return {
+    size: bytes.byteLength,
+    async read(offset, length) {
+      const end = Math.min(bytes.byteLength, Math.max(offset, 0) + Math.max(length, 0));
+      return new Uint8Array(bytes.slice(Math.max(offset, 0), end));
+    },
+    async readAll() {
+      return bytes;
+    },
+    async close() {
+    }
+  };
+}
+var RANGED_READ_MIN_BYTES = 256 * 1024 * 1024;
+var MAX_SINGLE_READ_BYTES = 64 * 1024 * 1024;
+async function nodeFileSource(path) {
+  try {
+    const req = window.require;
+    if (typeof req !== "function") return null;
+    const fsModule = req("fs");
+    const promises = fsModule == null ? void 0 : fsModule.promises;
+    if (!promises) return null;
+    const stat = await promises.stat(path);
+    const handle = await promises.open(path, "r");
+    let closed = false;
+    const fill = async (buffer, position) => {
+      var _a;
+      let filled = 0;
+      while (filled < buffer.length) {
+        const want = Math.min(buffer.length - filled, MAX_SINGLE_READ_BYTES);
+        const { bytesRead: n } = await handle.read(buffer, filled, want, position + filled);
+        if (n <= 0) break;
+        filled += n;
+      }
+      source.bytesRead = ((_a = source.bytesRead) != null ? _a : 0) + filled;
+      return filled;
+    };
+    const source = {
+      size: stat.size,
+      bytesRead: 0,
+      async read(offset, length) {
+        const start = Math.max(offset, 0);
+        const want = Math.max(Math.min(length, stat.size - start), 0);
+        const buffer = new Uint8Array(want);
+        const filled = await fill(buffer, start);
+        return filled === buffer.length ? buffer : buffer.slice(0, filled);
+      },
+      async readAll() {
+        const buffer = new Uint8Array(stat.size);
+        const filled = await fill(buffer, 0);
+        return filled === buffer.length ? buffer.buffer : buffer.slice(0, filled).buffer;
+      },
+      async close() {
+        if (closed) return;
+        closed = true;
+        await handle.close();
+      }
+    };
+    return source;
+  } catch (e) {
+    return null;
+  }
+}
+
+// src/wav-source.ts
+var RIFF = 1179011410;
+var WAVE = 1163280727;
+var FMT = 544501094;
+var DATA = 1635017060;
+var FORMAT_PCM = 1;
+var FORMAT_FLOAT = 3;
+var FORMAT_EXTENSIBLE = 65534;
+function parseWavHeaderIn(bytes, totalSize) {
+  if (bytes.byteLength < 44) return null;
+  const view = new DataView(bytes);
+  if (view.getUint32(0, true) !== RIFF || view.getUint32(8, true) !== WAVE) return null;
+  let sampleRate = 0;
+  let channels = 0;
+  let bitsPerSample = 0;
+  let formatTag = 0;
+  let dataOffset = 0;
+  let dataBytes = 0;
+  let pos = 12;
+  while (pos + 8 <= bytes.byteLength) {
+    const id = view.getUint32(pos, true);
+    const size = view.getUint32(pos + 4, true);
+    const body = pos + 8;
+    if (id === FMT && body + 16 <= bytes.byteLength) {
+      formatTag = view.getUint16(body, true);
+      channels = view.getUint16(body + 2, true);
+      sampleRate = view.getUint32(body + 4, true);
+      bitsPerSample = view.getUint16(body + 14, true);
+      if (formatTag === FORMAT_EXTENSIBLE && body + 26 <= bytes.byteLength) {
+        formatTag = view.getUint16(body + 24, true);
+      }
+    } else if (id === DATA) {
+      dataOffset = body;
+      const remaining = totalSize - body;
+      dataBytes = size === 0 || size > remaining ? remaining : size;
+      break;
+    }
+    pos = body + size + size % 2;
+    if (size === 0) break;
+  }
+  if (!dataOffset || dataBytes <= 0 || !sampleRate || !channels) return null;
+  if (formatTag !== FORMAT_PCM && formatTag !== FORMAT_FLOAT) return null;
+  const format = formatTag === FORMAT_FLOAT ? "float" : "pcm";
+  if (format === "pcm" && ![8, 16, 24, 32].includes(bitsPerSample)) return null;
+  if (format === "float" && ![32, 64].includes(bitsPerSample)) return null;
+  const frameBytes = bitsPerSample / 8 * channels;
+  if (frameBytes <= 0) return null;
+  return {
+    sampleRate,
+    channels,
+    bitsPerSample,
+    format,
+    dataOffset,
+    dataBytes,
+    totalFrames: Math.floor(dataBytes / frameBytes)
+  };
+}
+var MAX_HEADER_READ_BYTES = 1024 * 1024;
+async function parseWavHeaderAsync(source) {
+  const headLen = Math.min(MAX_HEADER_READ_BYTES, source.size);
+  if (headLen < 44) return null;
+  const head = await source.read(0, headLen);
+  return parseWavHeaderIn(head.buffer, source.size);
+}
+var MAX_NORMALISE_GAIN = 32;
+function gainFromPeak(peak, info) {
+  if (info.format !== "float") return 1;
+  if (!(peak > 0) || !Number.isFinite(peak)) return 1;
+  return Math.min(MAX_NORMALISE_GAIN, 1 / peak);
+}
+function peakOfBlock(block, info) {
+  let peak = 0;
+  const bytesPerSample = info.bitsPerSample / 8;
+  const frameBytes = bytesPerSample * info.channels;
+  if (frameBytes <= 0) return 0;
+  const frames = Math.floor(block.byteLength / frameBytes);
+  const count = frames * info.channels;
+  if (info.bitsPerSample === 32 && block.byteOffset % 4 === 0) {
+    const samples = new Float32Array(block.buffer, block.byteOffset, count);
+    for (let i = 0; i < samples.length; i++) {
+      const v = Math.abs(samples[i]);
+      if (v > peak) peak = v;
+    }
+    return peak;
+  }
+  const view = new DataView(block.buffer, block.byteOffset, block.byteLength);
+  for (let i = 0; i < count; i++) {
+    const v = Math.abs(readSample(view, i * bytesPerSample, info));
+    if (v > peak) peak = v;
+  }
+  return peak;
+}
+var NORMALISE_WINDOW_BYTES = 16 * 1024 * 1024;
+async function normalisationGainFrom(source, info) {
+  if (info.format !== "float") return 1;
+  const bytesPerSample = info.bitsPerSample / 8;
+  const frameBytes = bytesPerSample * info.channels;
+  if (frameBytes <= 0) return 1;
+  const framesPerWindow = Math.max(1, Math.floor(NORMALISE_WINDOW_BYTES / frameBytes));
+  const windowBytes = framesPerWindow * frameBytes;
+  let peak = 0;
+  let readSoFar = 0;
+  while (readSoFar < info.dataBytes) {
+    const length = Math.min(windowBytes, info.dataBytes - readSoFar);
+    const block = await source.read(info.dataOffset + readSoFar, length);
+    const blockPeak = peakOfBlock(block, info);
+    if (blockPeak > peak) peak = blockPeak;
+    readSoFar += length;
+  }
+  return gainFromPeak(peak, info);
+}
+function monoFramesFromBlock(block, info, gain = 1) {
+  const bytesPerSample = info.bitsPerSample / 8;
+  const frameBytes = bytesPerSample * info.channels;
+  if (frameBytes <= 0) return new Float32Array(0);
+  const frames = Math.floor(block.byteLength / frameBytes);
+  const out = new Float32Array(frames);
+  const view = new DataView(block.buffer, block.byteOffset, block.byteLength);
+  for (let i = 0; i < frames; i++) {
+    const frameStart = i * frameBytes;
+    let sum = 0;
+    for (let ch = 0; ch < info.channels; ch++) {
+      sum += readSample(view, frameStart + ch * bytesPerSample, info);
+    }
+    out[i] = sum / info.channels * gain;
+  }
+  return out;
+}
+async function monoFramesFromSource(source, info, startFrame, endFrame, gain = 1) {
+  const first = Math.max(0, Math.min(startFrame, info.totalFrames));
+  const last = Math.max(first, Math.min(endFrame, info.totalFrames));
+  const bytesPerSample = info.bitsPerSample / 8;
+  const frameBytes = bytesPerSample * info.channels;
+  const block = await source.read(info.dataOffset + first * frameBytes, (last - first) * frameBytes);
+  return monoFramesFromBlock(block, info, gain);
+}
+function readSample(view, offset, info) {
+  if (info.format === "float") {
+    return info.bitsPerSample === 64 ? view.getFloat64(offset, true) : view.getFloat32(offset, true);
+  }
+  switch (info.bitsPerSample) {
+    case 8:
+      return (view.getUint8(offset) - 128) / 128;
+    case 16:
+      return view.getInt16(offset, true) / 32768;
+    case 24: {
+      const lo = view.getUint8(offset);
+      const mid = view.getUint8(offset + 1);
+      const hi = view.getInt8(offset + 2);
+      return (hi << 16 | mid << 8 | lo) / 8388608;
+    }
+    default:
+      return view.getInt32(offset, true) / 2147483648;
+  }
+}
+
+// src/decimate.ts
+var TARGET_SAMPLE_RATE = 16e3;
+var KERNEL_HALF_WIDTH = 16;
+function kernelPaddingFrames(fromRate, toRate) {
+  if (fromRate === toRate) return 0;
+  return Math.ceil(KERNEL_HALF_WIDTH * Math.max(1, fromRate / toRate));
+}
+function sinc(x) {
+  if (x === 0) return 1;
+  const px = Math.PI * x;
+  return Math.sin(px) / px;
+}
+function blackman(t) {
+  return 0.42 - 0.5 * Math.cos(2 * Math.PI * t) + 0.08 * Math.cos(4 * Math.PI * t);
+}
+function gcd(a, b) {
+  let x = a;
+  let y = b;
+  while (y !== 0) {
+    const rest = x % y;
+    x = y;
+    y = rest;
+  }
+  return x;
+}
+var planCache = /* @__PURE__ */ new Map();
+function buildKernelPlan(fromRate, toRate) {
+  const key = `${fromRate}:${toRate}`;
+  const cached = planCache.get(key);
+  if (cached) return cached;
+  const g = gcd(fromRate, toRate);
+  const p = fromRate / g;
+  const q = toRate / g;
+  const fc = 0.45 * Math.min(fromRate, toRate) / fromRate;
+  const halfWidth = KERNEL_HALF_WIDTH * Math.max(1, p / q);
+  const phases = new Array(q);
+  const tapStart = new Int32Array(q);
+  for (let k = 0; k < q; k++) {
+    const frac = k / q;
+    const lo = Math.ceil(-halfWidth - frac);
+    const hi = Math.floor(halfWidth - frac);
+    const weights = new Float32Array(Math.max(0, hi - lo + 1));
+    let sum = 0;
+    for (let t = lo; t <= hi; t++) {
+      const di = t + frac;
+      const w = sinc(2 * fc * di) * blackman((di / halfWidth + 1) / 2);
+      weights[t - lo] = w;
+      sum += w;
+    }
+    if (sum !== 0) {
+      for (let i = 0; i < weights.length; i++) weights[i] /= sum;
+    }
+    phases[k] = weights;
+    tapStart[k] = lo;
+  }
+  const plan = { p, q, phases, tapStart };
+  planCache.set(key, plan);
+  return plan;
+}
+function applyPlan(samples, plan, outLen, baseOffset) {
+  const out = new Float32Array(outLen);
+  const { p, q, phases, tapStart } = plan;
+  const srcLen = samples.length;
+  for (let n = 0; n < outLen; n++) {
+    const numer = n * p;
+    const k = numer % q;
+    const base = baseOffset + Math.floor(numer / q);
+    const weights = phases[k];
+    const start = base + tapStart[k];
+    let sum = 0;
+    for (let t = 0; t < weights.length; t++) {
+      const idx = start + t;
+      const clamped = idx < 0 ? 0 : idx >= srcLen ? srcLen - 1 : idx;
+      sum += weights[t] * samples[clamped];
+    }
+    out[n] = sum;
+  }
+  return out;
+}
+function resampleSpan(padded, fromRate, toRate, leadingPad, spanFrames) {
+  if (fromRate === toRate) return padded.slice(leadingPad, leadingPad + spanFrames);
+  const outLen = Math.round(spanFrames * toRate / fromRate);
+  if (outLen <= 0) return new Float32Array(0);
+  return applyPlan(padded, buildKernelPlan(fromRate, toRate), outLen, leadingPad);
+}
 
 // src/audio-quality.ts
 var LIKELY_TOO_LARGE_MB = 90;
@@ -5227,9 +5992,9 @@ function maxSafeChunkSeconds(sampleRate) {
   if (sampleRate <= 0) return CHUNK_TARGET_SECONDS;
   return Math.max(1, Math.floor((CHUNK_MAX_BYTES - WAV_HEADER_BYTES) / (sampleRate * 2)));
 }
-function planChunks(totalFrames, sampleRate, chunkSeconds) {
+function planChunks(totalFrames, sampleRate, chunkSeconds, encodedRate = sampleRate) {
   if (totalFrames <= 0 || sampleRate <= 0) return [];
-  const safeSeconds = Math.min(chunkSeconds, maxSafeChunkSeconds(sampleRate));
+  const safeSeconds = Math.min(chunkSeconds, maxSafeChunkSeconds(encodedRate));
   const framesPerChunk = Math.max(1, Math.floor(safeSeconds * sampleRate));
   const spans = [];
   let start = 0;
@@ -5289,6 +6054,25 @@ function encodeWavMono(samples, sampleRate) {
     offset += 2;
   }
   return buffer;
+}
+var MIN_SPLIT_SECONDS = 60;
+function canSplitSpan(span) {
+  return span.endSec - span.startSec >= MIN_SPLIT_SECONDS * 2;
+}
+function splitSpan(span) {
+  const m = span.sub ? span.sub.split("/").map(Number) : [1, 1];
+  const n = m[0];
+  const denom = m[1] * 2;
+  const midFrame = span.startFrame + Math.floor((span.endFrame - span.startFrame) / 2);
+  const rate = (span.endFrame - span.startFrame) / (span.endSec - span.startSec);
+  const midSec = span.startSec + (midFrame - span.startFrame) / rate;
+  return [
+    { ...span, endFrame: midFrame, endSec: midSec, sub: `${2 * n - 1}/${denom}` },
+    { ...span, startFrame: midFrame, startSec: midSec, sub: `${2 * n}/${denom}` }
+  ];
+}
+function partTitle(span) {
+  return `Part ${span.index + 1}${span.sub ? ` (${span.sub})` : ""}`;
 }
 
 // src/transcript-format.ts
@@ -5414,8 +6198,8 @@ function diarizationNotice(perPart) {
 }
 
 // src/audio-quality-modal.ts
-var import_obsidian5 = require("obsidian");
-var QualityWarningModal = class extends import_obsidian5.Modal {
+var import_obsidian6 = require("obsidian");
+var QualityWarningModal = class extends import_obsidian6.Modal {
   constructor(app, fileName, warnings, resolveResult) {
     super(app);
     this.resolved = false;
@@ -5434,14 +6218,14 @@ var QualityWarningModal = class extends import_obsidian5.Modal {
     for (const w of this.warnings) {
       list.createEl("li", { text: w.message });
     }
-    new import_obsidian5.Setting(contentEl).setName("Don't warn me again").setDesc(
+    new import_obsidian6.Setting(contentEl).setName("Don't warn me again").setDesc(
       "Skip this check for future file transcriptions. You can re-enable it in settings."
     ).addToggle(
       (toggle) => toggle.setValue(false).onChange((value) => {
         this.dontWarnAgain = value;
       })
     );
-    new import_obsidian5.Setting(contentEl).addButton(
+    new import_obsidian6.Setting(contentEl).addButton(
       (btn) => btn.setButtonText("Cancel").onClick(() => this.finish(false))
     ).addButton(
       (btn) => btn.setButtonText("Transcribe anyway").setCta().onClick(() => this.finish(true))
@@ -5501,8 +6285,8 @@ function reviewRenameGroups(chunks) {
 }
 
 // src/transcript-review-modal.ts
-var import_obsidian6 = require("obsidian");
-var TranscriptReviewModal = class extends import_obsidian6.Modal {
+var import_obsidian7 = require("obsidian");
+var TranscriptReviewModal = class extends import_obsidian7.Modal {
   constructor(app, params, resolveDone) {
     super(app);
     this.params = params;
@@ -5514,7 +6298,7 @@ var TranscriptReviewModal = class extends import_obsidian6.Modal {
     const { contentEl } = this;
     this.containerEl.addClass("voxtral-review-overlay");
     this.modalEl.addClass("voxtral-review-modal");
-    if (import_obsidian6.Platform.isMobile && window.visualViewport) {
+    if (import_obsidian7.Platform.isMobile && window.visualViewport) {
       const vv = window.visualViewport;
       const adjustHeight = () => {
         this.modalEl.style.maxHeight = `${vv.height - 32}px`;
@@ -5523,18 +6307,18 @@ var TranscriptReviewModal = class extends import_obsidian6.Modal {
       vv.addEventListener("resize", adjustHeight);
       this.removeVVListener = () => vv.removeEventListener("resize", adjustHeight);
     }
-    new import_obsidian6.Setting(contentEl).setName(`Review transcript: ${this.params.fileName}`).setHeading();
+    new import_obsidian7.Setting(contentEl).setName(`Review transcript: ${this.params.fileName}`).setHeading();
     this.previewEl = contentEl.createDiv({ cls: "voxtral-review-preview" });
     this.renderPreview();
     const groups = reviewRenameGroups(this.params.chunks);
     if (groups.length > 0) {
-      new import_obsidian6.Setting(contentEl).setName("Rename speakers").setDesc(
+      new import_obsidian7.Setting(contentEl).setName("Rename speakers").setDesc(
         groups.length > 1 ? "Each part's speaker numbers were detected independently \u2014 a rename only applies within its own part." : ""
       ).setHeading();
       for (const group of groups) {
         const partSuffix = group.partNumber != null ? ` (part ${group.partNumber})` : "";
         for (const label of group.labels) {
-          new import_obsidian6.Setting(contentEl).setName(`${label}${partSuffix}`).addText(
+          new import_obsidian7.Setting(contentEl).setName(`${label}${partSuffix}`).addText(
             (text) => text.setValue(label).onChange((value) => {
               this.setRename(group.partNumber, label, value);
             })
@@ -5542,7 +6326,7 @@ var TranscriptReviewModal = class extends import_obsidian6.Modal {
         }
       }
     }
-    new import_obsidian6.Setting(contentEl).addButton(
+    new import_obsidian7.Setting(contentEl).addButton(
       (btn) => btn.setButtonText("Discard").onClick(() => void this.finish("discard"))
     ).addButton(
       (btn) => btn.setButtonText("Insert").setCta().onClick(() => void this.finish("insert"))
@@ -5573,7 +6357,13 @@ var TranscriptReviewModal = class extends import_obsidian6.Modal {
     this.resolved = true;
     if (action === "insert") {
       const text = renderReviewChunks(this.params.chunks, this.renames);
-      await this.params.onInsert(text);
+      const names = /* @__PURE__ */ new Set();
+      for (const perPart of this.renames.values()) {
+        for (const name of perPart.values()) {
+          if (name.trim()) names.add(name.trim());
+        }
+      }
+      await this.params.onInsert(text, [...names]);
     } else {
       this.params.onDiscard();
     }
@@ -5597,6 +6387,10 @@ function openTranscriptReviewModal(app, params) {
 }
 
 // src/file-transcription-service.ts
+function describeBias(prefix, ctx) {
+  const bias = buildContextBias(ctx.vocabularyTerms);
+  return `${prefix} ${bias.length} context-bias term(s)`;
+}
 var _FileTranscriptionService = class _FileTranscriptionService {
   constructor(deps) {
     this.deps = deps;
@@ -5608,6 +6402,15 @@ var _FileTranscriptionService = class _FileTranscriptionService {
     // everything else waits here in request order.
     this.queue = [];
     this.running = false;
+    /** Options of the in-flight call (VX_E6_S7); read by the note-creation and review paths. */
+    this.current = {};
+    /**
+     * The step now running, for the failure notice (VX_E24_S5). The on-disk
+     * crash log only exists when debug logging is on, so a first crash carries
+     * no trace at all; this lives in memory and costs nothing, and turns "not
+     * enough memory" into "not enough memory, while reading the file".
+     */
+    this.currentStep = "starting";
   }
   get app() {
     return this.deps.app;
@@ -5647,8 +6450,15 @@ var _FileTranscriptionService = class _FileTranscriptionService {
     } catch (e) {
     }
   }
+  /** Log `msg`, then run `fn`. Keeps a "starting X" line in front of a step
+   * that may never return (the decode of a very large file). */
+  async logStepThen(msg, fn) {
+    await this.logStep(msg);
+    return fn();
+  }
   /** Record a step in BOTH the in-memory log and the crash-proof on-disk log. */
   async logStep(msg) {
+    this.currentStep = msg;
     vlog.debug(`Voxtral: ${msg}`);
     await this.crashLog(msg);
   }
@@ -5658,6 +6468,10 @@ var _FileTranscriptionService = class _FileTranscriptionService {
    * is diagnosable after the fact without console babysitting.
    */
   async logRealtime(msg) {
+    await this.logStep(msg);
+  }
+  /** Crash-proof line for a step that runs before `transcribe()` is called (the term dialog, VX_E6_S7). */
+  async logEvent(msg) {
     await this.logStep(msg);
   }
   // ── File transcription (batch) ──
@@ -5673,11 +6487,11 @@ var _FileTranscriptionService = class _FileTranscriptionService {
    * path's progress-notice Cancel button) stops only that file's remaining
    * parts and leaves the rest of the queue untouched.
    */
-  async transcribe(file, insert, context) {
+  async transcribe(file, insert, context, options = {}) {
     return new Promise((resolve) => {
-      this.queue.push({ file, insert, context, resolve });
+      this.queue.push({ file, insert, context, options, resolve });
       if (this.running) {
-        new import_obsidian7.Notice(`Queued: ${file.name} (${this.queue.length} waiting)`);
+        new import_obsidian8.Notice(`Queued: ${file.name} (${this.queue.length} waiting)`);
         return;
       }
       void this.drainQueue();
@@ -5699,6 +6513,7 @@ var _FileTranscriptionService = class _FileTranscriptionService {
       while (next = this.queue.shift()) {
         const item = next;
         try {
+          this.current = item.options;
           await this.runTranscribe(item.file, item.insert, item.context);
         } finally {
           item.resolve();
@@ -5714,37 +6529,57 @@ var _FileTranscriptionService = class _FileTranscriptionService {
     const ctx = context != null ? context : EMPTY_REQUEST_CONTEXT;
     try {
       const needsChunking = exceedsUploadLimit(file.stat.size);
-      const bytes = await this.app.vault.readBinary(file);
+      const ranged = needsChunking ? await this.openRangedSource(file) : null;
+      let bytes = null;
+      let source;
+      if (ranged) {
+        source = ranged;
+        await this.logStep(
+          `chunked: ranged read from disk (${file.name}, ${(file.stat.size / (1024 * 1024)).toFixed(0)} MB)`
+        );
+      } else {
+        this.currentStep = `reading ${file.name} (${(file.stat.size / (1024 * 1024)).toFixed(0)} MB) into memory`;
+        bytes = await this.app.vault.readBinary(file);
+        this.currentStep = "file read";
+        source = bufferSource(bytes);
+      }
       await this.crashLog(
         `
-=== ${(/* @__PURE__ */ new Date()).toISOString()} transcribe ${file.name} (${(file.stat.size / (1024 * 1024)).toFixed(1)} MB) chunked=${needsChunking} diarize=${settings.fileTranscriptDiarize} mobile=${import_obsidian7.Platform.isMobile} ===`
+=== ${(/* @__PURE__ */ new Date()).toISOString()} transcribe ${file.name} (${(file.stat.size / (1024 * 1024)).toFixed(1)} MB) chunked=${needsChunking} diarize=${settings.fileTranscriptDiarize} mobile=${import_obsidian8.Platform.isMobile} ===`
       );
       if (settings.fileTranscriptQualityWarnings) {
         const proceed = await this.preflightQualityGate(file, bytes);
         if (!proceed) {
-          new import_obsidian7.Notice(`Transcription of ${file.name} cancelled.`);
+          new import_obsidian8.Notice(`Transcription of ${file.name} cancelled.`);
           return;
         }
       }
       this.updateStatusBar("processing");
       if (ctx.vocabularyTerms.length) {
-        const n = buildContextBias(ctx.vocabularyTerms).length;
-        await this.logStep(`vault vocabulary: sending ${n} context-bias term(s)`);
+        await this.logStep(describeBias("vault vocabulary: sending", ctx));
       }
       if (needsChunking) {
-        await this.transcribeInChunks(file, bytes, insert, settings, ctx);
+        try {
+          await this.transcribeInChunks(file, source, insert, settings, ctx);
+        } finally {
+          await source.close();
+        }
         this.updateStatusBar("idle");
         return;
       }
-      new import_obsidian7.Notice(`Transcribing ${file.name}\u2026`);
+      if (!bytes) {
+        throw new Error(`Could not read ${file.name}.`);
+      }
+      new import_obsidian8.Notice(`Transcribing ${file.name}\u2026`);
       const blob = new Blob([bytes], { type: mimeForExtension(file.extension) });
       let chunks = [];
       if (settings.fileTranscriptDiarize) {
         await this.logStep("single-call: sending diarized request");
         const result = await this.transcribeDiarized(blob, settings, ctx);
         await this.logStep(
-          `single-call: response text=${result.text.length} chars, ${result.segments.length} segments; building body`
+          `single-call: response text=${result.text.length} chars, ${result.segments.length} segments`
         );
+        await this.logStep("single-call: building body");
         const turns = segmentsToTurns(result.segments);
         if (turns.length > 0) {
           chunks = [
@@ -5763,7 +6598,9 @@ ${fallback}` }];
         }
         await this.logStep(`single-call: built ${chunks.length} review chunk(s)`);
       } else {
+        await this.logStep("single-call: sending request");
         let text2 = (await transcribeBatch(blob, settings, this.httpRequest, false, ctx)).trim();
+        await this.logStep(`single-call: response text=${text2.length} chars`);
         if (text2 && settings.fileTranscriptCorrect) {
           await this.logStep(`single-call: correcting (${text2.length} chars)`);
           try {
@@ -5775,7 +6612,7 @@ ${fallback}` }];
             if (corrected) text2 = corrected;
           } catch (e) {
             await this.logStep(`single-call: correction failed: ${String(e)}`);
-            new import_obsidian7.Notice("Correction failed \u2014 inserting the uncorrected transcript.");
+            new import_obsidian8.Notice("Correction failed \u2014 inserting the uncorrected transcript.");
           }
         }
         if (text2) text2 = splitIntoParagraphs(text2);
@@ -5783,7 +6620,7 @@ ${fallback}` }];
       }
       this.updateStatusBar("idle");
       if (chunks.length === 0) {
-        new import_obsidian7.Notice(`No speech detected in ${file.name}.`);
+        new import_obsidian8.Notice(`No speech detected in ${file.name}.`);
         return;
       }
       if (settings.fileTranscriptReview) {
@@ -5793,22 +6630,51 @@ ${fallback}` }];
       const text = renderReviewChunks(chunks, /* @__PURE__ */ new Map());
       if (insert) {
         insert(text);
-        new import_obsidian7.Notice(`Inserted transcript of ${file.name}.`);
+        new import_obsidian8.Notice(`Inserted transcript of ${file.name}.`);
       } else {
         await this.createTranscriptNote(file, text);
       }
     } catch (e) {
       this.updateStatusBar("idle");
       const msg = String(e);
-      if (isTooLargeError(msg)) {
-        new import_obsidian7.Notice(
+      if (isMemoryError(msg)) {
+        new import_obsidian8.Notice(memoryErrorNotice(file.name, import_obsidian8.Platform.isMobile, this.currentStep), 1e4);
+      } else if (isTooLargeError(msg)) {
+        new import_obsidian8.Notice(
           `${file.name} was rejected as too large by the transcription service, even after splitting. Try a smaller or shorter recording.`,
           8e3
         );
       } else {
-        new import_obsidian7.Notice(`Transcription failed: ${msg}`);
+        new import_obsidian8.Notice(`Transcription failed: ${msg}`);
       }
       vlog.error("Voxtral: File transcription failed", e);
+    }
+  }
+  /**
+   * Try to open `file` for ranged reads straight from disk (VX_E24_S6),
+   * instead of the single `readBinary()` allocation that a 2 GB WAV never got
+   * past. Every condition must hold: desktop only (mobile has no `fs`, and a
+   * file this large is unusable there regardless of how it's read), `.wav`
+   * only (the only format this pipeline can split without decoding), only
+   * once the file is actually big enough that the single allocation is the
+   * risk, and only when the vault adapter is a real filesystem (not, say, a
+   * web/mobile adapter without a path on disk).
+   *
+   * Returns null on ANY failure so the caller falls back to `readBinary()`
+   * exactly as it did before this story — nothing here is allowed to turn
+   * into a hard error for the user.
+   */
+  async openRangedSource(file) {
+    try {
+      if (!import_obsidian8.Platform.isDesktopApp) return null;
+      if (file.extension.toLowerCase() !== "wav") return null;
+      if (file.stat.size < RANGED_READ_MIN_BYTES) return null;
+      const adapter = this.app.vault.adapter;
+      if (!(adapter instanceof import_obsidian8.FileSystemAdapter)) return null;
+      return await nodeFileSource(adapter.getFullPath(file.path));
+    } catch (e) {
+      vlog.error("Voxtral: could not open a ranged read of the file, falling back to readBinary()", e);
+      return null;
     }
   }
   /**
@@ -5825,7 +6691,7 @@ ${fallback}` }];
       };
       let signal = null;
       let durationSec = null;
-      if (shouldAnalyzeSignal(baseMeta, import_obsidian7.Platform.isMobile)) {
+      if (bytes && shouldAnalyzeSignal(baseMeta, import_obsidian8.Platform.isMobile)) {
         const analysis = await this.analyzeAudio(bytes);
         if (analysis) {
           signal = analysis.signal;
@@ -5905,14 +6771,20 @@ ${fallback}` }];
    */
   async decodeToMono16k(bytes) {
     try {
-      const ctx = new AudioContext();
+      const targetRate = 16e3;
+      const ctx = new AudioContext({ sampleRate: targetRate });
       let buf;
       try {
         buf = await ctx.decodeAudioData(bytes.slice(0));
       } finally {
         void ctx.close();
       }
-      const targetRate = 16e3;
+      await this.logStep(
+        `chunked: decoded at ${buf.sampleRate} Hz, ${buf.numberOfChannels} channel(s)${buf.sampleRate === targetRate ? "" : ` (asked for ${targetRate} Hz)`}`
+      );
+      if (buf.sampleRate === targetRate && buf.numberOfChannels === 1) {
+        return { samples: buf.getChannelData(0), sampleRate: targetRate };
+      }
       const frames = Math.max(1, Math.ceil(buf.duration * targetRate));
       const offline = new OfflineAudioContext(1, frames, targetRate);
       const source = offline.createBufferSource();
@@ -5938,16 +6810,18 @@ ${fallback}` }];
     await openTranscriptReviewModal(this.app, {
       fileName: file.name,
       chunks,
-      onInsert: async (finalText) => {
+      onInsert: async (finalText, speakerNames = []) => {
+        var _a, _b;
+        if (speakerNames.length > 0) (_b = (_a = this.current).onSpeakerNames) == null ? void 0 : _b.call(_a, speakerNames);
         if (insert) {
           insert(finalText);
-          new import_obsidian7.Notice(insertedNotice);
+          new import_obsidian8.Notice(insertedNotice);
         } else {
           await this.createTranscriptNote(file, finalText);
         }
       },
       onDiscard: () => {
-        new import_obsidian7.Notice(`Discarded transcript of ${file.name}.`);
+        new import_obsidian8.Notice(`Discarded transcript of ${file.name}.`);
       }
     });
   }
@@ -5959,20 +6833,59 @@ ${fallback}` }];
    * part by part. A progress notice shows "part k/N" with a Cancel button that
    * stops further parts and leaves the already-inserted text in place.
    */
-  async transcribeInChunks(file, bytes, insert, settings, context) {
+  async transcribeInChunks(file, source, insert, settings, context) {
     let totalFrames;
     let sampleRate;
+    let encodedRate;
     let chunkWav;
-    await this.logStep("chunked: decoding to 16 kHz mono");
-    const mono = await this.decodeToMono16k(bytes);
-    if (mono) {
+    const wav = file.extension.toLowerCase() === "wav" ? await parseWavHeaderAsync(source) : null;
+    const mono = wav ? null : await this.logStepThen(
+      "chunked: decoding to 16 kHz mono",
+      async () => this.decodeToMono16k(await source.readAll())
+    );
+    if (wav) {
+      if (wav.format === "float") {
+        await this.logStep(
+          `chunked: scanning peak over ${(wav.dataBytes / (1024 * 1024)).toFixed(0)} MB`
+        );
+      }
+      const gain = await normalisationGainFrom(source, wav);
+      await this.logStep(
+        `chunked: WAV fast path, ${wav.sampleRate} Hz \u2192 ${TARGET_SAMPLE_RATE} Hz, ${wav.channels} channel(s), ${wav.bitsPerSample}-bit ${wav.format}, ${wav.totalFrames} frames${gain === 1 ? "" : `, normalising by ${gain.toFixed(2)}x`}`
+      );
+      totalFrames = wav.totalFrames;
+      sampleRate = wav.sampleRate;
+      encodedRate = TARGET_SAMPLE_RATE;
+      chunkWav = async (span) => {
+        if (wav.sampleRate === TARGET_SAMPLE_RATE) {
+          return encodeWavMono(
+            await monoFramesFromSource(source, wav, span.startFrame, span.endFrame, gain),
+            wav.sampleRate
+          );
+        }
+        const pad = kernelPaddingFrames(wav.sampleRate, TARGET_SAMPLE_RATE);
+        const readStart = Math.max(0, span.startFrame - pad);
+        const readEnd = Math.min(wav.totalFrames, span.endFrame + pad);
+        const leadingPad = span.startFrame - readStart;
+        const raw = await monoFramesFromSource(source, wav, readStart, readEnd, gain);
+        const resampled = resampleSpan(
+          raw,
+          wav.sampleRate,
+          TARGET_SAMPLE_RATE,
+          leadingPad,
+          span.endFrame - span.startFrame
+        );
+        return encodeWavMono(resampled, TARGET_SAMPLE_RATE);
+      };
+    } else if (mono) {
       totalFrames = mono.samples.length;
       sampleRate = mono.sampleRate;
-      chunkWav = (span) => encodeWavMono(mono.samples.subarray(span.startFrame, span.endFrame), sampleRate);
+      encodedRate = sampleRate;
+      chunkWav = async (span) => encodeWavMono(mono.samples.subarray(span.startFrame, span.endFrame), sampleRate);
       await this.logStep(`chunked: decoded 16k mono, ${totalFrames} frames`);
     } else {
       await this.logStep("chunked: 16k decode failed, trying source-rate decode");
-      const decoded = await this.decodeToChannels(bytes);
+      const decoded = await this.decodeToChannels(await source.readAll());
       if (!decoded) {
         throw new Error(
           `Could not decode ${file.name} \u2014 it may be too large to split in memory on this device. Try a smaller/compressed file, or transcribe on desktop.`
@@ -5980,7 +6893,8 @@ ${fallback}` }];
       }
       totalFrames = decoded.totalFrames;
       sampleRate = decoded.sampleRate;
-      chunkWav = (span) => encodeWavMono(
+      encodedRate = sampleRate;
+      chunkWav = async (span) => encodeWavMono(
         mixToMono(decoded.channels, span.startFrame, span.endFrame),
         sampleRate
       );
@@ -5988,7 +6902,7 @@ ${fallback}` }];
         `chunked: decoded source-rate ${totalFrames} frames @ ${sampleRate}Hz`
       );
     }
-    const spans = planChunks(totalFrames, sampleRate, settings.chunkSeconds);
+    const spans = planChunks(totalFrames, sampleRate, settings.chunkSeconds, encodedRate);
     await this.logStep(`chunked: planned ${spans.length} chunk(s) @ ${sampleRate}Hz`);
     const review = settings.fileTranscriptReview;
     const reviewChunks = [];
@@ -6001,7 +6915,7 @@ ${fallback}` }];
       const note = await this.createLinkedNote(file, "");
       const leaf = this.app.workspace.getLeaf(true);
       await leaf.openFile(note);
-      const view = leaf.view instanceof import_obsidian7.MarkdownView ? leaf.view : null;
+      const view = leaf.view instanceof import_obsidian8.MarkdownView ? leaf.view : null;
       if (!view) {
         throw new Error(`Could not open a note for ${file.name}.`);
       }
@@ -6020,7 +6934,7 @@ ${fallback}` }];
       }
     };
     let cancelled = false;
-    const progress = new import_obsidian7.Notice("", 0);
+    const progress = new import_obsidian8.Notice("", 0);
     const renderProgress = (part) => {
       progress.setMessage(
         createFragment((frag) => {
@@ -6045,75 +6959,88 @@ ${fallback}` }];
 `);
       await this.logStep("chunked: diarization banner appended");
     }
+    let ctx = context;
+    const label = (span) => `chunk ${span.index + 1}/${spans.length}${span.sub ? ` (${span.sub})` : ""}`;
+    const requestPart = (span, blob, c) => retryWithBackoff(
+      (attempt) => {
+        if (attempt > 0) {
+          vlog.debug(`Voxtral: retry ${attempt} for ${label(span)}`);
+        }
+        return diarize ? this.transcribeDiarized(blob, settings, c) : transcribeBatchRaw(blob, settings, this.httpRequest, false, c);
+      },
+      {
+        attempts: 5,
+        baseDelayMs: 1500,
+        shouldRetry: (e) => !isPermanentRequestError(String(e))
+      }
+    );
+    const pending = [...spans];
     try {
-      for (const span of spans) {
-        if (cancelled) break;
+      while (pending.length > 0) {
+        const span = pending[0];
+        pending.shift();
+        if (cancelled) {
+          await this.logStep(`chunked: cancelled before ${label(span)}`);
+          break;
+        }
         renderProgress(span.index + 1);
-        await this.logStep(`chunk ${span.index + 1}/${spans.length}: encoding WAV`);
-        const wav = chunkWav(span);
-        const blob = new Blob([wav], { type: "audio/wav" });
+        await this.logStep(`${label(span)}: encoding WAV`);
+        const wav2 = await chunkWav(span);
+        const blob = new Blob([wav2], { type: "audio/wav" });
         await this.logStep(
-          `chunk ${span.index + 1}/${spans.length}: ${(wav.byteLength / (1024 * 1024)).toFixed(1)} MB WAV, ${Math.round(span.endSec - span.startSec)}s; sending (diarize=${diarize})`
+          `${label(span)}: ${(wav2.byteLength / (1024 * 1024)).toFixed(1)} MB WAV, ${Math.round(span.endSec - span.startSec)}s; sending (diarize=${diarize})`
         );
         let result = null;
         try {
-          result = await retryWithBackoff(
-            (attempt) => {
-              if (attempt > 0) {
-                vlog.debug(
-                  `Voxtral: retry ${attempt} for chunk ${span.index + 1}/${spans.length}`
-                );
-              }
-              return diarize ? this.transcribeDiarized(blob, settings, context) : transcribeBatchRaw(blob, settings, this.httpRequest, false, context);
-            },
-            {
-              attempts: 5,
-              baseDelayMs: 1500,
-              shouldRetry: (e) => !isTooLargeError(String(e))
-            }
-          );
+          result = await requestPart(span, blob, ctx);
           await this.logStep(
-            `chunk ${span.index + 1}/${spans.length}: response text=${result.text.length} chars, ${result.segments.length} segments`
+            `${label(span)}: response text=${result.text.length} chars, ${result.segments.length} segments`
           );
         } catch (e) {
+          await this.logStep(`${label(span)} failed: ${String(e)}`);
+          if (canSplitSpan(span)) {
+            const halves = splitSpan(span);
+            await this.logStep(
+              `${label(span)}: retrying as two halves of ${Math.round((span.endSec - span.startSec) / 2)}s`
+            );
+            pending.unshift(...halves);
+            continue;
+          }
           failed.push(span.index + 1);
-          await this.logStep(
-            `chunk ${span.index + 1}/${spans.length} failed: ${String(e)}`
-          );
         }
         if (!result) {
           if (diarize) {
-            append(`### Part ${span.index + 1}
+            append(`### ${partTitle(span)}
 
 [This part could not be transcribed]
 `);
           } else if (!correct) {
-            append(`[Part ${span.index + 1} could not be transcribed]
+            append(`[${partTitle(span)} could not be transcribed]
 `);
           }
           continue;
         }
         if (diarize) {
           await this.logStep(
-            `chunk ${span.index + 1}/${spans.length}: building diarized body from ${result.segments.length} segments`
+            `${label(span)}: building diarized body from ${result.segments.length} segments`
           );
           const turns = segmentsToTurns(result.segments);
           if (turns.length > 0) {
-            appendDiarizedPart(`### Part ${span.index + 1}
+            appendDiarizedPart(`### ${partTitle(span)}
 
 `, span.index + 1, turns, "\n");
             anyText = true;
           } else {
             const fallback = splitIntoParagraphs(result.text.trim());
             if (fallback) {
-              append(`### Part ${span.index + 1}
+              append(`### ${partTitle(span)}
 
 ${fallback}
 `);
               anyText = true;
             }
           }
-          await this.logStep(`chunk ${span.index + 1}/${spans.length}: appended`);
+          await this.logStep(`${label(span)}: appended`);
         } else {
           let part = result.text.trim();
           if (part) {
@@ -6133,18 +7060,23 @@ ${fallback}
         try {
           corrected = (await correctText(raw, settings, this.httpRequest, {
             timeoutMs: correctionTimeoutMs(raw.length),
-            context
+            context: ctx
           })).trim();
           await this.logStep(`chunked: correction done (${corrected.length} chars)`);
         } catch (e) {
           await this.logStep(`chunked: correction failed: ${String(e)}`);
-          new import_obsidian7.Notice("Correction failed \u2014 inserting the uncorrected transcript.");
+          new import_obsidian8.Notice("Correction failed \u2014 inserting the uncorrected transcript.");
         }
         append(splitIntoParagraphs(corrected || raw));
         anyText = true;
       }
     } finally {
       progress.hide();
+    }
+    if (typeof source.bytesRead === "number") {
+      await this.logStep(
+        `chunked: read ${(source.bytesRead / (1024 * 1024)).toFixed(0)} MB from disk in total`
+      );
     }
     const done = spans.length - failed.length;
     const failNote = failed.length ? ` ${failed.length} part(s) failed (${failed.join(", ")}); the rest was kept.` : "";
@@ -6154,13 +7086,13 @@ ${fallback}
       return;
     }
     if (cancelled) {
-      new import_obsidian7.Notice(`Stopped ${file.name}: ${done} of ${spans.length} parts done.${failNote}`);
+      new import_obsidian8.Notice(`Stopped ${file.name}: ${done} of ${spans.length} parts done.${failNote}`);
     } else if (!anyText && failed.length) {
-      new import_obsidian7.Notice(`Could not transcribe ${file.name}: all ${spans.length} parts failed.`);
+      new import_obsidian8.Notice(`Could not transcribe ${file.name}: all ${spans.length} parts failed.`);
     } else if (!anyText) {
-      new import_obsidian7.Notice(`No speech detected in ${file.name}.`);
+      new import_obsidian8.Notice(`No speech detected in ${file.name}.`);
     } else {
-      new import_obsidian7.Notice(`Transcribed ${file.name} in ${spans.length} parts.${failNote}`);
+      new import_obsidian8.Notice(`Transcribed ${file.name} in ${spans.length} parts.${failNote}`);
     }
   }
   /**
@@ -6174,16 +7106,28 @@ ${fallback}
     if (link.startsWith("!")) {
       link = link.slice(1);
     }
-    return this.app.vault.create(path, `Source: ${link}
+    const note = await this.app.vault.create(path, `Source: ${link}
 
 ${body}
 `);
+    const terms = this.current.noteVocabulary;
+    if (terms && terms.length > 0) {
+      try {
+        await this.app.fileManager.processFrontMatter(note, (fm) => {
+          fm["voxtral-vocabulary"] = terms;
+        });
+        await this.logStep(`note memory: wrote ${terms.length} term(s) to ${note.path}`);
+      } catch (e) {
+        await this.logStep(`note memory: could not write frontmatter: ${String(e)}`);
+      }
+    }
+    return note;
   }
   /** Create a new transcript note, open it, and notify (single-shot path). */
   async createTranscriptNote(file, text) {
     const note = await this.createLinkedNote(file, text);
     await this.app.workspace.getLeaf(true).openFile(note);
-    new import_obsidian7.Notice(`Transcript saved to ${note.path}.`);
+    new import_obsidian8.Notice(`Transcript saved to ${note.path}.`);
   }
   /** A note path under `folder` based on `base`, suffixed with a number if taken. */
   uniqueNotePath(folder, base) {
@@ -6204,7 +7148,7 @@ function uniqueNotePath(app, folder, base) {
 }
 
 // src/playback-controller.ts
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 var MAX_CACHED_CHUNKS = 12;
 var SKIP_BACK_RESTART_THRESHOLD_S = 2;
 var PlaybackController = class {
@@ -6348,7 +7292,7 @@ var PlaybackController = class {
     } catch (e) {
       vlog.error("Voxtral: audio playback failed", e);
       const head = Array.from(new Uint8Array(bytes.slice(0, 8))).map((b) => b.toString(16).padStart(2, "0")).join(" ");
-      new import_obsidian8.Notice(`Could not play audio: ${String(e)} [${bytes.byteLength}B head=${head}]`);
+      new import_obsidian9.Notice(`Could not play audio: ${String(e)} [${bytes.byteLength}B head=${head}]`);
       this.stopPlayback();
     }
   }
@@ -6623,7 +7567,7 @@ var PlaybackController = class {
    * the cache as-is (only the failed chunk's synthesis is lost). */
   handleChunkFailure(index, e) {
     vlog.error("Voxtral: listen back chunk failed", e);
-    new import_obsidian8.Notice(
+    new import_obsidian9.Notice(
       `Listen back failed at paragraph ${index + 1} of ${this.queueChunks.length}: ${String(e)}`
     );
     this.stopPlayback();
@@ -7685,7 +8629,7 @@ var CommandEngine = class {
 };
 
 // src/templates.ts
-var import_obsidian9 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 var TemplateRegistry = class {
   constructor() {
     this.templateCommands = [];
@@ -7703,14 +8647,14 @@ var TemplateRegistry = class {
   }
   scanFolder(folder) {
     for (const child of folder.children) {
-      if (child instanceof import_obsidian9.TFile && child.extension === "md") {
+      if (child instanceof import_obsidian10.TFile && child.extension === "md") {
         const displayName = child.basename;
         this.templateCommands.push({
           name: normalizeCommand(displayName),
           displayName,
           path: child.path
         });
-      } else if (child instanceof import_obsidian9.TFolder) {
+      } else if (child instanceof import_obsidian10.TFolder) {
         this.scanFolder(child);
       }
     }
@@ -10047,7 +10991,7 @@ var STATUS_BAR_STATES = {
     text: () => "\u27F3 reconnecting..."
   }
 };
-var VoxtralPlugin = class extends import_obsidian10.Plugin {
+var VoxtralPlugin = class extends import_obsidian11.Plugin {
   constructor() {
     super(...arguments);
     /**
@@ -10097,7 +11041,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     // loading, playing or paused. See playback-mobile-controls.ts.
     this.playbackMobileControls = new PlaybackMobileControls(
       (el, icon) => {
-        (0, import_obsidian10.setIcon)(el, icon);
+        (0, import_obsidian11.setIcon)(el, icon);
       }
     );
     // Per-note language override (VX_E27_S8): resolved once at recording
@@ -10119,7 +11063,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     this.sessionStyleInstruction = void 0;
     /** Platform adapter: wraps Obsidian's requestUrl as HttpRequestFn */
     this.httpRequest = async (options) => {
-      const response = await (0, import_obsidian10.requestUrl)({
+      const response = await (0, import_obsidian11.requestUrl)({
         url: options.url,
         method: options.method,
         headers: options.headers,
@@ -10225,9 +11169,9 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       isRecording: () => this.recording.isRecording(),
       getEditor: () => {
         var _a;
-        return this.recording.currentEditor || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) || null;
+        return this.recording.currentEditor || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView)) == null ? void 0 : _a.editor) || null;
       },
-      notify: (msg, dur) => new import_obsidian10.Notice(msg, dur),
+      notify: (msg, dur) => new import_obsidian11.Notice(msg, dur),
       onCommandExecuted: (commandId) => this.handleCommandExecuted(commandId),
       logLifecycle: (msg) => {
         void this.fileTranscriptionService.logRealtime(msg);
@@ -10255,14 +11199,14 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       },
       resolveEditor: () => {
         var _a, _b;
-        return (_b = (_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) != null ? _b : null;
+        return (_b = (_a = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView)) == null ? void 0 : _a.editor) != null ? _b : null;
       },
       updateStatusBar: (state) => this.updateStatusBar(state),
       setIndicatorState: (state) => {
         this.recordingIndicator.setState(state);
       },
       notify: (message, durationMs) => {
-        new import_obsidian10.Notice(message, durationMs);
+        new import_obsidian11.Notice(message, durationMs);
       },
       addSendButton: () => {
         this.addSendButton();
@@ -10274,7 +11218,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
         this.onRecordingStarted(mode);
       },
       onStopped: () => {
-        new import_obsidian10.Notice("Recording stopped");
+        new import_obsidian11.Notice("Recording stopped");
       },
       isHidden: () => activeDocument.hidden,
       setTimer: (callback, ms) => window.setTimeout(callback, ms),
@@ -10296,7 +11240,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     this.addRibbonIcon("mic", "Voxtral: start/stop recording", () => {
       void this.recording.toggle();
     });
-    if (!import_obsidian10.Platform.isMobile) {
+    if (!import_obsidian11.Platform.isMobile) {
       this.statusBarEl = this.addStatusBarItem();
       this.statusBarEl.addClass("mod-clickable");
       this.statusBarEl.setAttribute("aria-label", "Voxtral \u2014 open the voice help panel");
@@ -10305,7 +11249,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       });
       this.updateStatusBar("idle");
     }
-    if (!import_obsidian10.Platform.isMobile) {
+    if (!import_obsidian11.Platform.isMobile) {
       this.ttsStatusBarEl = this.addStatusBarItem();
       this.ttsStatusBarEl.addClass("voxtral-tts-status");
       this.ttsStatusBarEl.hidden = true;
@@ -10313,7 +11257,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
         cls: "voxtral-tts-btn"
       });
       this.ttsSkipBackBtn.setAttribute("aria-label", "Skip back one paragraph");
-      (0, import_obsidian10.setIcon)(this.ttsSkipBackBtn, "skip-back");
+      (0, import_obsidian11.setIcon)(this.ttsSkipBackBtn, "skip-back");
       this.registerDomEvent(this.ttsSkipBackBtn, "click", () => {
         this.playback.skipBackward();
       });
@@ -10321,7 +11265,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
         cls: "voxtral-tts-btn"
       });
       this.ttsPauseBtn.setAttribute("aria-label", "Pause playback");
-      (0, import_obsidian10.setIcon)(this.ttsPauseBtn, "pause");
+      (0, import_obsidian11.setIcon)(this.ttsPauseBtn, "pause");
       this.registerDomEvent(this.ttsPauseBtn, "click", () => {
         this.playback.togglePause();
       });
@@ -10329,7 +11273,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
         cls: "voxtral-tts-btn"
       });
       this.ttsSkipForwardBtn.setAttribute("aria-label", "Skip forward one paragraph");
-      (0, import_obsidian10.setIcon)(this.ttsSkipForwardBtn, "skip-forward");
+      (0, import_obsidian11.setIcon)(this.ttsSkipForwardBtn, "skip-forward");
       this.registerDomEvent(this.ttsSkipForwardBtn, "click", () => {
         this.playback.skipForward();
       });
@@ -10340,14 +11284,14 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
         cls: "voxtral-tts-btn"
       });
       ttsStopBtn.setAttribute("aria-label", "Stop playback");
-      (0, import_obsidian10.setIcon)(ttsStopBtn, "square");
+      (0, import_obsidian11.setIcon)(ttsStopBtn, "square");
       this.registerDomEvent(ttsStopBtn, "click", () => {
         this.playback.stopPlayback();
       });
       this.playback.onStateChange((state) => this.updateTtsStatusBar(state));
       this.playback.onProgressChange(() => this.updateTtsStatusBar(this.playback.getState()));
     }
-    if (import_obsidian10.Platform.isMobile) {
+    if (import_obsidian11.Platform.isMobile) {
       const playbackHandlers = {
         skipBack: () => {
           this.playback.skipBackward();
@@ -10373,7 +11317,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
           this.playbackMobileControls.setState(state);
           return;
         }
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView);
         if (!view) {
           return;
         }
@@ -10425,7 +11369,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     });
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
-        if (!(file instanceof import_obsidian10.TFile) || !isAudioFile(file.extension)) {
+        if (!(file instanceof import_obsidian11.TFile) || !isAudioFile(file.extension)) {
           return;
         }
         menu.addItem(
@@ -10549,7 +11493,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
         if (!this.settings.ttsEnabled) return;
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView);
         if (!view || view.file !== file) return;
         menu.addItem(
           (item) => item.setTitle("Read aloud").setIcon("volume-2").onClick(() => {
@@ -10598,7 +11542,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
           href: `https://github.com/maxonamission/obsidian-voxtral/releases/tag/${current}`
         });
       });
-      new import_obsidian10.Notice(frag, 8e3);
+      new import_obsidian11.Notice(frag, 8e3);
     }
     if (current !== prev) {
       this.settings.lastSeenVersion = current;
@@ -10652,7 +11596,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     this.setupTemplates();
     if (apiKeyMigrated) {
       await this.saveSettings();
-      new import_obsidian10.Notice(
+      new import_obsidian11.Notice(
         "Voxtral moved your API key into Obsidian's secret storage. It's now stored per device and no longer syncs \u2014 enter it once on each other device you use.",
         12e3
       );
@@ -10715,8 +11659,8 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       }
     );
     this.sendRibbonEl.addClass("voxtral-send-button");
-    if (import_obsidian10.Platform.isMobile) {
-      const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+    if (import_obsidian11.Platform.isMobile) {
+      const view = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView);
       if (view) {
         this.mobileActionEl = view.addAction(
           "send",
@@ -10768,12 +11712,12 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
    */
   prepareRecordingSession() {
     if (!this.settings.apiKey && !isLocalMode(this.settings)) {
-      new import_obsidian10.Notice("Please set your API key in the plugin settings.");
+      new import_obsidian11.Notice("Please set your API key in the plugin settings.");
       return null;
     }
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView);
     if (!view) {
-      new import_obsidian10.Notice("Open a note first to start dictating.");
+      new import_obsidian11.Notice("Open a note first to start dictating.");
       return null;
     }
     const editor = view.editor;
@@ -10781,7 +11725,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     const resolved = this.resolveEffectiveLanguageForFile(view.file);
     this.activeLanguage = resolved.language;
     if (resolved.invalidValue !== void 0) {
-      new import_obsidian10.Notice(
+      new import_obsidian11.Notice(
         `Unknown voxtral-language '${resolved.invalidValue}' \u2014 using ${this.settings.language}`
       );
     }
@@ -10798,14 +11742,14 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
    * fell back to batch (VX_E22_S8) shows the batch explainer.
    */
   onRecordingStarted(mode) {
-    const shouldAutoOpenHelp = import_obsidian10.Platform.isMobile ? this.settings.autoOpenHelpMobile : this.settings.autoOpenHelpDesktop;
+    const shouldAutoOpenHelp = import_obsidian11.Platform.isMobile ? this.settings.autoOpenHelpMobile : this.settings.autoOpenHelpDesktop;
     if (shouldAutoOpenHelp) {
       void this.openHelpPanel({ keepEditorFocus: true, skipIfOpen: true });
     }
     const micName = this.recorder.activeMicLabel;
     if (mode === "batch") {
       const enterHint = this.settings.enterToSend ? " Press Enter (when not typing) or tap send to transcribe chunks." : " Tap send to transcribe chunks while you keep talking.";
-      if (import_obsidian10.Platform.isMobile && !this.settings.dismissMobileBatchNotice) {
+      if (import_obsidian11.Platform.isMobile && !this.settings.dismissMobileBatchNotice) {
         const frag = activeDocument.createDocumentFragment();
         frag.createSpan({
           text: `Recording started (${micName}). Tap the send button (\u2191) to transcribe chunks while you keep talking.`
@@ -10821,16 +11765,16 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
           this.settings.dismissMobileBatchNotice = true;
           void this.saveSettings();
         });
-        new import_obsidian10.Notice(frag, 8e3);
+        new import_obsidian11.Notice(frag, 8e3);
       } else {
-        new import_obsidian10.Notice(
+        new import_obsidian11.Notice(
           `Voxtral: Recording started (${micName})
 ` + enterHint.trim(),
           6e3
         );
       }
     } else {
-      new import_obsidian10.Notice(`Recording started (${micName})`);
+      new import_obsidian11.Notice(`Recording started (${micName})`);
     }
   }
   /**
@@ -10852,57 +11796,57 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     var _a;
     const selection = editor.getSelection();
     if (!selection) {
-      new import_obsidian10.Notice("Select text first to correct it");
+      new import_obsidian11.Notice("Select text first to correct it");
       return;
     }
     if (isLocalMode(this.settings)) {
       if (!((_a = this.settings.localCorrectionUrl) == null ? void 0 : _a.trim())) {
-        new import_obsidian10.Notice("Correction is off in local server mode \u2014 configure a local correction endpoint in settings.");
+        new import_obsidian11.Notice("Correction is off in local server mode \u2014 configure a local correction endpoint in settings.");
         return;
       }
     } else if (!this.settings.apiKey) {
-      new import_obsidian10.Notice("Please set your API key first");
+      new import_obsidian11.Notice("Please set your API key first");
       return;
     }
     try {
       if (selection.length > 1e4) {
-        new import_obsidian10.Notice("Correcting... This can take a few minutes for long text.");
+        new import_obsidian11.Notice("Correcting... This can take a few minutes for long text.");
       } else {
-        new import_obsidian10.Notice("Correcting...");
+        new import_obsidian11.Notice("Correcting...");
       }
       const corrected = await correctText(selection, this.settings, this.httpRequest, {
         timeoutMs: correctionTimeoutMs(selection.length)
       });
       if (corrected) {
         editor.replaceSelection(corrected);
-        new import_obsidian10.Notice("Selection corrected");
+        new import_obsidian11.Notice("Selection corrected");
       }
     } catch (e) {
-      new import_obsidian10.Notice(`Correction failed: ${String(e)}`);
+      new import_obsidian11.Notice(`Correction failed: ${String(e)}`);
     }
   }
   async correctAll(editor) {
     var _a;
     if (!this.tracker.hasRanges()) {
-      new import_obsidian10.Notice("No dictated text to correct");
+      new import_obsidian11.Notice("No dictated text to correct");
       return;
     }
     if (isLocalMode(this.settings)) {
       if (!((_a = this.settings.localCorrectionUrl) == null ? void 0 : _a.trim())) {
-        new import_obsidian10.Notice("Correction is off in local server mode \u2014 configure a local correction endpoint in settings.");
+        new import_obsidian11.Notice("Correction is off in local server mode \u2014 configure a local correction endpoint in settings.");
         return;
       }
     } else if (!this.settings.apiKey) {
-      new import_obsidian10.Notice("Please set your API key first");
+      new import_obsidian11.Notice("Please set your API key first");
       return;
     }
     try {
-      new import_obsidian10.Notice("Correcting...");
+      new import_obsidian11.Notice("Correcting...");
       await this.tracker.autoCorrectAfterStop(editor, this.settings, this.httpRequest);
       this.tracker.reset();
-      new import_obsidian10.Notice("Dictated text corrected");
+      new import_obsidian11.Notice("Dictated text corrected");
     } catch (e) {
-      new import_obsidian10.Notice(`Correction failed: ${String(e)}`);
+      new import_obsidian11.Notice(`Correction failed: ${String(e)}`);
     }
   }
   // ── Listen back (TTS, E26 — experimental) ──
@@ -10919,9 +11863,9 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
    * no "active editor" of its own) and read from there. */
   async readAloudFromActiveView() {
     var _a;
-    const editor = (_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor;
+    const editor = (_a = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView)) == null ? void 0 : _a.editor;
     if (!editor) {
-      new import_obsidian10.Notice("Open a note to read aloud.");
+      new import_obsidian11.Notice("Open a note to read aloud.");
       return;
     }
     await this.readAloud(editor);
@@ -10936,7 +11880,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
     for (let i = 0; i <= editor.lastLine(); i++) lines.push(editor.getLine(i));
     const text = textFromParagraph(lines, editor.getCursor().line);
     if (!text) {
-      new import_obsidian10.Notice("Nothing to read aloud from here.");
+      new import_obsidian11.Notice("Nothing to read aloud from here.");
       return;
     }
     await this.readTextAloud(text);
@@ -10944,7 +11888,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
   async readParagraphAloud(editor) {
     const paragraph = this.getCurrentParagraph(editor);
     if (!paragraph.trim()) {
-      new import_obsidian10.Notice("No paragraph on the current line to read aloud.");
+      new import_obsidian11.Notice("No paragraph on the current line to read aloud.");
       return;
     }
     await this.readTextAloud(paragraph);
@@ -10965,24 +11909,24 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
   /** Synthesize `rawText` (markdown flattened to prose) and play it. */
   async readTextAloud(rawText) {
     if (!this.settings.ttsEnabled) {
-      new import_obsidian10.Notice("Listen back is off \u2014 enable it in the plugin settings.");
+      new import_obsidian11.Notice("Listen back is off \u2014 enable it in the plugin settings.");
       return;
     }
     if (!this.settings.apiKey) {
-      new import_obsidian10.Notice("Please set your API key in the plugin settings.");
+      new import_obsidian11.Notice("Please set your API key in the plugin settings.");
       return;
     }
     const text = flattenForSpeech(rawText);
     if (!text) {
-      new import_obsidian10.Notice("Nothing to read aloud.");
+      new import_obsidian11.Notice("Nothing to read aloud.");
       return;
     }
     const chunks = splitForSpeech(text);
     if (chunks.length === 0) {
-      new import_obsidian10.Notice("Nothing to read aloud.");
+      new import_obsidian11.Notice("Nothing to read aloud.");
       return;
     }
-    const progress = new import_obsidian10.Notice("Generating audio\u2026", 0);
+    const progress = new import_obsidian11.Notice("Generating audio\u2026", 0);
     const attempt = this.playback.beginLoading();
     try {
       await this.playback.playChunks(
@@ -10992,7 +11936,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
       );
     } catch (e) {
       vlog.error("Voxtral: speech synthesis failed", e);
-      new import_obsidian10.Notice(`Listen back failed: ${String(e)}`);
+      new import_obsidian11.Notice(`Listen back failed: ${String(e)}`);
       if (this.playback.isCurrent(attempt)) this.playback.stopPlayback();
     } finally {
       progress.hide();
@@ -11002,7 +11946,7 @@ var VoxtralPlugin = class extends import_obsidian10.Plugin {
   async exportLogs() {
     const count = getLogCount();
     if (count === 0) {
-      new import_obsidian10.Notice("No logs to export");
+      new import_obsidian11.Notice("No logs to export");
       return;
     }
     const now = /* @__PURE__ */ new Date();
@@ -11020,7 +11964,7 @@ ${getLogText()}
 `;
     const file = await this.app.vault.create(path, content);
     await this.app.workspace.getLeaf(true).openFile(file);
-    new import_obsidian10.Notice(`${count} log entries saved to ${file.path}`);
+    new import_obsidian11.Notice(`${count} log entries saved to ${file.path}`);
   }
   // ── File transcription (batch) ──
   // Pipeline (decode/chunk/retry/progress/output placement) lives in
@@ -11031,36 +11975,32 @@ ${getLogText()}
     let editor = null;
     let noteFile = null;
     if (this.settings.fileTranscriptOutput === "cursor") {
-      let view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+      let view = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView);
       if (!view) {
         const recent = this.app.workspace.getMostRecentLeaf();
-        if ((recent == null ? void 0 : recent.view) instanceof import_obsidian10.MarkdownView) {
+        if ((recent == null ? void 0 : recent.view) instanceof import_obsidian11.MarkdownView) {
           view = recent.view;
         }
       }
       if (!view) {
-        new import_obsidian10.Notice("Open a note first to insert the transcript.");
+        new import_obsidian11.Notice("Open a note first to insert the transcript.");
         return;
       }
       this.app.workspace.setActiveLeaf(view.leaf, { focus: true });
-      if (import_obsidian10.Platform.isMobile) {
+      if (import_obsidian11.Platform.isMobile) {
         this.app.workspace.leftSplit.collapse();
       }
       editor = view.editor;
       noteFile = view.file;
     }
-    const context = {
-      vocabularyTerms: this.resolveEffectiveVocabulary(noteFile),
-      // Per-note style override (VX_E8_S4): same output-target note as the
-      // vocabulary collection above — "newNote" output has no note yet, so
-      // no frontmatter to read.
-      styleInstruction: this.resolveEffectiveStyleForFile(noteFile)
-    };
+    const plan = await this.resolveFileContextSafely(file, noteFile, "interactive");
+    if (!plan) return;
     const target = editor;
     await this.fileTranscriptionService.transcribe(
       file,
       target ? (text) => target.replaceSelection(text + "\n") : null,
-      context
+      plan.context,
+      plan.options
     );
   }
   // ── Watch folder (VX_E27_S14) ──
@@ -11073,7 +12013,7 @@ ${getLogText()}
    */
   onVaultFileCreated(file) {
     try {
-      if (!(file instanceof import_obsidian10.TFile)) return;
+      if (!(file instanceof import_obsidian11.TFile)) return;
       const candidate = {
         path: file.path,
         extension: file.extension
@@ -11086,16 +12026,16 @@ ${getLogText()}
       });
       if (!offer) return;
       if (this.settings.watchFolderMode === "auto") {
-        this.startWatchFolderTranscription(file);
+        void this.startWatchFolderTranscription(file, "auto");
         return;
       }
-      const notice = new import_obsidian10.Notice(
+      const notice = new import_obsidian11.Notice(
         createFragment((frag) => {
           frag.appendText(`New recording: ${file.name} `);
           const btn = frag.createEl("button", { text: "Transcribe" });
           btn.addEventListener("click", () => {
             notice.hide();
-            this.startWatchFolderTranscription(file);
+            void this.startWatchFolderTranscription(file, "interactive");
           });
         }),
         0
@@ -11113,12 +12053,125 @@ ${getLogText()}
    * its own `transcribe()` call, and the service queues them (VX_E31_S4)
    * instead of a still-running file picking up the next file's context.
    */
-  startWatchFolderTranscription(file) {
-    const context = {
-      vocabularyTerms: this.resolveEffectiveVocabulary(null),
-      styleInstruction: this.resolveEffectiveStyleForFile(null)
+  async startWatchFolderTranscription(file, mode) {
+    const plan = await this.resolveFileContextSafely(file, null, mode);
+    if (!plan) return;
+    await this.fileTranscriptionService.transcribe(file, null, plan.context, plan.options);
+  }
+  /**
+   * `resolveFileContext` with its failure made visible: a thrown error in
+   * the dialog would otherwise look like a dead Transcribe button (owner
+   * test 3 sep 2026). Falls back to nothing rather than to a silent
+   * transcription without the chosen terms.
+   */
+  async resolveFileContextSafely(audio, noteFile, mode) {
+    try {
+      return await this.resolveFileContext(audio, noteFile, mode);
+    } catch (e) {
+      vlog.error("Voxtral: term dialog failed", e);
+      await this.fileTranscriptionService.logEvent(`terms dialog: failed: ${String(e)}`);
+      new import_obsidian11.Notice(`Could not prepare the terms for ${audio.name}: ${String(e)}`, 8e3);
+      return null;
+    }
+  }
+  /**
+   * The request context for one file transcription (VX_E6_S7). Collects
+   * the ranked term groups (frontmatter, custom list, file name, note
+   * neighbourhood) and, for a user-initiated transcription with the
+   * pre-flight setting on, shows the "Terms for this recording" dialog.
+   * Returns null when the user cancels there. "auto" (watch folder,
+   * unattended) never shows the dialog and never offers file-name terms:
+   * a term nobody looked at must not reach the API (owner test 12 aug
+   * 2026). "silent" is the manual path with the dialog switched off: the
+   * default selection, file-name terms included, goes out unchanged.
+   */
+  async resolveFileContext(audio, noteFile, mode) {
+    const styleInstruction = this.resolveEffectiveStyleForFile(noteFile);
+    const groups = collectTermGroups({
+      app: this.app,
+      settings: this.settings,
+      audioFile: audio,
+      noteFile,
+      includeFilename: mode !== "auto"
+    });
+    const options = {
+      onSpeakerNames: (names) => {
+        void this.learnTerms(names, []);
+      }
     };
-    void this.fileTranscriptionService.transcribe(file, null, context);
+    if (mode === "auto" || !this.settings.fileTranscriptTermPreflight) {
+      return {
+        context: { vocabularyTerms: defaultTermSelection(groups), styleInstruction },
+        options
+      };
+    }
+    await this.fileTranscriptionService.logEvent(
+      `terms dialog: opened for ${audio.name} with ${groups.map((g) => `${g.source}=${g.terms.length}`).join(", ") || "no groups"}`
+    );
+    const choice = await chooseTermsForRecording(this.app, audio.name, groups);
+    await this.fileTranscriptionService.logEvent(
+      `terms dialog: ${choice.proceed ? "transcribe" : "cancelled"}, ${choice.terms.length} term(s), ${choice.rememberTerms.length} to remember${choice.dontAskAgain ? ", don't ask again" : ""}`
+    );
+    if (choice.dontAskAgain) {
+      this.settings.fileTranscriptTermPreflight = false;
+      await this.saveSettings();
+    }
+    if (!choice.proceed) return null;
+    const customBefore = parseCustomTerms(this.settings.customVocabularyTerms);
+    if (choice.rememberTerms.length > 0) {
+      const existing = this.settings.customVocabularyTerms.trim();
+      this.settings.customVocabularyTerms = existing ? `${existing}, ${choice.rememberTerms.join(", ")}` : choice.rememberTerms.join(", ");
+      await this.saveSettings();
+    }
+    await this.learnTerms(choice.confirmedTerms, choice.demotedTerms);
+    if (choice.saveInNote) {
+      const noteTerms = noteVocabularyTerms(choice.terms, customBefore);
+      if (noteTerms.length > 0) {
+        if (noteFile) {
+          await this.writeNoteVocabulary(noteFile, noteTerms);
+        } else {
+          options.noteVocabulary = noteTerms;
+        }
+      }
+    }
+    return { context: { vocabularyTerms: choice.terms, styleInstruction }, options };
+  }
+  /** Record confirmed and switched-off terms in the learned vocabulary (VX_E6_S7). */
+  async learnTerms(confirmed, demoted) {
+    if (confirmed.length === 0 && demoted.length === 0) return;
+    this.settings.learnedVocabulary = recordLearnedTerms(
+      this.settings.learnedVocabulary,
+      confirmed,
+      demoted
+    );
+    await this.saveSettings();
+  }
+  /**
+   * Merge `terms` into the note's `voxtral-vocabulary` frontmatter
+   * (VX_E6_S7): existing entries stay, new ones are appended, so a note
+   * accumulates the terms of every recording placed in it.
+   */
+  async writeNoteVocabulary(note, terms) {
+    try {
+      await this.app.fileManager.processFrontMatter(note, (fm) => {
+        var _a;
+        const existing = (_a = resolveVocabularyOverride(fm["voxtral-vocabulary"])) != null ? _a : [];
+        const seen = new Set(existing.map((t) => t.toLowerCase()));
+        const merged = [...existing];
+        for (const t of terms) {
+          if (seen.has(t.toLowerCase())) continue;
+          seen.add(t.toLowerCase());
+          merged.push(t);
+        }
+        fm["voxtral-vocabulary"] = merged;
+      });
+      await this.fileTranscriptionService.logEvent(
+        `note memory: merged ${terms.length} term(s) into ${note.path}`
+      );
+    } catch (e) {
+      vlog.error("Voxtral: could not write voxtral-vocabulary frontmatter", e);
+      new import_obsidian11.Notice(`Could not save the terms in ${note.basename}: ${String(e)}`);
+    }
   }
   /**
    * Whether a "(transcript)" note already exists for `file` — the
@@ -11143,10 +12196,10 @@ ${getLogText()}
    */
   async transcribeEmbeddedAudio() {
     var _a, _b;
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView);
     const note = view == null ? void 0 : view.file;
     if (!view || !note) {
-      new import_obsidian10.Notice("Open a note with an audio embed first.");
+      new import_obsidian11.Notice("Open a note with an audio embed first.");
       return;
     }
     const cache = this.app.metadataCache.getFileCache(note);
@@ -11157,7 +12210,7 @@ ${getLogText()}
     const refs = [];
     for (const ref of rawRefs) {
       const target = this.app.metadataCache.getFirstLinkpathDest(ref.link, note.path);
-      if (target instanceof import_obsidian10.TFile && isAudioFile(target.extension)) {
+      if (target instanceof import_obsidian11.TFile && isAudioFile(target.extension)) {
         refs.push({
           link: ref.link,
           line: ref.position.start.line,
@@ -11170,7 +12223,7 @@ ${getLogText()}
     const resolution = resolveAudioRef(refs, cursorLine);
     switch (resolution.kind) {
       case "none":
-        new import_obsidian10.Notice("No audio embed found in this note (e.g. ![[recording.m4a]]).");
+        new import_obsidian11.Notice("No audio embed found in this note (e.g. ![[recording.m4a]]).");
         return;
       case "choose":
         new EmbedPickerModal(this.app, resolution.refs, (ref) => {
@@ -11185,22 +12238,18 @@ ${getLogText()}
   /** Shared tail of `transcribeEmbeddedAudio`: insert the transcript for one resolved ref. */
   async insertEmbedTranscript(view, note, ref) {
     const target = this.app.metadataCache.getFirstLinkpathDest(ref.link, note.path);
-    if (!(target instanceof import_obsidian10.TFile) || !isAudioFile(target.extension)) {
-      new import_obsidian10.Notice("The embed on this line isn't an audio file.");
+    if (!(target instanceof import_obsidian11.TFile) || !isAudioFile(target.extension)) {
+      new import_obsidian11.Notice("The embed on this line isn't an audio file.");
       return;
     }
     const editor = view.editor;
     editor.setCursor({ line: ref.endLine, ch: editor.getLine(ref.endLine).length });
-    const context = {
-      vocabularyTerms: this.resolveEffectiveVocabulary(note),
-      // Per-note style override (VX_E8_S4): the embed's own note is the
-      // output-target note here too (see the vocabulary collection above).
-      styleInstruction: this.resolveEffectiveStyleForFile(note)
-    };
+    const plan = await this.resolveFileContextSafely(target, note, "interactive");
+    if (!plan) return;
     await this.fileTranscriptionService.transcribe(target, (text) => {
       editor.replaceSelection(`
 ${text}`);
-    }, context);
+    }, plan.context, plan.options);
   }
   // ── Help panel host (read/write the per-platform auto-open setting) ──
   /** HelpPanelHost: effective language — per-note override during recording, else the global setting. */
@@ -11210,11 +12259,11 @@ ${text}`);
   }
   /** HelpPanelHost: current auto-open value for the active platform. */
   getAutoOpen() {
-    return import_obsidian10.Platform.isMobile ? this.settings.autoOpenHelpMobile : this.settings.autoOpenHelpDesktop;
+    return import_obsidian11.Platform.isMobile ? this.settings.autoOpenHelpMobile : this.settings.autoOpenHelpDesktop;
   }
   /** HelpPanelHost: persist a new auto-open value for the active platform. */
   async setAutoOpen(enabled) {
-    if (import_obsidian10.Platform.isMobile) {
+    if (import_obsidian11.Platform.isMobile) {
       this.settings.autoOpenHelpMobile = enabled;
     } else {
       this.settings.autoOpenHelpDesktop = enabled;
@@ -11229,7 +12278,7 @@ ${text}`);
     );
     if (existing.length > 0) {
       if (opts.skipIfOpen) return;
-      const editor2 = opts.keepEditorFocus && !import_obsidian10.Platform.isMobile ? (_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor : void 0;
+      const editor2 = opts.keepEditorFocus && !import_obsidian11.Platform.isMobile ? (_a = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView)) == null ? void 0 : _a.editor : void 0;
       await this.app.workspace.revealLeaf(existing[0]);
       editor2 == null ? void 0 : editor2.focus();
       return;
@@ -11240,8 +12289,8 @@ ${text}`);
       type: VIEW_TYPE_VOXTRAL_HELP,
       active: !opts.keepEditorFocus
     });
-    if (import_obsidian10.Platform.isMobile) return;
-    const editor = opts.keepEditorFocus ? (_b = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _b.editor : void 0;
+    if (import_obsidian11.Platform.isMobile) return;
+    const editor = opts.keepEditorFocus ? (_b = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView)) == null ? void 0 : _b.editor : void 0;
     await this.app.workspace.revealLeaf(leaf);
     editor == null ? void 0 : editor.focus();
   }
@@ -11262,8 +12311,8 @@ ${text}`);
   showCommandFeedback(commandId) {
     if (!this.settings.commandFeedback) return;
     const label = getLabel(commandId, this.recordingSettings.language);
-    if (import_obsidian10.Platform.isMobile) {
-      new import_obsidian10.Notice(`\u2192 ${label}`, 1500);
+    if (import_obsidian11.Platform.isMobile) {
+      new import_obsidian11.Notice(`\u2192 ${label}`, 1500);
       return;
     }
     if (!this.statusBarEl) return;
@@ -11287,18 +12336,18 @@ ${text}`);
    */
   performVoiceUndo(editorOverride) {
     var _a, _b, _c;
-    const editor = (_c = (_b = editorOverride != null ? editorOverride : this.recording.currentEditor) != null ? _b : (_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) != null ? _c : null;
+    const editor = (_c = (_b = editorOverride != null ? editorOverride : this.recording.currentEditor) != null ? _b : (_a = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView)) == null ? void 0 : _a.editor) != null ? _c : null;
     if (!editor) return;
     const result = this.commands.undoLastCommand(editor);
     switch (result) {
       case "reverted":
-        new import_obsidian10.Notice("Undid last voice command");
+        new import_obsidian11.Notice("Undid last voice command");
         break;
       case "stale":
-        new import_obsidian10.Notice("Can't undo \u2014 text was added after the command.");
+        new import_obsidian11.Notice("Can't undo \u2014 text was added after the command.");
         break;
       case "none":
-        new import_obsidian10.Notice("No voice command to undo.");
+        new import_obsidian11.Notice("No voice command to undo.");
         break;
     }
   }
@@ -11309,18 +12358,18 @@ ${text}`);
    */
   performCorrectionUndo(editorOverride) {
     var _a, _b, _c;
-    const editor = (_c = (_b = editorOverride != null ? editorOverride : this.recording.currentEditor) != null ? _b : (_a = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView)) == null ? void 0 : _a.editor) != null ? _c : null;
+    const editor = (_c = (_b = editorOverride != null ? editorOverride : this.recording.currentEditor) != null ? _b : (_a = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView)) == null ? void 0 : _a.editor) != null ? _c : null;
     if (!editor) return;
     const result = this.tracker.undoLastCorrection(editor);
     switch (result) {
       case "reverted":
-        new import_obsidian10.Notice("Reverted to raw transcription");
+        new import_obsidian11.Notice("Reverted to raw transcription");
         break;
       case "stale":
-        new import_obsidian10.Notice("Text has changed since correction");
+        new import_obsidian11.Notice("Text has changed since correction");
         break;
       case "none":
-        new import_obsidian10.Notice("Nothing to undo");
+        new import_obsidian11.Notice("Nothing to undo");
         break;
     }
   }
@@ -11334,7 +12383,7 @@ ${text}`);
     const text = spec.text(this.recorder, this.commands);
     if (text === null) {
       this.statusBarEl.empty();
-      (0, import_obsidian10.setIcon)(this.statusBarEl, "mic");
+      (0, import_obsidian11.setIcon)(this.statusBarEl, "mic");
     } else {
       this.statusBarEl.setText(text);
     }
@@ -11365,10 +12414,10 @@ ${text}`);
     this.ttsPauseBtn.disabled = state === "loading";
     this.ttsPauseBtn.empty();
     if (state === "paused") {
-      (0, import_obsidian10.setIcon)(this.ttsPauseBtn, "play");
+      (0, import_obsidian11.setIcon)(this.ttsPauseBtn, "play");
       this.ttsPauseBtn.setAttribute("aria-label", "Resume playback");
     } else {
-      (0, import_obsidian10.setIcon)(this.ttsPauseBtn, "pause");
+      (0, import_obsidian11.setIcon)(this.ttsPauseBtn, "pause");
       this.ttsPauseBtn.setAttribute(
         "aria-label",
         state === "loading" ? "Generating audio\u2026" : "Pause playback"

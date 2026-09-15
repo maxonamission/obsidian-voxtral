@@ -404,3 +404,92 @@
 	font-size: var(--font-smaller);
 	font-weight: var(--font-normal);
 }
+
+/* Pre-flight term dialog (VX_E6_S7). On a phone the on-screen keyboard is
+   drawn over the page without shrinking it; while a field has focus, room
+   the size of the keyboard is added under the content so it can scroll
+   clear (same approach as the Tasks plugin's edit modal). Override the
+   variable in a snippet if your keyboard is taller. */
+.is-mobile .voxtral-terms-modal-container {
+	--voxtral-keyboard-space: clamp(220px, 35vh, 360px);
+}
+
+.is-mobile .voxtral-terms-modal-container:has(textarea:focus, input[type="text"]:focus) .modal-content {
+	padding-bottom: var(--voxtral-keyboard-space);
+}
+
+.voxtral-terms-actions {
+	position: sticky;
+	bottom: 0;
+	background: var(--background-primary);
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 0.6em;
+	padding-bottom: 0.4em;
+	margin-top: 0.4em;
+}
+
+.voxtral-term-chip-covered {
+	opacity: 0.55;
+}
+
+.voxtral-terms-intro {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+}
+
+.voxtral-terms-actions {
+	position: sticky;
+	bottom: 0;
+	background: var(--background-primary);
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 0.6em;
+	padding-bottom: 0.4em;
+	margin-top: 0.4em;
+}
+
+.voxtral-term-chip-covered {
+	opacity: 0.55;
+}
+
+.voxtral-terms-group {
+	margin: 0.6em 0;
+}
+
+.voxtral-terms-group-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-weight: var(--font-semibold);
+	margin-bottom: 0.3em;
+}
+
+.voxtral-terms-group-toggle {
+	font-size: var(--font-smaller);
+	padding: 0.1em 0.6em;
+}
+
+.voxtral-terms-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35em;
+	max-height: 9.5em;
+	overflow-y: auto;
+}
+
+.voxtral-term-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3em;
+	padding: 0.15em 0.55em;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+	cursor: pointer;
+	font-size: var(--font-smaller);
+}
+
+.voxtral-terms-counter,
+.voxtral-terms-empty {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+}
