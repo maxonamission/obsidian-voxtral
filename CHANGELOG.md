@@ -4,6 +4,15 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.15.1] - 2026-09-15
+
+- **The terms dialog no longer leans on a CSS selector that can slow down focus
+  changes.** On a phone it adds room under the content while a field has focus,
+  so the field can scroll clear of the keyboard; that is now driven by the
+  dialog itself instead of by a `:has()` selector, which browsers have to
+  re-evaluate broadly every time focus moves. Same behaviour, and it now also
+  covers field types the old selector did not list.
+
 ## [1.15.0] - 2026-09-15
 
 - **Fixed: unticking a term in "Terms for this recording" did nothing when

@@ -409,12 +409,17 @@
    drawn over the page without shrinking it; while a field has focus, room
    the size of the keyboard is added under the content so it can scroll
    clear (same approach as the Tasks plugin's edit modal). Override the
-   variable in a snippet if your keyboard is taller. */
+   variable in a snippet if your keyboard is taller.
+
+   The focus state is a class the modal sets itself (VX_E6_S12), not a
+   `:has(… :focus)` selector: `:has` invalidates broadly on every focus
+   change, and a class also catches a field of a type the selector did not
+   list. */
 .is-mobile .voxtral-terms-modal-container {
 	--voxtral-keyboard-space: clamp(220px, 35vh, 360px);
 }
 
-.is-mobile .voxtral-terms-modal-container:has(textarea:focus, input[type="text"]:focus) .modal-content {
+.is-mobile .voxtral-terms-modal-container.voxtral-terms-keyboard-open .modal-content {
 	padding-bottom: var(--voxtral-keyboard-space);
 }
 

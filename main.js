@@ -5227,6 +5227,9 @@ function noteVocabularyTerms(chosen, customBefore) {
   const already = new Set(customBefore.map((t) => t.toLowerCase()));
   return chosen.filter((t) => !already.has(t.toLowerCase()));
 }
+function keepsKeyboardSpace(relatedTarget, containerContains) {
+  return relatedTarget !== null && relatedTarget !== void 0 && containerContains(relatedTarget);
+}
 
 // src/term-preflight-modal.ts
 var import_obsidian5 = require("obsidian");
@@ -5268,6 +5271,7 @@ function selectedGroups(groups, kept) {
 }
 
 // src/term-preflight-modal.ts
+var KEYBOARD_OPEN_CLASS = "voxtral-terms-keyboard-open";
 var TermPreflightModal = class extends import_obsidian5.Modal {
   constructor(app, fileName, groups, resolveResult) {
     super(app);
@@ -5299,6 +5303,15 @@ var TermPreflightModal = class extends import_obsidian5.Modal {
     const { contentEl } = this;
     contentEl.addClass("voxtral-terms-modal");
     this.containerEl.addClass("voxtral-terms-modal-container");
+    this.containerEl.addEventListener("focusin", () => {
+      this.containerEl.addClass(KEYBOARD_OPEN_CLASS);
+    });
+    this.containerEl.addEventListener("focusout", (ev) => {
+      if (keepsKeyboardSpace(ev.relatedTarget, (n) => this.containerEl.contains(n))) {
+        return;
+      }
+      this.containerEl.removeClass(KEYBOARD_OPEN_CLASS);
+    });
     contentEl.createEl("h3", { text: "Terms for this recording" });
     contentEl.createEl("p", {
       cls: "voxtral-terms-intro",
