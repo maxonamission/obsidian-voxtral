@@ -5468,6 +5468,51 @@ function chooseTermsForRecording(app, fileName, groups) {
   });
 }
 
+// src/insert-anchor.ts
+function advanceAnchor(anchor, text) {
+  const lines = text.split("\n");
+  if (lines.length === 1) {
+    return { line: anchor.line, ch: anchor.ch + text.length };
+  }
+  return { line: anchor.line + lines.length - 1, ch: lines[lines.length - 1].length };
+}
+
+// src/anchored-insert.ts
+function createAnchoredInsert(options) {
+  const { app, view, editor, file } = options;
+  let anchor = options.anchor;
+  let fellBackToFile = false;
+  let queue = Promise.resolve();
+  async function insertOne(text) {
+    var _a, _b, _c, _d, _e;
+    if (!fellBackToFile && ((_a = view.file) == null ? void 0 : _a.path) !== file.path) {
+      fellBackToFile = true;
+      (_d = options.log) == null ? void 0 : _d.call(
+        options,
+        `insert: view left ${file.path} (now showing ${(_c = (_b = view.file) == null ? void 0 : _b.path) != null ? _c : "no file"}) \u2014 writing the rest directly to the file instead of the editor`
+      );
+      (_e = options.notify) == null ? void 0 : _e.call(
+        options,
+        `That tab moved on, so the rest of the transcript is being added to the end of ${file.basename}.`
+      );
+    }
+    if (fellBackToFile) {
+      await app.vault.process(file, (data) => data + text);
+    } else {
+      editor.replaceRange(text, anchor);
+    }
+    anchor = advanceAnchor(anchor, text);
+  }
+  return (text) => {
+    const step = queue.then(() => insertOne(text)).catch((e) => {
+      var _a;
+      (_a = options.log) == null ? void 0 : _a.call(options, `insert: failed to place a part: ${String(e)}`);
+    });
+    queue = step;
+    return step;
+  };
+}
+
 // src/tts-text.ts
 function stripFrontMatter(markdown) {
   var _a;
@@ -6418,6 +6463,24 @@ var _FileTranscriptionService = class _FileTranscriptionService {
     /** Options of the in-flight call (VX_E6_S7); read by the note-creation and review paths. */
     this.current = {};
     /**
+     * Serializes crash-log writes (VX_E27_S15): `crashLog()` used to `await`
+     * `vault.adapter.append()` directly, which is a read-modify-write on the
+     * adapter's side, not an atomic OS-level append. Every call site in this
+     * class awaits its own `crashLog()`/`logStep()` before starting the next
+     * step, so within one queued transcription these never overlapped — but
+     * `main.ts`'s realtime lifecycle callback fires `logRealtime()` with
+     * `void` (fire-and-forget, matching the old `replaceSelection()`-style
+     * calls it replaced), so two of ITS lines, or one of its lines and a
+     * batch step's line, could still race each other's append. Chaining every
+     * write behind this promise (same pattern as `anchored-insert.ts`'s
+     * `queue`) makes that impossible, at near-zero cost, regardless of
+     * whether that internal race ever actually caused the reported loss (see
+     * `crashLog()`'s doc comment for what stap 1 did and did not establish).
+     */
+    this.crashLogQueue = Promise.resolve();
+    /** Set once the header (or its absence) has been checked this session; see `ensureCrashLogHeader()`. */
+    this.crashLogHeaderChecked = false;
+    /**
      * The step now running, for the failure notice (VX_E24_S5). The on-disk
      * crash log only exists when debug logging is on, so a first crash carries
      * no trace at all; this lives in memory and costs nothing, and turns "not
@@ -6448,18 +6511,85 @@ var _FileTranscriptionService = class _FileTranscriptionService {
    * before the next step runs: after a crash, the LAST line on disk pinpoints the
    * step that was executing when the app died. Lives in the vault root so it's
    * easy to open. Gated by debug logging; never throws into the caller.
+   *
+   * VX_E27_S15: a real run lost several lines scattered through a single
+   * transcription (`response` at part 2, `sending` at parts 5 and 7,
+   * `appended` at part 10) even though every call in that run's own code
+   * path was awaited in sequence — the batch loop that produced those lines
+   * (see `transcribeInChunks` below) is a single `while` loop, so it cannot
+   * race itself. Two things could still explain it:
+   *
+   *  1. An internal race: some OTHER, unawaited `crashLog()` call
+   *     interleaving with this run's. `logRealtime()` is fired with `void`
+   *     from `main.ts`'s realtime lifecycle callback, so this was possible
+   *     in principle, though nothing in that day's report points to a
+   *     realtime session running at the same time. Closed below regardless
+   *     — it's cheap and fully unit-testable, unlike the alternative.
+   *  2. An external race: the log file open in an Obsidian editor tab,
+   *     whose own (stale) in-memory buffer got saved back over lines this
+   *     appended in the meantime. This fits the one timing detail on
+   *     record — the file's mtime (16:55:24) trails the run's end (16:54)
+   *     by over a minute, well after this run's own writes, not during
+   *     them — which an internal race would not produce. It also matches
+   *     documented Obsidian behaviour: an open `MarkdownView` holds its own
+   *     buffer and periodically flushes it back to disk independently of
+   *     `vault.adapter` writes.
+   *
+   * Left UNRESOLVED between the two: nobody confirmed the log was actually
+   * open in a tab during that run, so (2) is the best-fitting explanation
+   * on the evidence, not a reproduced one. See `ensureCrashLogHeader()` for
+   * the mitigation taken for it anyway.
    */
   async crashLog(msg) {
     if (!this.settings.debugLogging) return;
+    const now = /* @__PURE__ */ new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const ts = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, "0")}`;
+    const line = `${ts}  ${msg}
+`;
+    const step = this.crashLogQueue.then(() => this.writeCrashLogLine(line)).catch(() => {
+    });
+    this.crashLogQueue = step;
+    return step;
+  }
+  /** The actual write, run only from inside `crashLogQueue`'s chain. */
+  async writeCrashLogLine(line) {
+    await this.ensureCrashLogHeader();
+    await this.app.vault.adapter.append(_FileTranscriptionService.CRASH_LOG_PATH, line);
+  }
+  /**
+   * Best-effort mitigation for the external race (candidate 2 above): a
+   * header line warning against keeping the log open in an editor while a
+   * transcription runs. Considered and rejected:
+   *
+   *  - Writing outside the vault: nothing in the injected `App`/adapter
+   *    surface does that, and this log exists specifically to survive a
+   *    MOBILE crash, where there is no Node `fs` to fall back to.
+   *  - Buffering lines and writing once at the end of a run: defeats the
+   *    log's entire purpose (see the class doc comment above) — a crash
+   *    mid-run would then leave NOTHING on disk, which is strictly worse
+   *    than the occasional lost line this story is about.
+   *
+   * Checked once per plugin session (`crashLogHeaderChecked`), not on every
+   * line — this is a courtesy, not a correctness guarantee, so it isn't
+   * worth an `exists()` round trip per write. Feature-detected because it
+   * runs ahead of the very first write and unit tests stand in adapters
+   * that only implement `append()`; the real Obsidian `DataAdapter` always
+   * has both.
+   */
+  async ensureCrashLogHeader() {
+    if (this.crashLogHeaderChecked) return;
+    this.crashLogHeaderChecked = true;
+    const adapter = this.app.vault.adapter;
+    if (typeof adapter.exists !== "function" || typeof adapter.write !== "function") return;
     try {
-      const now = /* @__PURE__ */ new Date();
-      const pad = (n) => String(n).padStart(2, "0");
-      const ts = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, "0")}`;
-      await this.app.vault.adapter.append(
-        _FileTranscriptionService.CRASH_LOG_PATH,
-        `${ts}  ${msg}
-`
-      );
+      const alreadyExists = await adapter.exists(_FileTranscriptionService.CRASH_LOG_PATH);
+      if (!alreadyExists) {
+        await adapter.write(
+          _FileTranscriptionService.CRASH_LOG_PATH,
+          _FileTranscriptionService.CRASH_LOG_HEADER
+        );
+      }
     } catch (e) {
     }
   }
@@ -6933,8 +7063,21 @@ ${fallback}` }];
         throw new Error(`Could not open a note for ${file.name}.`);
       }
       const editor = view.editor;
-      editor.setCursor({ line: editor.lastLine(), ch: editor.getLine(editor.lastLine()).length });
-      append = (text) => editor.replaceSelection(`${text}
+      const lastLine = editor.lastLine();
+      const anchorPos = { line: lastLine, ch: editor.getLine(lastLine).length };
+      editor.setCursor(anchorPos);
+      const anchoredInsert = createAnchoredInsert({
+        app: this.app,
+        view,
+        editor,
+        file: note,
+        anchor: anchorPos,
+        log: (msg) => void this.logStep(msg),
+        notify: (msg) => {
+          new import_obsidian8.Notice(msg);
+        }
+      });
+      append = (text) => void anchoredInsert(`${text}
 `);
     }
     const appendDiarizedPart = (header, partNumber, turns, trailer) => {
@@ -7148,6 +7291,14 @@ ${body}
   }
 };
 _FileTranscriptionService.CRASH_LOG_PATH = "voxtral-crash-log.md";
+/**
+ * Written once, only when the log file doesn't exist yet (VX_E27_S15):
+ * warns against keeping the file open in an editor during a
+ * transcription. See `ensureCrashLogHeader()` for why — the suspected
+ * cause of lost lines has no fix at the write layer, so this is the
+ * mitigation.
+ */
+_FileTranscriptionService.CRASH_LOG_HEADER = "<!-- Voxtral crash log. Do not keep this file open in an editor tab while a transcription is running: Obsidian can save that tab's own (stale) buffer back over lines appended here in the meantime, and this file loses them silently. -->\n";
 var FileTranscriptionService = _FileTranscriptionService;
 function uniqueNotePath(app, folder, base) {
   const dir = folder ? `${folder}/` : "";
@@ -11987,6 +12138,7 @@ ${getLogText()}
   async transcribeFileFromMenu(file) {
     let editor = null;
     let noteFile = null;
+    let noteView = null;
     if (this.settings.fileTranscriptOutput === "cursor") {
       let view = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView);
       if (!view) {
@@ -12005,13 +12157,24 @@ ${getLogText()}
       }
       editor = view.editor;
       noteFile = view.file;
+      noteView = view;
     }
     const plan = await this.resolveFileContextSafely(file, noteFile, "interactive");
     if (!plan) return;
-    const target = editor;
+    const anchoredInsert = editor && noteFile && noteView ? createAnchoredInsert({
+      app: this.app,
+      view: noteView,
+      editor,
+      file: noteFile,
+      anchor: editor.getCursor(),
+      log: (msg) => void this.fileTranscriptionService.logEvent(msg),
+      notify: (msg) => {
+        new import_obsidian11.Notice(msg);
+      }
+    }) : null;
     await this.fileTranscriptionService.transcribe(
       file,
-      target ? (text) => target.replaceSelection(text + "\n") : null,
+      anchoredInsert ? (text) => void anchoredInsert(text + "\n") : null,
       plan.context,
       plan.options
     );
@@ -12256,11 +12419,23 @@ ${getLogText()}
       return;
     }
     const editor = view.editor;
-    editor.setCursor({ line: ref.endLine, ch: editor.getLine(ref.endLine).length });
+    const anchorPos = { line: ref.endLine, ch: editor.getLine(ref.endLine).length };
+    editor.setCursor(anchorPos);
     const plan = await this.resolveFileContextSafely(target, note, "interactive");
     if (!plan) return;
+    const anchoredInsert = createAnchoredInsert({
+      app: this.app,
+      view,
+      editor,
+      file: note,
+      anchor: anchorPos,
+      log: (msg) => void this.fileTranscriptionService.logEvent(msg),
+      notify: (msg) => {
+        new import_obsidian11.Notice(msg);
+      }
+    });
     await this.fileTranscriptionService.transcribe(target, (text) => {
-      editor.replaceSelection(`
+      void anchoredInsert(`
 ${text}`);
     }, plan.context, plan.options);
   }

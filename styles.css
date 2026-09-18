@@ -40,6 +40,7 @@
    for its own status-bar icons. */
 .voxtral-tts-btn {
 	--icon-size: var(--icon-xs);
+
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -57,13 +58,13 @@
 	cursor: pointer;
 }
 
-.voxtral-tts-btn:hover:not(:disabled) {
-	color: var(--icon-color-hover, var(--text-normal));
-}
-
 .voxtral-tts-btn:disabled {
 	color: var(--text-faint);
 	cursor: default;
+}
+
+.voxtral-tts-btn:hover:not(:disabled) {
+	color: var(--icon-color-hover, var(--text-normal));
 }
 
 .voxtral-tts-counter {
@@ -229,6 +230,7 @@
 		opacity: 1;
 		transform: scale(1);
 	}
+
 	50% {
 		opacity: 0.35;
 		transform: scale(0.75);
@@ -381,7 +383,7 @@
 
 .voxtral-review-preview-text {
 	white-space: pre-wrap;
-	word-break: break-word;
+	overflow-wrap: break-word;
 	font-family: var(--font-text);
 	margin: 0;
 }
@@ -440,20 +442,6 @@
 .voxtral-terms-intro {
 	color: var(--text-muted);
 	font-size: var(--font-smaller);
-}
-
-.voxtral-terms-actions {
-	position: sticky;
-	bottom: 0;
-	background: var(--background-primary);
-	border-top: 1px solid var(--background-modifier-border);
-	padding-top: 0.6em;
-	padding-bottom: 0.4em;
-	margin-top: 0.4em;
-}
-
-.voxtral-term-chip-covered {
-	opacity: 0.55;
 }
 
 .voxtral-terms-group {

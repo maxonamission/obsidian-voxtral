@@ -4,6 +4,24 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.15.2] - 2026-09-18
+
+- **The debug crash log no longer silently drops lines.** Two log writes that
+  happened to overlap could clobber each other's line; log writes are now
+  queued so that can no longer happen. The log file also now opens with a
+  one-line note asking you not to keep it open in an editor tab while a
+  transcription is running, since that can still make Obsidian's own tab
+  buffer overwrite lines written in the meantime.
+- **A long file transcription no longer drifts to wherever your cursor
+  happens to be, or into another note.** All three progressive-insert paths
+  (insert at cursor, the embed command, and the new-linked-note output) now
+  track their own insertion point instead of trusting the live cursor
+  selection, so moving your cursor mid-transcription no longer scatters the
+  next part. If you switch the tab to a different note while a
+  transcription is still running, the remaining parts are now written
+  straight to the original note instead of landing in the note you switched
+  to.
+
 ## [1.15.1] - 2026-09-15
 
 - **The terms dialog no longer leans on a CSS selector that can slow down focus
