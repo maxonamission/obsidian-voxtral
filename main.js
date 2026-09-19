@@ -3013,7 +3013,7 @@ async function payloadBytes(audio) {
   }
   return audio.bytes;
 }
-async function transcribeBatchRaw(audio, settings, httpRequest, diarize = false, context = EMPTY_REQUEST_CONTEXT) {
+async function transcribeBatchRaw(audio, settings, httpRequest, diarize = false, context = EMPTY_REQUEST_CONTEXT, onBeforeUpload) {
   var _a, _b, _c;
   const t = audio.type;
   const ext = t.includes("mp4") ? "m4a" : t.includes("ogg") ? "ogg" : t.includes("mpeg") || t.includes("mp3") ? "mp3" : t.includes("wav") ? "wav" : t.includes("flac") ? "flac" : t.includes("aac") ? "aac" : "webm";
@@ -3073,6 +3073,7 @@ ${term}\r
   body.set(tailBuf, headerBuf.length + fileBytes.length);
   const base = resolveBaseUrl(settings);
   assertKeySafeBaseUrl(base);
+  if (onBeforeUpload) await onBeforeUpload();
   const response = await withTimeout(
     httpRequest({
       url: `${base}/v1/audio/transcriptions`,
@@ -3095,8 +3096,8 @@ ${term}\r
     segments: (_c = (_b = response.json) == null ? void 0 : _b.segments) != null ? _c : []
   };
 }
-async function transcribeBatch(audioBlob, settings, httpRequest, diarize = false, context = EMPTY_REQUEST_CONTEXT) {
-  return (await transcribeBatchRaw(audioBlob, settings, httpRequest, diarize, context)).text;
+async function transcribeBatch(audioBlob, settings, httpRequest, diarize = false, context = EMPTY_REQUEST_CONTEXT, onBeforeUpload) {
+  return (await transcribeBatchRaw(audioBlob, settings, httpRequest, diarize, context, onBeforeUpload)).text;
 }
 async function synthesizeSpeech(text, settings, httpRequest) {
   var _a, _b, _c, _d, _e;
@@ -5656,10 +5657,10 @@ function heapSnapshot(perf = typeof performance === "undefined" ? null : perform
 function describeMemoryPlan(payloadBytes2, heap) {
   const mb = (payloadBytes2 / MB).toFixed(1);
   if (!heap) {
-    return `body ${mb} MB (+${mb} MB to copy); heap unavailable on this engine`;
+    return `body ${mb} MB (+${mb} MB to copy); JS heap unavailable on this engine`;
   }
   const headroom = heap.limitMb - heap.usedMb;
-  return `body ${mb} MB (+${mb} MB to copy); heap ${heap.usedMb.toFixed(0)}/${heap.limitMb.toFixed(0)} MB, ${headroom.toFixed(0)} MB free`;
+  return `body ${mb} MB (+${mb} MB to copy); JS heap ${heap.usedMb.toFixed(0)}/${heap.limitMb.toFixed(0)} MB, ${headroom.toFixed(0)} MB free (audio buffers excluded)`;
 }
 
 // src/byte-source.ts
@@ -5972,6 +5973,7 @@ function resampleSpan(padded, fromRate, toRate, leadingPad, spanFrames) {
 
 // src/audio-quality.ts
 var LIKELY_TOO_LARGE_MB = 90;
+var MOBILE_SINGLE_UPLOAD_LIMIT_MB = 32;
 var LOW_BITRATE_KBPS = 24;
 var CLIPPING_FRACTION_WARN = 5e-3;
 var CLIP_LEVEL = 0.98;
@@ -5989,8 +5991,9 @@ function shouldAnalyzeSignal(meta, isMobile) {
   const capMb = isMobile ? SIGNAL_ANALYSIS_MAX_MB_MOBILE : SIGNAL_ANALYSIS_MAX_MB_DESKTOP;
   return meta.sizeBytes <= capMb * MB2;
 }
-function exceedsUploadLimit(sizeBytes) {
-  return sizeBytes > LIKELY_TOO_LARGE_MB * MB2;
+function exceedsUploadLimit(sizeBytes, isMobile = false) {
+  const limitMb = isMobile ? MOBILE_SINGLE_UPLOAD_LIMIT_MB : LIKELY_TOO_LARGE_MB;
+  return sizeBytes > limitMb * MB2;
 }
 function toDbfs(linear) {
   if (linear <= 0) return -100;
@@ -6098,6 +6101,30 @@ function planChunks(totalFrames, sampleRate, chunkSeconds, encodedRate = sampleR
   }
   return spans;
 }
+function planMp3ByteChunks(index, targetBytes, maxSeconds) {
+  const { frameCount, byteOffsets, timeOffsets } = index;
+  if (frameCount <= 0) return [];
+  const spans = [];
+  let spanStart = 0;
+  let chunkIndex = 0;
+  for (let i = 1; i <= frameCount; i++) {
+    const bytesSoFar = byteOffsets[i] - byteOffsets[spanStart];
+    const secondsSoFar = timeOffsets[i] - timeOffsets[spanStart];
+    const isLast = i === frameCount;
+    if (isLast || bytesSoFar >= targetBytes || secondsSoFar >= maxSeconds) {
+      spans.push({
+        index: chunkIndex,
+        startFrame: spanStart,
+        endFrame: i,
+        startSec: timeOffsets[spanStart],
+        endSec: timeOffsets[i]
+      });
+      chunkIndex++;
+      spanStart = i;
+    }
+  }
+  return spans;
+}
 function mixToMono(channels, startFrame, endFrame) {
   const len = Math.max(0, endFrame - startFrame);
   const out = new Float32Array(len);
@@ -6158,6 +6185,144 @@ function splitSpan(span) {
 }
 function partTitle(span) {
   return `Part ${span.index + 1}${span.sub ? ` (${span.sub})` : ""}`;
+}
+
+// src/mp3-frames.ts
+var ID3V2_MAGIC = [73, 68, 51];
+var ID3V2_HEADER_BYTES = 10;
+var MAX_TOLERATED_TAIL_BYTES = 256 * 1024;
+var ID3V2_FOOTER_BYTES = 10;
+var ID3V2_FOOTER_FLAG = 16;
+var ID3V1_TAG_BYTES = 128;
+var ID3V1_MAGIC = [84, 65, 71];
+var SAMPLE_RATES_HZ = {
+  mpeg1: [44100, 48e3, 32e3],
+  mpeg2: [22050, 24e3, 16e3],
+  mpeg25: [11025, 12e3, 8e3]
+};
+var LAYER3_BITRATES_KBPS = {
+  mpeg1: [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0],
+  mpeg2or25: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0]
+};
+function frameLengthCoefficient(version) {
+  return version === "mpeg1" ? 144 : 72;
+}
+function samplesPerFrame(version) {
+  return version === "mpeg1" ? 1152 : 576;
+}
+function hasMagicAt(bytes, offset, magic) {
+  if (offset < 0 || offset + magic.length > bytes.length) return false;
+  for (let i = 0; i < magic.length; i++) {
+    if (bytes[offset + i] !== magic[i]) return false;
+  }
+  return true;
+}
+function id3v2SkipBytes(bytes) {
+  if (!hasMagicAt(bytes, 0, ID3V2_MAGIC)) return 0;
+  if (bytes.length < ID3V2_HEADER_BYTES) return 0;
+  const hasFooter = (bytes[5] & ID3V2_FOOTER_FLAG) !== 0;
+  const b6 = bytes[6] & 127;
+  const b7 = bytes[7] & 127;
+  const b8 = bytes[8] & 127;
+  const b9 = bytes[9] & 127;
+  const tagSize = b6 << 21 | b7 << 14 | b8 << 7 | b9;
+  return ID3V2_HEADER_BYTES + tagSize + (hasFooter ? ID3V2_FOOTER_BYTES : 0);
+}
+function audioEndOffset(bytes) {
+  if (bytes.length < ID3V1_TAG_BYTES) return bytes.length;
+  const tagStart = bytes.length - ID3V1_TAG_BYTES;
+  return hasMagicAt(bytes, tagStart, ID3V1_MAGIC) ? tagStart : bytes.length;
+}
+function parseFrameHeader(bytes, pos, end) {
+  if (pos + 4 > end) return "insufficient_bytes";
+  const b0 = bytes[pos];
+  const b1 = bytes[pos + 1];
+  const b2 = bytes[pos + 2];
+  const b3 = bytes[pos + 3];
+  if (b0 !== 255 || (b1 & 224) !== 224) return "no_sync";
+  const versionBits = b1 >> 3 & 3;
+  if (versionBits === 1) return "reserved_version";
+  const version = versionBits === 3 ? "mpeg1" : versionBits === 2 ? "mpeg2" : "mpeg25";
+  const layerBits = b1 >> 1 & 3;
+  if (layerBits !== 1) return "unsupported_layer";
+  const bitrateIndex = b2 >> 4 & 15;
+  if (bitrateIndex === 0) return "free_format";
+  if (bitrateIndex === 15) return "reserved_bitrate";
+  const sampleRateIndex = b2 >> 2 & 3;
+  if (sampleRateIndex === 3) return "reserved_sample_rate";
+  const padding = b2 >> 1 & 1;
+  const channelModeBits = b3 >> 6 & 3;
+  const channels = channelModeBits === 3 ? 1 : 2;
+  const sampleRate = SAMPLE_RATES_HZ[version][sampleRateIndex];
+  const bitrateKbps2 = LAYER3_BITRATES_KBPS[version === "mpeg1" ? "mpeg1" : "mpeg2or25"][bitrateIndex];
+  const frameBytes = Math.floor(frameLengthCoefficient(version) * bitrateKbps2 * 1e3 / sampleRate) + padding;
+  return { sampleRate, channels, frameBytes, samples: samplesPerFrame(version) };
+}
+function buildMp3FrameIndex(bytes) {
+  const end = audioEndOffset(bytes);
+  const start = id3v2SkipBytes(bytes);
+  if (start > end) return { ok: false, reason: "id3v2_size_exceeds_buffer", offset: start };
+  const byteOffsets = [];
+  const timeOffsets = [];
+  let cumulativeSec = 0;
+  let sampleRate = 0;
+  let channels = 0;
+  let pos = start;
+  let skippedTail = null;
+  while (pos < end) {
+    const header = parseFrameHeader(bytes, pos, end);
+    if (typeof header === "string" || pos + header.frameBytes > end) {
+      const reason = typeof header === "string" ? header : "frame_exceeds_buffer";
+      if (byteOffsets.length === 0) return { ok: false, reason, offset: pos };
+      const leftover = end - pos;
+      if (leftover > MAX_TOLERATED_TAIL_BYTES) return { ok: false, reason, offset: pos };
+      skippedTail = { reason, offset: pos, bytes: leftover };
+      break;
+    }
+    if (byteOffsets.length === 0) {
+      sampleRate = header.sampleRate;
+      channels = header.channels;
+    }
+    byteOffsets.push(pos);
+    timeOffsets.push(cumulativeSec);
+    cumulativeSec += header.samples / header.sampleRate;
+    pos += header.frameBytes;
+  }
+  if (byteOffsets.length === 0) return { ok: false, reason: "no_frames_found", offset: pos };
+  byteOffsets.push(pos);
+  timeOffsets.push(cumulativeSec);
+  return {
+    ok: true,
+    index: {
+      frameCount: byteOffsets.length - 1,
+      sampleRate,
+      channels,
+      durationSec: cumulativeSec,
+      byteOffsets: Uint32Array.from(byteOffsets),
+      timeOffsets: Float64Array.from(timeOffsets)
+    },
+    skippedTail
+  };
+}
+function frameIndexAtOrBefore(timeOffsets, t) {
+  const last = timeOffsets.length - 1;
+  if (t <= timeOffsets[0]) return 0;
+  if (t >= timeOffsets[last]) return last;
+  let lo = 0;
+  let hi = last;
+  while (lo < hi) {
+    const mid = lo + hi + 1 >>> 1;
+    if (timeOffsets[mid] <= t) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+function mp3ByteRange(index, startSec, endSec) {
+  const s = Math.max(0, startSec);
+  const e = Math.max(s, endSec);
+  const startFrame = frameIndexAtOrBefore(index.timeOffsets, s);
+  const endFrame = frameIndexAtOrBefore(index.timeOffsets, e);
+  return { start: index.byteOffsets[startFrame], end: index.byteOffsets[endFrame] };
 }
 
 // src/transcript-format.ts
@@ -6698,7 +6863,7 @@ var _FileTranscriptionService = class _FileTranscriptionService {
     const settings = { ...this.settings };
     const ctx = context != null ? context : EMPTY_REQUEST_CONTEXT;
     try {
-      const needsChunking = exceedsUploadLimit(file.stat.size);
+      const needsChunking = exceedsUploadLimit(file.stat.size, import_obsidian8.Platform.isMobile);
       const ranged = needsChunking ? await this.openRangedSource(file) : null;
       let bytes = null;
       let source;
@@ -6749,7 +6914,12 @@ var _FileTranscriptionService = class _FileTranscriptionService {
       let chunks = [];
       if (settings.fileTranscriptDiarize) {
         await this.logStep("single-call: sending diarized request");
-        const result = await this.transcribeDiarized(payload, settings, ctx);
+        const result = await this.transcribeDiarized(
+          payload,
+          settings,
+          ctx,
+          () => this.logStep("single-call: multipart body built, uploading")
+        );
         await this.logStep(
           `single-call: response text=${result.text.length} chars, ${result.segments.length} segments`
         );
@@ -6773,7 +6943,14 @@ ${fallback}` }];
         await this.logStep(`single-call: built ${chunks.length} review chunk(s)`);
       } else {
         await this.logStep("single-call: sending request");
-        let text2 = (await transcribeBatch(payload, settings, this.httpRequest, false, ctx)).trim();
+        let text2 = (await transcribeBatch(
+          payload,
+          settings,
+          this.httpRequest,
+          false,
+          ctx,
+          () => this.logStep("single-call: multipart body built, uploading")
+        )).trim();
         await this.logStep(`single-call: response text=${text2.length} chars`);
         if (text2 && settings.fileTranscriptCorrect) {
           await this.logStep(`single-call: correcting (${text2.length} chars)`);
@@ -6811,6 +6988,9 @@ ${fallback}` }];
     } catch (e) {
       this.updateStatusBar("idle");
       const msg = String(e);
+      await this.crashLog(
+        `FAILED at "${this.currentStep}" (${isMemoryError(msg) ? "memory" : isTooLargeError(msg) ? "too-large" : "other"}): ${msg}`
+      );
       if (isMemoryError(msg)) {
         new import_obsidian8.Notice(memoryErrorNotice(file.name, import_obsidian8.Platform.isMobile, this.currentStep), 1e4);
       } else if (isTooLargeError(msg)) {
@@ -6933,8 +7113,8 @@ ${fallback}` }];
    * in transcribeBatchRaw — the API requires segment timestamps for diarization
    * and rejects them alongside `language`, so the language hint is dropped there.
    */
-  async transcribeDiarized(blob, settings, context) {
-    return transcribeBatchRaw(blob, settings, this.httpRequest, true, context);
+  async transcribeDiarized(blob, settings, context, onBeforeUpload) {
+    return transcribeBatchRaw(blob, settings, this.httpRequest, true, context, onBeforeUpload);
   }
   /**
    * Decode an audio file and resample it to 16 kHz mono (the rate the speech model
@@ -7008,76 +7188,8 @@ ${fallback}` }];
    * stops further parts and leaves the already-inserted text in place.
    */
   async transcribeInChunks(file, source, insert, settings, context) {
-    let totalFrames;
-    let sampleRate;
-    let encodedRate;
-    let chunkWav;
-    const wav = file.extension.toLowerCase() === "wav" ? await parseWavHeaderAsync(source) : null;
-    const mono = wav ? null : await this.logStepThen(
-      "chunked: decoding to 16 kHz mono",
-      async () => this.decodeToMono16k(await source.readAll())
-    );
-    if (wav) {
-      if (wav.format === "float") {
-        await this.logStep(
-          `chunked: scanning peak over ${(wav.dataBytes / (1024 * 1024)).toFixed(0)} MB`
-        );
-      }
-      const gain = await normalisationGainFrom(source, wav);
-      await this.logStep(
-        `chunked: WAV fast path, ${wav.sampleRate} Hz \u2192 ${TARGET_SAMPLE_RATE} Hz, ${wav.channels} channel(s), ${wav.bitsPerSample}-bit ${wav.format}, ${wav.totalFrames} frames${gain === 1 ? "" : `, normalising by ${gain.toFixed(2)}x`}`
-      );
-      totalFrames = wav.totalFrames;
-      sampleRate = wav.sampleRate;
-      encodedRate = TARGET_SAMPLE_RATE;
-      chunkWav = async (span) => {
-        if (wav.sampleRate === TARGET_SAMPLE_RATE) {
-          return encodeWavMono(
-            await monoFramesFromSource(source, wav, span.startFrame, span.endFrame, gain),
-            wav.sampleRate
-          );
-        }
-        const pad = kernelPaddingFrames(wav.sampleRate, TARGET_SAMPLE_RATE);
-        const readStart = Math.max(0, span.startFrame - pad);
-        const readEnd = Math.min(wav.totalFrames, span.endFrame + pad);
-        const leadingPad = span.startFrame - readStart;
-        const raw = await monoFramesFromSource(source, wav, readStart, readEnd, gain);
-        const resampled = resampleSpan(
-          raw,
-          wav.sampleRate,
-          TARGET_SAMPLE_RATE,
-          leadingPad,
-          span.endFrame - span.startFrame
-        );
-        return encodeWavMono(resampled, TARGET_SAMPLE_RATE);
-      };
-    } else if (mono) {
-      totalFrames = mono.samples.length;
-      sampleRate = mono.sampleRate;
-      encodedRate = sampleRate;
-      chunkWav = async (span) => encodeWavMono(mono.samples.subarray(span.startFrame, span.endFrame), sampleRate);
-      await this.logStep(`chunked: decoded 16k mono, ${totalFrames} frames`);
-    } else {
-      await this.logStep("chunked: 16k decode failed, trying source-rate decode");
-      const decoded = await this.decodeToChannels(await source.readAll());
-      if (!decoded) {
-        throw new Error(
-          `Could not decode ${file.name} \u2014 it may be too large to split in memory on this device. Try a smaller/compressed file, or transcribe on desktop.`
-        );
-      }
-      totalFrames = decoded.totalFrames;
-      sampleRate = decoded.sampleRate;
-      encodedRate = sampleRate;
-      chunkWav = async (span) => encodeWavMono(
-        mixToMono(decoded.channels, span.startFrame, span.endFrame),
-        sampleRate
-      );
-      await this.logStep(
-        `chunked: decoded source-rate ${totalFrames} frames @ ${sampleRate}Hz`
-      );
-    }
-    const spans = planChunks(totalFrames, sampleRate, settings.chunkSeconds, encodedRate);
-    await this.logStep(`chunked: planned ${spans.length} chunk(s) @ ${sampleRate}Hz`);
+    const mp3Plan = file.extension.toLowerCase() === "mp3" ? await this.planMp3ChunkRoute(source, settings) : null;
+    const { spans, mimeType, readPart } = mp3Plan != null ? mp3Plan : await this.planDecodedChunkRoute(file, source, settings);
     const review = settings.fileTranscriptReview;
     const reviewChunks = [];
     let append;
@@ -7148,12 +7260,12 @@ ${fallback}` }];
     }
     let ctx = context;
     const label = (span) => `chunk ${span.index + 1}/${spans.length}${span.sub ? ` (${span.sub})` : ""}`;
-    const requestPart = (span, blob, c) => retryWithBackoff(
+    const requestPart = (span, payload, c) => retryWithBackoff(
       (attempt) => {
         if (attempt > 0) {
           vlog.debug(`Voxtral: retry ${attempt} for ${label(span)}`);
         }
-        return diarize ? this.transcribeDiarized(blob, settings, c) : transcribeBatchRaw(blob, settings, this.httpRequest, false, c);
+        return diarize ? this.transcribeDiarized(payload, settings, c) : transcribeBatchRaw(payload, settings, this.httpRequest, false, c);
       },
       {
         attempts: 5,
@@ -7171,15 +7283,15 @@ ${fallback}` }];
           break;
         }
         renderProgress(span.index + 1);
-        await this.logStep(`${label(span)}: encoding WAV`);
-        const wav2 = await chunkWav(span);
-        const blob = new Blob([wav2], { type: "audio/wav" });
+        await this.logStep(`${label(span)}: reading part bytes`);
+        const partBytes = await readPart(span);
+        const payload = { bytes: partBytes, type: mimeType };
         await this.logStep(
-          `${label(span)}: ${(wav2.byteLength / (1024 * 1024)).toFixed(1)} MB WAV, ${Math.round(span.endSec - span.startSec)}s; sending (diarize=${diarize})`
+          `${label(span)}: ${(partBytes.byteLength / (1024 * 1024)).toFixed(1)} MB (${mimeType}), ${Math.round(span.endSec - span.startSec)}s; sending (diarize=${diarize})`
         );
         let result = null;
         try {
-          result = await requestPart(span, blob, ctx);
+          result = await requestPart(span, payload, ctx);
           await this.logStep(
             `${label(span)}: response text=${result.text.length} chars, ${result.segments.length} segments`
           );
@@ -7281,6 +7393,132 @@ ${fallback}
     } else {
       new import_obsidian8.Notice(`Transcribed ${file.name} in ${spans.length} parts.${failNote}`);
     }
+  }
+  /**
+   * Try the mp3 frame-boundary route (VX_E24_S10 fase 2): index the file's
+   * mp3 frames and, on success, plan byte-sized spans straight from that
+   * index — no PCM decode at all. Returns null on anything
+   * `buildMp3FrameIndex` doesn't trust, so `transcribeInChunks` falls back
+   * to `planDecodedChunkRoute` exactly as before this story.
+   */
+  async planMp3ChunkRoute(source, settings) {
+    const raw = new Uint8Array(await source.readAll());
+    const result = buildMp3FrameIndex(raw);
+    if (!result.ok) {
+      await this.logStep(
+        `chunked: mp3 frame index rejected (${result.reason} at byte ${result.offset}) \u2014 falling back to decode`
+      );
+      return null;
+    }
+    const index = result.index;
+    const tailNote = result.skippedTail ? `, dropped ${result.skippedTail.bytes} unreadable tail byte(s) at byte ${result.skippedTail.offset} (${result.skippedTail.reason})` : "";
+    await this.logStep(
+      `chunked: mp3 frame index ok, ${index.frameCount} frames, ${index.durationSec.toFixed(1)}s @ ${index.sampleRate} Hz, ${index.channels} channel(s)${tailNote} \u2014 skipping decode`
+    );
+    const targetBytes = import_obsidian8.Platform.isMobile ? MOBILE_SINGLE_UPLOAD_LIMIT_MB * 1024 * 1024 : CHUNK_MAX_BYTES;
+    const spans = planMp3ByteChunks(index, targetBytes, settings.chunkSeconds);
+    await this.logStep(
+      `chunked: planned ${spans.length} mp3 chunk(s), target ${(targetBytes / (1024 * 1024)).toFixed(0)} MB/part (mobile=${import_obsidian8.Platform.isMobile})`
+    );
+    return {
+      spans,
+      mimeType: "audio/mpeg",
+      readPart: async (span) => {
+        const range = mp3ByteRange(index, span.startSec, span.endSec);
+        return source.read(range.start, range.end - range.start);
+      }
+    };
+  }
+  /**
+   * The three PCM-based chunk routes — WAV fast path, 16 kHz mono decode, and
+   * source-rate decode fallback — unchanged since before VX_E24_S10 except for
+   * the return shape (`ChunkPlan`, generalised so `planMp3ChunkRoute` above can
+   * share the same call site in `transcribeInChunks`). Decodes to 16 kHz mono
+   * once and frees the full-resolution buffer, so the loop holds little memory
+   * (a long recording at the source rate is hundreds of MB — enough to
+   * OOM-crash the app on mobile). Falls back to the source-rate channels if
+   * the resample path isn't available.
+   */
+  async planDecodedChunkRoute(file, source, settings) {
+    let totalFrames;
+    let sampleRate;
+    let encodedRate;
+    let chunkWav;
+    const wav = file.extension.toLowerCase() === "wav" ? await parseWavHeaderAsync(source) : null;
+    const mono = wav ? null : await this.logStepThen(
+      "chunked: decoding to 16 kHz mono",
+      async () => this.decodeToMono16k(await source.readAll())
+    );
+    if (wav) {
+      if (wav.format === "float") {
+        await this.logStep(
+          `chunked: scanning peak over ${(wav.dataBytes / (1024 * 1024)).toFixed(0)} MB`
+        );
+      }
+      const gain = await normalisationGainFrom(source, wav);
+      await this.logStep(
+        `chunked: WAV fast path, ${wav.sampleRate} Hz \u2192 ${TARGET_SAMPLE_RATE} Hz, ${wav.channels} channel(s), ${wav.bitsPerSample}-bit ${wav.format}, ${wav.totalFrames} frames${gain === 1 ? "" : `, normalising by ${gain.toFixed(2)}x`}`
+      );
+      totalFrames = wav.totalFrames;
+      sampleRate = wav.sampleRate;
+      encodedRate = TARGET_SAMPLE_RATE;
+      chunkWav = async (span) => {
+        if (wav.sampleRate === TARGET_SAMPLE_RATE) {
+          return encodeWavMono(
+            await monoFramesFromSource(source, wav, span.startFrame, span.endFrame, gain),
+            wav.sampleRate
+          );
+        }
+        const pad = kernelPaddingFrames(wav.sampleRate, TARGET_SAMPLE_RATE);
+        const readStart = Math.max(0, span.startFrame - pad);
+        const readEnd = Math.min(wav.totalFrames, span.endFrame + pad);
+        const leadingPad = span.startFrame - readStart;
+        const raw = await monoFramesFromSource(source, wav, readStart, readEnd, gain);
+        const resampled = resampleSpan(
+          raw,
+          wav.sampleRate,
+          TARGET_SAMPLE_RATE,
+          leadingPad,
+          span.endFrame - span.startFrame
+        );
+        return encodeWavMono(resampled, TARGET_SAMPLE_RATE);
+      };
+    } else if (mono) {
+      totalFrames = mono.samples.length;
+      sampleRate = mono.sampleRate;
+      encodedRate = sampleRate;
+      chunkWav = async (span) => encodeWavMono(mono.samples.subarray(span.startFrame, span.endFrame), sampleRate);
+      await this.logStep(`chunked: decoded 16k mono, ${totalFrames} frames`);
+    } else {
+      await this.logStep("chunked: 16k decode failed, trying source-rate decode");
+      const decoded = await this.decodeToChannels(await source.readAll());
+      if (!decoded) {
+        throw new Error(
+          `Could not decode ${file.name} \u2014 it may be too large to split in memory on this device. Try a smaller/compressed file, or transcribe on desktop.`
+        );
+      }
+      totalFrames = decoded.totalFrames;
+      sampleRate = decoded.sampleRate;
+      encodedRate = sampleRate;
+      chunkWav = async (span) => encodeWavMono(
+        mixToMono(decoded.channels, span.startFrame, span.endFrame),
+        sampleRate
+      );
+      await this.logStep(
+        `chunked: decoded source-rate ${totalFrames} frames @ ${sampleRate}Hz`
+      );
+    }
+    const spans = planChunks(totalFrames, sampleRate, settings.chunkSeconds, encodedRate);
+    await this.logStep(`chunked: planned ${spans.length} chunk(s) @ ${sampleRate}Hz`);
+    return {
+      spans,
+      mimeType: "audio/wav",
+      // `chunkWav` always returns a fresh, chunk-sized ArrayBuffer it just
+      // allocated (the WAV encode above), so wrapping it as a Uint8Array is
+      // a zero-copy view over the whole thing — never a slice of something
+      // bigger — exactly like the mp3 route's contiguous `source.read()`.
+      readPart: async (span) => new Uint8Array(await chunkWav(span))
+    };
   }
   /**
    * Create a new note holding `body`, linked to the source audio. Returns the

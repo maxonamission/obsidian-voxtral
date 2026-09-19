@@ -4,6 +4,35 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.16.0] - 2026-09-19
+
+- **Transcribing a long mp3 on a phone now works instead of killing the app.**
+  A recording of roughly 60 MB or more used to make Obsidian disappear without
+  a notice and without anything in the log. The cause was not the recording
+  itself but the moment of upload: handing one body that large to the phone's
+  network layer ends the app outright, and nothing on our side ever gets the
+  chance to report it. On a phone, a recording over 32 MB is now cut into
+  parts and sent one part at a time. The cut is made at mp3 frame boundaries,
+  so nothing has to be decoded to do it, and each part is a valid recording in
+  its own right.
+- **Two things to know about a recording that is sent in parts.** Speaker
+  labels are detected per part, so the same label in one part may be a
+  different person than in the next; a note above the transcript says so. And
+  each part is sent as it comes back, so the transcript arrives in pieces
+  rather than all at once.
+- **Parts of an mp3 are now sent as they are, rather than converted first.**
+  Until now every part was decoded, mixed down to a single channel, reduced to
+  16 kHz and repackaged before being sent. An mp3 part is now sent in its
+  original form, which is both smaller to upload and closer to what you
+  recorded.
+- **The debug crash log now says why a transcription failed.** A failure used
+  to leave the log as silent as a crash did, which made the two impossible to
+  tell apart. The log now records the reason, what kind of failure it was, and
+  which step was running, and it notes the moment an upload actually starts.
+  If a large recording still fails, that log now points at the step instead of
+  just stopping. Debug logging has to be on in the settings for any of this to
+  be written.
+
 ## [1.15.3] - 2026-09-19
 
 - **Transcribing a large recording on a phone no longer makes Obsidian
