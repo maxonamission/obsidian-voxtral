@@ -3006,14 +3006,20 @@ function buildContextBias(terms) {
   }
   return result;
 }
-async function transcribeBatchRaw(audioBlob, settings, httpRequest, diarize = false, context = EMPTY_REQUEST_CONTEXT) {
+async function payloadBytes(audio) {
+  const maybeBlob = audio;
+  if (typeof maybeBlob.arrayBuffer === "function") {
+    return new Uint8Array(await maybeBlob.arrayBuffer());
+  }
+  return audio.bytes;
+}
+async function transcribeBatchRaw(audio, settings, httpRequest, diarize = false, context = EMPTY_REQUEST_CONTEXT) {
   var _a, _b, _c;
-  const t = audioBlob.type;
+  const t = audio.type;
   const ext = t.includes("mp4") ? "m4a" : t.includes("ogg") ? "ogg" : t.includes("mpeg") || t.includes("mp3") ? "mp3" : t.includes("wav") ? "wav" : t.includes("flac") ? "flac" : t.includes("aac") ? "aac" : "webm";
-  const mimeType = audioBlob.type || `audio/${ext}`;
+  const mimeType = audio.type || `audio/${ext}`;
   const boundary = `----VoxtralBoundary${Date.now()}`;
-  const arrayBuf = await audioBlob.arrayBuffer();
-  const fileBytes = new Uint8Array(arrayBuf);
+  const fileBytes = await payloadBytes(audio);
   let textParts = "";
   textParts += `--${boundary}\r
 `;
@@ -5635,6 +5641,27 @@ ${piece}`;
 // src/file-transcription-service.ts
 var import_obsidian8 = require("obsidian");
 
+// src/memory-probe.ts
+var MB = 1024 * 1024;
+function heapSnapshot(perf = typeof performance === "undefined" ? null : performance) {
+  if (!perf || typeof perf !== "object") return null;
+  const mem = perf.memory;
+  if (!mem || typeof mem !== "object") return null;
+  const used = mem.usedJSHeapSize;
+  const limit = mem.jsHeapSizeLimit;
+  if (typeof used !== "number" || typeof limit !== "number") return null;
+  if (!Number.isFinite(used) || !Number.isFinite(limit)) return null;
+  return { usedMb: used / MB, limitMb: limit / MB };
+}
+function describeMemoryPlan(payloadBytes2, heap) {
+  const mb = (payloadBytes2 / MB).toFixed(1);
+  if (!heap) {
+    return `body ${mb} MB (+${mb} MB to copy); heap unavailable on this engine`;
+  }
+  const headroom = heap.limitMb - heap.usedMb;
+  return `body ${mb} MB (+${mb} MB to copy); heap ${heap.usedMb.toFixed(0)}/${heap.limitMb.toFixed(0)} MB, ${headroom.toFixed(0)} MB free`;
+}
+
 // src/byte-source.ts
 function bufferSource(bytes) {
   return {
@@ -5953,17 +5980,17 @@ var SILENCE_FRACTION_WARN = 0.6;
 var SILENCE_WINDOW_DBFS = -50;
 var SIGNAL_ANALYSIS_MAX_MB_DESKTOP = 60;
 var SIGNAL_ANALYSIS_MAX_MB_MOBILE = 20;
-var MB = 1024 * 1024;
+var MB2 = 1024 * 1024;
 function bitrateKbps(meta) {
   if (!meta.durationSec || meta.durationSec <= 0) return null;
   return meta.sizeBytes * 8 / 1e3 / meta.durationSec;
 }
 function shouldAnalyzeSignal(meta, isMobile) {
   const capMb = isMobile ? SIGNAL_ANALYSIS_MAX_MB_MOBILE : SIGNAL_ANALYSIS_MAX_MB_DESKTOP;
-  return meta.sizeBytes <= capMb * MB;
+  return meta.sizeBytes <= capMb * MB2;
 }
 function exceedsUploadLimit(sizeBytes) {
-  return sizeBytes > LIKELY_TOO_LARGE_MB * MB;
+  return sizeBytes > LIKELY_TOO_LARGE_MB * MB2;
 }
 function toDbfs(linear) {
   if (linear <= 0) return -100;
@@ -6042,9 +6069,9 @@ function assessAudioQuality(meta, signal) {
 }
 
 // src/audio-chunking.ts
-var MB2 = 1024 * 1024;
+var MB3 = 1024 * 1024;
 var CHUNK_TARGET_SECONDS = 600;
-var CHUNK_MAX_BYTES = 80 * MB2;
+var CHUNK_MAX_BYTES = 80 * MB3;
 var WAV_HEADER_BYTES = 44;
 function maxSafeChunkSeconds(sampleRate) {
   if (sampleRate <= 0) return CHUNK_TARGET_SECONDS;
@@ -6714,11 +6741,15 @@ var _FileTranscriptionService = class _FileTranscriptionService {
         throw new Error(`Could not read ${file.name}.`);
       }
       new import_obsidian8.Notice(`Transcribing ${file.name}\u2026`);
-      const blob = new Blob([bytes], { type: mimeForExtension(file.extension) });
+      const payload = {
+        bytes: new Uint8Array(bytes),
+        type: mimeForExtension(file.extension)
+      };
+      await this.logStep(`single-call: ${describeMemoryPlan(bytes.byteLength, heapSnapshot())}`);
       let chunks = [];
       if (settings.fileTranscriptDiarize) {
         await this.logStep("single-call: sending diarized request");
-        const result = await this.transcribeDiarized(blob, settings, ctx);
+        const result = await this.transcribeDiarized(payload, settings, ctx);
         await this.logStep(
           `single-call: response text=${result.text.length} chars, ${result.segments.length} segments`
         );
@@ -6742,7 +6773,7 @@ ${fallback}` }];
         await this.logStep(`single-call: built ${chunks.length} review chunk(s)`);
       } else {
         await this.logStep("single-call: sending request");
-        let text2 = (await transcribeBatch(blob, settings, this.httpRequest, false, ctx)).trim();
+        let text2 = (await transcribeBatch(payload, settings, this.httpRequest, false, ctx)).trim();
         await this.logStep(`single-call: response text=${text2.length} chars`);
         if (text2 && settings.fileTranscriptCorrect) {
           await this.logStep(`single-call: correcting (${text2.length} chars)`);

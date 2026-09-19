@@ -4,6 +4,23 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.15.3] - 2026-09-19
+
+- **Transcribing a large recording on a phone no longer makes Obsidian
+  disappear.** Sending a file to the transcription service kept the audio in
+  memory four times over at the moment of upload, so a recording of around
+  60 MB or more could push Obsidian past what the system allows it and the app
+  was killed outright, without a notice and without anything in the log. The
+  upload now holds the audio twice, which is the minimum the request itself
+  needs, roughly halving the peak. Recordings that already worked are
+  unaffected; the ones that used to end in a crash now stand a fair chance.
+- **The debug crash log now records what an upload is about to cost.** Just
+  before the audio is handed to the request, the log notes the size of the
+  body, how much extra is needed to build it, and, where the platform reports
+  it, how much heap is in use and how much room is left. A crash of this kind
+  kills the app without raising an error, so this line is the only trace it
+  leaves behind. Turn on debug logging in the settings if you want it.
+
 ## [1.15.2] - 2026-09-18
 
 - **The debug crash log no longer silently drops lines.** Two log writes that
