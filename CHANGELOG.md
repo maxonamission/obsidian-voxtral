@@ -4,6 +4,19 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.17.0] - 2026-09-20
+
+- **You can now decide where a transcript note is saved.** Until now it always
+  landed next to the audio file, with no way to change that. There is a new
+  setting for where new transcript notes go: next to the audio file, as before,
+  or a folder you name. A folder that does not exist yet is created for you.
+- **You can also pick a different folder for a single recording.** When the
+  dialog that asks about terms opens, it now offers the destination folder as
+  well, filled in with your default, so you can send one recording somewhere
+  else without changing the setting. This only appears when a note is actually
+  going to be created, and it needs that terms dialog to be switched on — with
+  it off, every transcript quietly follows the default.
+
 ## [1.16.0] - 2026-09-19
 
 - **Transcribing a long mp3 on a phone now works instead of killing the app.**

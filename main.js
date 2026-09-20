@@ -62,6 +62,8 @@ var DEFAULT_SETTINGS = {
   commandFeedback: true,
   debugLogging: false,
   fileTranscriptOutput: "cursor",
+  fileTranscriptFolderMode: "besideAudio",
+  fileTranscriptFolder: "",
   fileTranscriptCorrect: false,
   fileTranscriptQualityWarnings: true,
   chunkSeconds: 600,
@@ -3776,6 +3778,28 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
+    new import_obsidian.Setting(containerEl).setName("Where new transcript notes are saved").setDesc(
+      `Only used for "New note linked to the audio file" above. Beside the audio file (default) keeps today's behavior; a fixed folder always saves new transcript notes there instead.`
+    ).addDropdown((drop) => {
+      drop.addOption("besideAudio", "Beside the audio file");
+      drop.addOption("fixed", "A fixed folder");
+      drop.setValue(this.plugin.settings.fileTranscriptFolderMode);
+      drop.onChange(async (value) => {
+        this.plugin.settings.fileTranscriptFolderMode = value;
+        await this.plugin.saveSettings();
+        this.rerenderSection("file-transcription");
+      });
+    });
+    if (this.plugin.settings.fileTranscriptFolderMode === "fixed") {
+      new import_obsidian.Setting(containerEl).setName("Fixed transcript folder").setDesc(
+        `Vault folder every new transcript note is saved to; created if it doesn't exist yet. Turn on "Ask for terms before transcribing a file" to change this folder for a single recording \u2014 with that setting off, every transcript silently uses this folder.`
+      ).addText(
+        (text) => text.setPlaceholder("Transcripts").setValue(this.plugin.settings.fileTranscriptFolder).onChange(async (value) => {
+          this.plugin.settings.fileTranscriptFolder = value;
+          await this.plugin.saveSettings();
+        })
+      );
+    }
     new import_obsidian.Setting(containerEl).setName("Correct file transcripts").setDesc(
       "Run a transcribed file through the correction layer (spelling, punctuation). Off by default \u2014 file transcripts can be long, so this adds extra API cost."
     ).addToggle(
@@ -4924,6 +4948,11 @@ var EmbedPickerModal = class extends import_obsidian3.FuzzySuggestModal {
   }
 };
 
+// src/folder-path.ts
+function normalizeFolder(raw) {
+  return raw.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
 // src/watch-folder.ts
 function shouldOfferTranscription(opts) {
   const { candidate, watchFolderPath, isAudio, transcriptExists } = opts;
@@ -4933,9 +4962,6 @@ function shouldOfferTranscription(opts) {
   if (!isAudio(candidate.extension)) return false;
   if (transcriptExists(candidate.path)) return false;
   return true;
-}
-function normalizeFolder(raw) {
-  return raw.trim().replace(/^\/+/, "").replace(/\/+$/, "");
 }
 function isInsideFolder(path, folder) {
   return path === folder || path.startsWith(`${folder}/`);
@@ -5280,8 +5306,9 @@ function selectedGroups(groups, kept) {
 // src/term-preflight-modal.ts
 var KEYBOARD_OPEN_CLASS = "voxtral-terms-keyboard-open";
 var TermPreflightModal = class extends import_obsidian5.Modal {
-  constructor(app, fileName, groups, resolveResult) {
+  constructor(app, fileName, groups, resolveResult, defaultFolder) {
     super(app);
+    this.defaultFolder = defaultFolder;
     this.resolved = false;
     this.typedText = "";
     this.rememberTyped = false;
@@ -5294,6 +5321,7 @@ var TermPreflightModal = class extends import_obsidian5.Modal {
     this.owned = ownedTermsByGroup(groups);
     this.covering = coveringGroup(groups);
     this.keptByGroup = new Map(groups.map((g) => [g, new Set(this.owned.get(g))]));
+    this.folderPath = defaultFolder != null ? defaultFolder : "";
   }
   chosenTerms() {
     return assembleTerms(selectedGroups(this.termGroups, this.keptByGroup), parseTypedTerms(this.typedText));
@@ -5402,6 +5430,13 @@ var TermPreflightModal = class extends import_obsidian5.Modal {
         window.setTimeout(() => area.inputEl.scrollIntoView({ block: "center" }), 300);
       });
     });
+    if (this.defaultFolder !== null) {
+      new import_obsidian5.Setting(contentEl).setName("Save to folder").setDesc("Vault folder for this recording's new transcript note; created if it doesn't exist yet.").addText(
+        (text) => text.setPlaceholder("Transcripts").setValue(this.folderPath).onChange((value) => {
+          this.folderPath = value;
+        })
+      );
+    }
     new import_obsidian5.Setting(contentEl).setName("Save the list in the note").setDesc("Write these terms (except the custom vocabulary) into the note's frontmatter, so the next recording for this note starts with them.").addToggle(
       (toggle) => toggle.setValue(true).onChange((value) => {
         this.saveInNote = value;
@@ -5450,7 +5485,8 @@ var TermPreflightModal = class extends import_obsidian5.Modal {
       dontAskAgain: this.dontAskAgain,
       confirmedTerms: confirmed,
       demotedTerms: demoted,
-      saveInNote: proceed && this.saveInNote
+      saveInNote: proceed && this.saveInNote,
+      outputFolder: this.defaultFolder !== null ? normalizeFolder(this.folderPath) : null
     });
     this.close();
   }
@@ -5464,14 +5500,15 @@ var TermPreflightModal = class extends import_obsidian5.Modal {
         dontAskAgain: this.dontAskAgain,
         confirmedTerms: [],
         demotedTerms: [],
-        saveInNote: false
+        saveInNote: false,
+        outputFolder: null
       });
     }
   }
 };
-function chooseTermsForRecording(app, fileName, groups) {
+function chooseTermsForRecording(app, fileName, groups, defaultFolder) {
   return new Promise((resolve) => {
-    new TermPreflightModal(app, fileName, groups, resolve).open();
+    new TermPreflightModal(app, fileName, groups, resolve, defaultFolder).open();
   });
 }
 
@@ -7523,9 +7560,19 @@ ${fallback}
   /**
    * Create a new note holding `body`, linked to the source audio. Returns the
    * note without opening it or notifying — callers decide how to surface it.
+   *
+   * The destination folder (VX_E25_S4) is `this.current.outputFolder` when the
+   * caller (main.ts) resolved one — from the folder settings, or the pre-flight
+   * dialog's per-recording override — else beside the source audio file, the
+   * original unconditional behavior. Normalized either way: a caller-supplied
+   * folder may be raw settings/dialog input (leading/trailing slashes, stray
+   * whitespace), and this is the point where it actually gets used.
    */
   async createLinkedNote(file, body) {
-    const folder = file.parent && file.parent.path !== "/" ? file.parent.path : "";
+    var _a;
+    const beforeNormalizing = (_a = this.current.outputFolder) != null ? _a : file.parent && file.parent.path !== "/" ? file.parent.path : "";
+    const folder = normalizeFolder(beforeNormalizing);
+    await this.ensureFolderExists(folder);
     const path = this.uniqueNotePath(folder, `${file.basename} (transcript)`);
     let link = this.app.fileManager.generateMarkdownLink(file, path);
     if (link.startsWith("!")) {
@@ -7557,6 +7604,22 @@ ${body}
   /** A note path under `folder` based on `base`, suffixed with a number if taken. */
   uniqueNotePath(folder, base) {
     return uniqueNotePath(this.app, folder, base);
+  }
+  /**
+   * Create `folder` if it doesn't exist yet (VX_E25_S4): a fixed transcript
+   * folder the user typed, or a per-recording override from the terms dialog,
+   * names the folder they mean, not an error. A no-op for the vault root
+   * (`""`, always exists) and for a folder that's already there.
+   */
+  async ensureFolderExists(folder) {
+    if (!folder) return;
+    const segments = folder.split("/").filter((s) => s.length > 0);
+    let path = "";
+    for (const segment of segments) {
+      path = path ? `${path}/${segment}` : segment;
+      if (this.app.vault.getAbstractFileByPath(path)) continue;
+      await this.app.vault.createFolder(path);
+    }
   }
 };
 _FileTranscriptionService.CRASH_LOG_PATH = "voxtral-crash-log.md";
@@ -12520,6 +12583,19 @@ ${getLogText()}
     }
   }
   /**
+   * Where a newly created transcript note lands by default (VX_E25_S4):
+   * beside the source audio file (default, unchanged behavior), or the
+   * configured fixed folder. Only consulted when a note is actually going
+   * to be created (the caller only reads this when `noteFile` is null) —
+   * "insert at cursor" has no note to place, so there is nothing to default.
+   */
+  defaultOutputFolder(audio) {
+    if (this.settings.fileTranscriptFolderMode === "fixed") {
+      return normalizeFolder(this.settings.fileTranscriptFolder);
+    }
+    return audio.parent && audio.parent.path !== "/" ? audio.parent.path : "";
+  }
+  /**
    * The request context for one file transcription (VX_E6_S7). Collects
    * the ranked term groups (frontmatter, custom list, file name, note
    * neighbourhood) and, for a user-initiated transcription with the
@@ -12529,8 +12605,16 @@ ${getLogText()}
    * a term nobody looked at must not reach the API (owner test 12 aug
    * 2026). "silent" is the manual path with the dialog switched off: the
    * default selection, file-name terms included, goes out unchanged.
+   *
+   * The transcript-destination folder (VX_E25_S4) rides along the same way:
+   * resolved to the settings default here, and — only when the dialog is
+   * shown AND a note will actually be created (`noteFile` is null) —
+   * offered there for a per-recording override. "auto" and the dialog
+   * switched off both get the silent default, same reasoning as the terms
+   * themselves.
    */
   async resolveFileContext(audio, noteFile, mode) {
+    var _a;
     const styleInstruction = this.resolveEffectiveStyleForFile(noteFile);
     const groups = collectTermGroups({
       app: this.app,
@@ -12542,7 +12626,10 @@ ${getLogText()}
     const options = {
       onSpeakerNames: (names) => {
         void this.learnTerms(names, []);
-      }
+      },
+      // undefined when noteFile is set: "insert at cursor" creates no note,
+      // so there is no folder to resolve.
+      outputFolder: noteFile === null ? this.defaultOutputFolder(audio) : void 0
     };
     if (mode === "auto" || !this.settings.fileTranscriptTermPreflight) {
       return {
@@ -12553,7 +12640,15 @@ ${getLogText()}
     await this.fileTranscriptionService.logEvent(
       `terms dialog: opened for ${audio.name} with ${groups.map((g) => `${g.source}=${g.terms.length}`).join(", ") || "no groups"}`
     );
-    const choice = await chooseTermsForRecording(this.app, audio.name, groups);
+    const choice = await chooseTermsForRecording(
+      this.app,
+      audio.name,
+      groups,
+      noteFile === null ? (_a = options.outputFolder) != null ? _a : "" : null
+    );
+    if (choice.outputFolder !== null) {
+      options.outputFolder = choice.outputFolder;
+    }
     await this.fileTranscriptionService.logEvent(
       `terms dialog: ${choice.proceed ? "transcribe" : "cancelled"}, ${choice.terms.length} term(s), ${choice.rememberTerms.length} to remember${choice.dontAskAgain ? ", don't ask again" : ""}`
     );
