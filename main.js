@@ -5520,15 +5520,45 @@ function advanceAnchor(anchor, text) {
   }
   return { line: anchor.line + lines.length - 1, ch: lines[lines.length - 1].length };
 }
+var ANCHOR_TAIL_LENGTH = 48;
+function updateTail(previousTail, written) {
+  const combined = previousTail + written;
+  return combined.length <= ANCHOR_TAIL_LENGTH ? combined : combined.slice(-ANCHOR_TAIL_LENGTH);
+}
+function normalizeForAnchorMatch(text) {
+  return text.replace(/[\u2013\u2014]/g, "-").replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\u00a0/g, " ");
+}
+function checkAnchor(fullText, anchorOffset, tail) {
+  if (tail.length === 0) {
+    return { kind: "ok" };
+  }
+  const start = Math.max(0, anchorOffset - tail.length);
+  const actual = fullText.slice(start, anchorOffset);
+  if (normalizeForAnchorMatch(actual) === normalizeForAnchorMatch(tail)) {
+    return { kind: "ok" };
+  }
+  const normalizedFull = normalizeForAnchorMatch(fullText);
+  const normalizedTail = normalizeForAnchorMatch(tail);
+  const first = normalizedFull.indexOf(normalizedTail);
+  if (first === -1) {
+    return { kind: "lost" };
+  }
+  const second = normalizedFull.indexOf(normalizedTail, first + 1);
+  if (second !== -1) {
+    return { kind: "lost" };
+  }
+  return { kind: "relocated", offset: first + tail.length };
+}
 
 // src/anchored-insert.ts
 function createAnchoredInsert(options) {
   const { app, view, editor, file } = options;
   let anchor = options.anchor;
   let fellBackToFile = false;
+  let tail = "";
   let queue = Promise.resolve();
   async function insertOne(text) {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     if (!fellBackToFile && ((_a = view.file) == null ? void 0 : _a.path) !== file.path) {
       fellBackToFile = true;
       (_d = options.log) == null ? void 0 : _d.call(
@@ -5539,12 +5569,24 @@ function createAnchoredInsert(options) {
         options,
         `That tab moved on, so the rest of the transcript is being added to the end of ${file.basename}.`
       );
+    } else if (!fellBackToFile) {
+      const check = checkAnchor(editor.getValue(), editor.posToOffset(anchor), tail);
+      if (check.kind === "relocated") {
+        anchor = editor.offsetToPos(check.offset);
+      } else if (check.kind === "lost") {
+        fellBackToFile = true;
+        (_f = options.log) == null ? void 0 : _f.call(
+          options,
+          `insert: lost track of the insertion point in ${file.path} (our own text was rewritten or is no longer there) \u2014 writing the rest to the end of the file instead`
+        );
+      }
     }
     if (fellBackToFile) {
       await app.vault.process(file, (data) => data + text);
     } else {
       editor.replaceRange(text, anchor);
     }
+    tail = updateTail(tail, text);
     anchor = advanceAnchor(anchor, text);
   }
   return (text) => {

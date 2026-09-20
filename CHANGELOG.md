@@ -4,6 +4,21 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.17.1] - 2026-09-20
+
+- **A transcript that arrives in parts no longer ends up in the wrong place when
+  another plugin edits the note while it is being written.** A long recording is
+  transcribed in parts over a minute or more, and the plugin kept track of where
+  to write the next part by counting lines it had written itself. If something
+  else changed the note in the meantime — a formatting plugin adding a couple of
+  lines to the front matter on the first autosave is the common case — every
+  part after that landed a few lines too high. The visible symptom was the note
+  about speaker labels ending up at the bottom instead of the top, but the same
+  shift could drop a part into the middle of an existing note. The plugin now
+  checks that the note still reads as it left it, finds its place again when
+  something moved, and adds the remaining parts at the end rather than guessing
+  when it cannot.
+
 ## [1.17.0] - 2026-09-20
 
 - **You can now decide where a transcript note is saved.** Until now it always
