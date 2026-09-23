@@ -4,6 +4,16 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.17.2] - 2026-09-23
+
+- **The debug crash log now says when the plugin had to find its place again.**
+  Since the previous release it recovers when another plugin edits the note while
+  a transcript is being written in parts, but it did so without saying anything —
+  so a run where that saved the day and a run where nothing happened read exactly
+  the same. The log now notes it, and by how many characters the text moved,
+  which is what identifies the plugin that moved it. A run where nothing shifts
+  still logs nothing. Debug logging has to be on in the settings.
+
 ## [1.17.1] - 2026-09-20
 
 - **A transcript that arrives in parts no longer ends up in the wrong place when

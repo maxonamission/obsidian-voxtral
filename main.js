@@ -5556,9 +5556,10 @@ function createAnchoredInsert(options) {
   let anchor = options.anchor;
   let fellBackToFile = false;
   let tail = "";
+  let lastOffset = 0;
   let queue = Promise.resolve();
   async function insertOne(text) {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g;
     if (!fellBackToFile && ((_a = view.file) == null ? void 0 : _a.path) !== file.path) {
       fellBackToFile = true;
       (_d = options.log) == null ? void 0 : _d.call(
@@ -5573,9 +5574,13 @@ function createAnchoredInsert(options) {
       const check = checkAnchor(editor.getValue(), editor.posToOffset(anchor), tail);
       if (check.kind === "relocated") {
         anchor = editor.offsetToPos(check.offset);
+        (_f = options.log) == null ? void 0 : _f.call(
+          options,
+          `insert: something else edited ${file.path} while we were writing (our text moved by ${check.offset - lastOffset} characters) \u2014 found it again and carried on in place`
+        );
       } else if (check.kind === "lost") {
         fellBackToFile = true;
-        (_f = options.log) == null ? void 0 : _f.call(
+        (_g = options.log) == null ? void 0 : _g.call(
           options,
           `insert: lost track of the insertion point in ${file.path} (our own text was rewritten or is no longer there) \u2014 writing the rest to the end of the file instead`
         );
@@ -5588,6 +5593,7 @@ function createAnchoredInsert(options) {
     }
     tail = updateTail(tail, text);
     anchor = advanceAnchor(anchor, text);
+    lastOffset = fellBackToFile ? 0 : editor.posToOffset(anchor);
   }
   return (text) => {
     const step = queue.then(() => insertOne(text)).catch((e) => {
