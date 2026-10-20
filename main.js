@@ -31,14 +31,14 @@ var EMPTY_REQUEST_CONTEXT = Object.freeze({
   vocabularyTerms: NO_VOCABULARY_TERMS
 });
 var DEFAULT_SETTINGS = {
-  settingsVersion: 10,
+  settingsVersion: 11,
   apiKey: "",
   apiKeySecretId: "",
   apiBaseUrl: "https://api.mistral.ai",
   realtimeProtocol: "auto",
   language: "nl",
-  realtimeModel: "voxtral-mini-transcribe-realtime-2602",
-  batchModel: "voxtral-mini-latest",
+  realtimeModel: "voxtral-mini-transcribe-realtime-3",
+  batchModel: "voxtral-mini-transcribe-3",
   correctModel: "mistral-small-latest",
   autoCorrect: true,
   correctionIntensity: "standard",
@@ -350,9 +350,69 @@ function getDefaultBuiltInCommands() {
   ];
 }
 
+// ../shared/src/voxtral-3.ts
+var VOXTRAL_3_MODEL_IDS = /* @__PURE__ */ new Set([
+  "voxtral-mini-transcribe-3-0",
+  "voxtral-mini-transcribe-3",
+  "voxtral-mini-transcribe-latest",
+  "voxtral-mini-transcribe-realtime-3-0",
+  "voxtral-mini-transcribe-realtime-3",
+  "voxtral-small-transcribe-3-0",
+  "voxtral-small-transcribe-3",
+  "voxtral-small-transcribe-latest"
+]);
+function isVoxtral3Model(modelId) {
+  if (typeof modelId !== "string") return false;
+  return VOXTRAL_3_MODEL_IDS.has(modelId.trim());
+}
+var STREAMING_DELAY_MIN_MS = 80;
+var STREAMING_DELAY_RANGE_MAX_MS = 1200;
+var STREAMING_DELAY_LONG_MS = 2400;
+function isValidStreamingDelayMs(value) {
+  if (typeof value !== "number" || !Number.isInteger(value)) return false;
+  return value >= STREAMING_DELAY_MIN_MS && value <= STREAMING_DELAY_RANGE_MAX_MS || value === STREAMING_DELAY_LONG_MS;
+}
+function nearestValidStreamingDelayMs(value) {
+  if (isValidStreamingDelayMs(value)) return value;
+  const rounded = Math.round(value);
+  if (isValidStreamingDelayMs(rounded)) return rounded;
+  if (rounded < STREAMING_DELAY_MIN_MS) return STREAMING_DELAY_MIN_MS;
+  const toRangeEnd = rounded - STREAMING_DELAY_RANGE_MAX_MS;
+  const toLong = STREAMING_DELAY_LONG_MS - rounded;
+  return toLong < toRangeEnd ? STREAMING_DELAY_LONG_MS : STREAMING_DELAY_RANGE_MAX_MS;
+}
+
 // src/settings-migration.ts
-var CURRENT_VERSION = 10;
+var CURRENT_VERSION = 11;
+var OLD_DEFAULT_BATCH_MODEL = "voxtral-mini-latest";
+var OLD_DEFAULT_REALTIME_MODEL = "voxtral-mini-transcribe-realtime-2602";
+var DELAY_KEYS = ["streamingDelayMs", "dualDelayFastMs", "dualDelaySlowMs"];
 var migrations = {
+  // v10 → v11 (VX_E32_S1, Voxtral 3). Two things changed on the API side:
+  // - The standard models moved to the Voxtral 3 versions. Only a value that
+  //   is EXACTLY the old standard is replaced; a model the user chose
+  //   (including `voxtral-mini-2602` or a dated id) stays as it is. A missing
+  //   key needs nothing here: the defaults-merge supplies the new standard.
+  // - `target_streaming_delay_ms` only accepts 80..1200 and 2400, and the
+  //   dictation does not start on anything else. The old menu offered 1600.
+  //   Any stored delay that is a finite number outside that set moves to the
+  //   nearest accepted value (1600 becomes 1200). The dual-delay values have
+  //   no menu, but a stored 5000 would break the session the same way.
+  10: (data) => {
+    if (data.batchModel === OLD_DEFAULT_BATCH_MODEL) {
+      data.batchModel = DEFAULT_SETTINGS.batchModel;
+    }
+    if (data.realtimeModel === OLD_DEFAULT_REALTIME_MODEL) {
+      data.realtimeModel = DEFAULT_SETTINGS.realtimeModel;
+    }
+    for (const key of DELAY_KEYS) {
+      const value = data[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        data[key] = nearestValidStreamingDelayMs(value);
+      }
+    }
+    return data;
+  }
   // NB: the localized insert text for built-ins (obsidian-voxtral#14) needs
   // no migration — loadSettings() refreshes every stored built-in's content
   // fields (labels, triggers, insertText, insertTextByLang, slot fields)
@@ -362,10 +422,10 @@ function migrateSettings(data) {
   if (!data) {
     return { ...DEFAULT_SETTINGS, settingsVersion: CURRENT_VERSION };
   }
-  let version = typeof data.settingsVersion === "number" ? data.settingsVersion : 0;
-  while (migrations[version]) {
-    data = migrations[version](data);
-    version++;
+  const storedVersion = typeof data.settingsVersion === "number" && Number.isFinite(data.settingsVersion) && data.settingsVersion >= 0 ? Math.floor(data.settingsVersion) : 0;
+  for (let version = storedVersion; version < CURRENT_VERSION; version++) {
+    const migrate = migrations[version];
+    if (migrate) data = migrate(data);
   }
   data.settingsVersion = CURRENT_VERSION;
   return { ...DEFAULT_SETTINGS, ...data };
@@ -1916,6 +1976,9 @@ function withTimeout(promise, timeoutMs, label) {
 }
 function sanitizeApiError(status, rawBody) {
   var _a;
+  if (status === 400 && rawBody.includes("invalid_request_prompt_too_long")) {
+    return "HTTP 400: The request exceeds the model's context window, which the audio and the vocabulary terms share. The vocabulary is a likely cause: try again with fewer terms.";
+  }
   try {
     const parsed = JSON.parse(rawBody);
     let msg = (parsed == null ? void 0 : parsed.message) || ((_a = parsed == null ? void 0 : parsed.error) == null ? void 0 : _a.message);
@@ -1951,221 +2014,31 @@ function sanitizeApiError(status, rawBody) {
   }
 }
 
-// ../shared/src/authenticated-websocket.ts
-var WS_OPEN = 1;
-function loadNodeModule(name) {
-  const r = globalThis["require"];
-  if (!r) throw new Error(`Node.js require() not available (needed for ${name})`);
-  return r(name);
+// ../shared/src/context-bias.ts
+var CONTEXT_BIAS_MAX_TERMS = 100;
+var CONTEXT_BIAS_MAX_TERM_LENGTH = 40;
+function stripTermPunctuation(term) {
+  return /\..*\.$/.test(term) ? term : term.replace(/[.;:!?]+$/, "");
 }
-function hasNodeWebSocketAuth() {
-  return typeof globalThis["require"] === "function";
+function trimEdgeCommas(term) {
+  return term.replace(/^[\s,]+|[\s,]+$/g, "");
 }
-function createAuthenticatedWebSocket(url, headers, callbacks) {
-  const https = loadNodeModule("https");
-  const crypto = loadNodeModule("crypto");
-  const parsed = new URL(url);
-  const wsKey = crypto.randomBytes(16).toString("base64");
-  let closed = false;
-  let pingInterval = null;
-  function clearPing() {
-    if (pingInterval) {
-      clearInterval(pingInterval);
-      pingInterval = null;
-    }
+function buildContextBias(terms, model) {
+  if (!terms || terms.length === 0) return [];
+  const v3 = isVoxtral3Model(model);
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const raw of terms) {
+    const term = v3 ? trimEdgeCommas(stripTermPunctuation(trimEdgeCommas(raw.replace(/\s+/g, " ")))) : stripTermPunctuation(raw.trim().replace(/\s+/g, "_").replace(/,/g, ""));
+    if (!term) continue;
+    if (term.length > CONTEXT_BIAS_MAX_TERM_LENGTH) continue;
+    if (!/\p{L}/u.test(term)) continue;
+    if (seen.has(term)) continue;
+    seen.add(term);
+    result.push(term);
+    if (result.length >= CONTEXT_BIAS_MAX_TERMS) break;
   }
-  const conn = {
-    readyState: 0,
-    send: () => {
-    },
-    // Pre-upgrade close (VX_E31_S3, audit §6.1 S2): before the HTTP
-    // upgrade there is no socket yet, and this used to be an empty
-    // function — the underlying https request kept running, so a connect
-    // timeout that "closed" the connection still got its upgrade a moment
-    // later and produced a second live socket with its own ping interval
-    // and callbacks into a session that had already been thrown away.
-    // Destroying the request is what actually cancels the handshake; the
-    // `closed` flag covers the race where the upgrade already landed in
-    // the event queue.
-    close: () => {
-      closed = true;
-      conn.readyState = 3;
-      clearPing();
-      try {
-        req.destroy();
-      } catch (e) {
-      }
-    }
-  };
-  const req = https.request(
-    {
-      hostname: parsed.hostname,
-      port: parsed.port || 443,
-      path: parsed.pathname + parsed.search,
-      method: "GET",
-      headers: {
-        ...headers,
-        Connection: "Upgrade",
-        Upgrade: "websocket",
-        "Sec-WebSocket-Version": "13",
-        "Sec-WebSocket-Key": wsKey
-      }
-    },
-    (res) => {
-      callbacks.onError(
-        new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
-      );
-      closed = true;
-      conn.readyState = 3;
-      req.destroy();
-    }
-  );
-  req.on("upgrade", (_res, socket) => {
-    if (closed) {
-      try {
-        socket.destroy();
-      } catch (e) {
-      }
-      return;
-    }
-    conn.readyState = WS_OPEN;
-    conn.send = (data) => {
-      const payload = Buffer.from(data, "utf-8");
-      const mask = crypto.randomBytes(4);
-      let header;
-      if (payload.length < 126) {
-        header = Buffer.alloc(6);
-        header[0] = 129;
-        header[1] = 128 | payload.length;
-        mask.copy(header, 2);
-      } else if (payload.length < 65536) {
-        header = Buffer.alloc(8);
-        header[0] = 129;
-        header[1] = 128 | 126;
-        header.writeUInt16BE(payload.length, 2);
-        mask.copy(header, 4);
-      } else {
-        header = Buffer.alloc(14);
-        header[0] = 129;
-        header[1] = 128 | 127;
-        header.writeBigUInt64BE(BigInt(payload.length), 2);
-        mask.copy(header, 10);
-      }
-      const masked = Buffer.alloc(payload.length);
-      for (let i = 0; i < payload.length; i++) {
-        masked[i] = payload[i] ^ mask[i % 4];
-      }
-      socket.write(Buffer.concat([header, masked]));
-    };
-    conn.close = () => {
-      closed = true;
-      conn.readyState = 3;
-      clearPing();
-      const closeFrame = Buffer.alloc(6);
-      closeFrame[0] = 136;
-      closeFrame[1] = 128;
-      const closeMask = crypto.randomBytes(4);
-      closeMask.copy(closeFrame, 2);
-      try {
-        socket.write(closeFrame);
-      } catch (e) {
-      }
-      socket.end();
-    };
-    pingInterval = setInterval(() => {
-      if (conn.readyState !== WS_OPEN) {
-        clearPing();
-        return;
-      }
-      try {
-        const pingFrame = Buffer.alloc(6);
-        pingFrame[0] = 137;
-        pingFrame[1] = 128;
-        const pingMask = crypto.randomBytes(4);
-        pingMask.copy(pingFrame, 2);
-        socket.write(pingFrame);
-      } catch (e) {
-      }
-    }, 15e3);
-    callbacks.onOpen();
-    let buffer = Buffer.alloc(0);
-    socket.on("data", (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      while (buffer.length >= 2) {
-        const firstByte = buffer[0];
-        const secondByte = buffer[1];
-        const opcode = firstByte & 15;
-        const isMasked = (secondByte & 128) !== 0;
-        let payloadLength = secondByte & 127;
-        let offset = 2;
-        if (payloadLength === 126) {
-          if (buffer.length < 4) return;
-          payloadLength = buffer.readUInt16BE(2);
-          offset = 4;
-        } else if (payloadLength === 127) {
-          if (buffer.length < 10) return;
-          payloadLength = Number(buffer.readBigUInt64BE(2));
-          offset = 10;
-        }
-        if (isMasked) offset += 4;
-        if (buffer.length < offset + payloadLength) return;
-        let payload = buffer.subarray(offset, offset + payloadLength);
-        if (isMasked) {
-          const maskKey = buffer.subarray(offset - 4, offset);
-          payload = Buffer.from(payload);
-          for (let i = 0; i < payload.length; i++) {
-            payload[i] ^= maskKey[i % 4];
-          }
-        }
-        buffer = buffer.subarray(offset + payloadLength);
-        if (opcode === 1) {
-          callbacks.onMessage(payload.toString("utf-8"));
-        } else if (opcode === 8) {
-          conn.readyState = 3;
-          clearPing();
-          socket.end();
-          callbacks.onClose();
-          return;
-        } else if (opcode === 9) {
-          const pongMask = crypto.randomBytes(4);
-          const pongLen = payload.length;
-          let pongHeader;
-          if (pongLen < 126) {
-            pongHeader = Buffer.alloc(6);
-            pongHeader[0] = 138;
-            pongHeader[1] = 128 | pongLen;
-            pongMask.copy(pongHeader, 2);
-          } else {
-            pongHeader = Buffer.alloc(8);
-            pongHeader[0] = 138;
-            pongHeader[1] = 128 | 126;
-            pongHeader.writeUInt16BE(pongLen, 2);
-            pongMask.copy(pongHeader, 4);
-          }
-          const maskedPong = Buffer.from(payload);
-          for (let i = 0; i < maskedPong.length; i++) {
-            maskedPong[i] ^= pongMask[i % 4];
-          }
-          socket.write(Buffer.concat([pongHeader, maskedPong]));
-        }
-      }
-    });
-    socket.on("close", () => {
-      conn.readyState = 3;
-      clearPing();
-      callbacks.onClose();
-    });
-    socket.on("error", (err) => {
-      conn.readyState = 3;
-      clearPing();
-      callbacks.onError(err);
-    });
-  });
-  req.on("error", (err) => {
-    callbacks.onError(err);
-  });
-  req.end();
-  return conn;
+  return result;
 }
 
 // ../shared/src/realtime-token.ts
@@ -2435,7 +2308,7 @@ function createTokenManager(settings, httpRequest) {
   return httpRequest ? new RealtimeTokenManager(settings, httpRequest) : null;
 }
 
-// ../shared/src/realtime-transcriber.ts
+// ../shared/src/realtime-session-update.ts
 function resolveRealtimeProtocol(settings) {
   if (settings.realtimeProtocol === "mistral" || settings.realtimeProtocol === "vllm") {
     return settings.realtimeProtocol;
@@ -2447,6 +2320,258 @@ function resolveRealtimeProtocol(settings) {
     return "mistral";
   }
 }
+function isRealtimeLanguageCode(value) {
+  return typeof value === "string" && /^[a-z]{2}$/.test(value);
+}
+function supportsRealtimeSessionHints(settings) {
+  return resolveRealtimeProtocol(settings) === "mistral" && isVoxtral3Model(settings.realtimeModel);
+}
+function resolveRealtimeSessionHints(settings, context) {
+  if (!supportsRealtimeSessionHints(settings)) return null;
+  const hints = {
+    contextBias: buildContextBias(context.vocabularyTerms, settings.realtimeModel)
+  };
+  if (isRealtimeLanguageCode(settings.language)) hints.language = settings.language;
+  return hints;
+}
+function describeRealtimeSessionHints(settings, context) {
+  var _a;
+  const hints = resolveRealtimeSessionHints(settings, context);
+  if (!hints) return "language and vocabulary hints not sent (route or model without support)";
+  return `hints language=${(_a = hints.language) != null ? _a : "auto"}, vocabulary terms=${hints.contextBias.length}`;
+}
+function buildRealtimeSessionUpdate(settings, context, delayMs) {
+  const session = {
+    audio_format: {
+      encoding: REALTIME_AUDIO_ENCODING,
+      sample_rate: REALTIME_AUDIO_SAMPLE_RATE_HZ
+    },
+    target_streaming_delay_ms: delayMs
+  };
+  const hints = resolveRealtimeSessionHints(settings, context);
+  if (hints == null ? void 0 : hints.language) session.language = hints.language;
+  if (hints && hints.contextBias.length > 0) session.context_bias = hints.contextBias;
+  return { type: "session.update", session };
+}
+
+// ../shared/src/authenticated-websocket.ts
+var WS_OPEN = 1;
+function loadNodeModule(name) {
+  const r = globalThis["require"];
+  if (!r) throw new Error(`Node.js require() not available (needed for ${name})`);
+  return r(name);
+}
+function hasNodeWebSocketAuth() {
+  return typeof globalThis["require"] === "function";
+}
+function createAuthenticatedWebSocket(url, headers, callbacks) {
+  const https = loadNodeModule("https");
+  const crypto = loadNodeModule("crypto");
+  const parsed = new URL(url);
+  const wsKey = crypto.randomBytes(16).toString("base64");
+  let closed = false;
+  let pingInterval = null;
+  function clearPing() {
+    if (pingInterval) {
+      clearInterval(pingInterval);
+      pingInterval = null;
+    }
+  }
+  const conn = {
+    readyState: 0,
+    send: () => {
+    },
+    // Pre-upgrade close (VX_E31_S3, audit §6.1 S2): before the HTTP
+    // upgrade there is no socket yet, and this used to be an empty
+    // function — the underlying https request kept running, so a connect
+    // timeout that "closed" the connection still got its upgrade a moment
+    // later and produced a second live socket with its own ping interval
+    // and callbacks into a session that had already been thrown away.
+    // Destroying the request is what actually cancels the handshake; the
+    // `closed` flag covers the race where the upgrade already landed in
+    // the event queue.
+    close: () => {
+      closed = true;
+      conn.readyState = 3;
+      clearPing();
+      try {
+        req.destroy();
+      } catch (e) {
+      }
+    }
+  };
+  const req = https.request(
+    {
+      hostname: parsed.hostname,
+      port: parsed.port || 443,
+      path: parsed.pathname + parsed.search,
+      method: "GET",
+      headers: {
+        ...headers,
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": wsKey
+      }
+    },
+    (res) => {
+      callbacks.onError(
+        new Error(`WebSocket upgrade failed: HTTP ${res.statusCode}`)
+      );
+      closed = true;
+      conn.readyState = 3;
+      req.destroy();
+    }
+  );
+  req.on("upgrade", (_res, socket) => {
+    if (closed) {
+      try {
+        socket.destroy();
+      } catch (e) {
+      }
+      return;
+    }
+    conn.readyState = WS_OPEN;
+    conn.send = (data) => {
+      const payload = Buffer.from(data, "utf-8");
+      const mask = crypto.randomBytes(4);
+      let header;
+      if (payload.length < 126) {
+        header = Buffer.alloc(6);
+        header[0] = 129;
+        header[1] = 128 | payload.length;
+        mask.copy(header, 2);
+      } else if (payload.length < 65536) {
+        header = Buffer.alloc(8);
+        header[0] = 129;
+        header[1] = 128 | 126;
+        header.writeUInt16BE(payload.length, 2);
+        mask.copy(header, 4);
+      } else {
+        header = Buffer.alloc(14);
+        header[0] = 129;
+        header[1] = 128 | 127;
+        header.writeBigUInt64BE(BigInt(payload.length), 2);
+        mask.copy(header, 10);
+      }
+      const masked = Buffer.alloc(payload.length);
+      for (let i = 0; i < payload.length; i++) {
+        masked[i] = payload[i] ^ mask[i % 4];
+      }
+      socket.write(Buffer.concat([header, masked]));
+    };
+    conn.close = () => {
+      closed = true;
+      conn.readyState = 3;
+      clearPing();
+      const closeFrame = Buffer.alloc(6);
+      closeFrame[0] = 136;
+      closeFrame[1] = 128;
+      const closeMask = crypto.randomBytes(4);
+      closeMask.copy(closeFrame, 2);
+      try {
+        socket.write(closeFrame);
+      } catch (e) {
+      }
+      socket.end();
+    };
+    pingInterval = setInterval(() => {
+      if (conn.readyState !== WS_OPEN) {
+        clearPing();
+        return;
+      }
+      try {
+        const pingFrame = Buffer.alloc(6);
+        pingFrame[0] = 137;
+        pingFrame[1] = 128;
+        const pingMask = crypto.randomBytes(4);
+        pingMask.copy(pingFrame, 2);
+        socket.write(pingFrame);
+      } catch (e) {
+      }
+    }, 15e3);
+    callbacks.onOpen();
+    let buffer = Buffer.alloc(0);
+    socket.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (buffer.length >= 2) {
+        const firstByte = buffer[0];
+        const secondByte = buffer[1];
+        const opcode = firstByte & 15;
+        const isMasked = (secondByte & 128) !== 0;
+        let payloadLength = secondByte & 127;
+        let offset = 2;
+        if (payloadLength === 126) {
+          if (buffer.length < 4) return;
+          payloadLength = buffer.readUInt16BE(2);
+          offset = 4;
+        } else if (payloadLength === 127) {
+          if (buffer.length < 10) return;
+          payloadLength = Number(buffer.readBigUInt64BE(2));
+          offset = 10;
+        }
+        if (isMasked) offset += 4;
+        if (buffer.length < offset + payloadLength) return;
+        let payload = buffer.subarray(offset, offset + payloadLength);
+        if (isMasked) {
+          const maskKey = buffer.subarray(offset - 4, offset);
+          payload = Buffer.from(payload);
+          for (let i = 0; i < payload.length; i++) {
+            payload[i] ^= maskKey[i % 4];
+          }
+        }
+        buffer = buffer.subarray(offset + payloadLength);
+        if (opcode === 1) {
+          callbacks.onMessage(payload.toString("utf-8"));
+        } else if (opcode === 8) {
+          conn.readyState = 3;
+          clearPing();
+          socket.end();
+          callbacks.onClose();
+          return;
+        } else if (opcode === 9) {
+          const pongMask = crypto.randomBytes(4);
+          const pongLen = payload.length;
+          let pongHeader;
+          if (pongLen < 126) {
+            pongHeader = Buffer.alloc(6);
+            pongHeader[0] = 138;
+            pongHeader[1] = 128 | pongLen;
+            pongMask.copy(pongHeader, 2);
+          } else {
+            pongHeader = Buffer.alloc(8);
+            pongHeader[0] = 138;
+            pongHeader[1] = 128 | 126;
+            pongHeader.writeUInt16BE(pongLen, 2);
+            pongMask.copy(pongHeader, 4);
+          }
+          const maskedPong = Buffer.from(payload);
+          for (let i = 0; i < maskedPong.length; i++) {
+            maskedPong[i] ^= pongMask[i % 4];
+          }
+          socket.write(Buffer.concat([pongHeader, maskedPong]));
+        }
+      }
+    });
+    socket.on("close", () => {
+      conn.readyState = 3;
+      clearPing();
+      callbacks.onClose();
+    });
+    socket.on("error", (err) => {
+      conn.readyState = 3;
+      clearPing();
+      callbacks.onError(err);
+    });
+  });
+  req.on("error", (err) => {
+    callbacks.onError(err);
+  });
+  req.end();
+  return conn;
+}
+
+// ../shared/src/realtime-transcriber.ts
 function isLocalMode(settings) {
   return resolveRealtimeProtocol(settings) === "vllm";
 }
@@ -2471,6 +2596,11 @@ function parseRealtimeMessage(value) {
   return msg;
 }
 var RealtimeTranscriber = class {
+  /**
+   * `opts.context` carries the vocabulary for `context_bias` (VX_E32_S2);
+   * it defaults to the empty context, so callers that have none keep the
+   * message they always got.
+   */
   constructor(settings, callbacks, delayOverrideMs, opts) {
     this.ws = null;
     this.intentionallyClosed = false;
@@ -2813,20 +2943,23 @@ var RealtimeTranscriber = class {
       JSON.stringify((_a = msg.session) != null ? _a : {})
     );
   }
+  /**
+   * Declare the session. Called only from the three handshake completions
+   * (header route on `session.created`, token route on `session.created`,
+   * vLLM on `open`), each before `sessionReady` flips and so before the first
+   * `input_audio.append`. Voxtral 3 refuses any later `session.update`, so
+   * keep it that way: a reconnect is a NEW transcriber with its own
+   * handshake, never a second update on a live socket.
+   */
   sendSessionUpdate() {
-    var _a;
+    var _a, _b, _c;
     if (!this.ws) return;
     const delayMs = (_a = this.delayOverrideMs) != null ? _a : this.settings.streamingDelayMs;
-    const msg = {
-      type: "session.update",
-      session: {
-        audio_format: {
-          encoding: REALTIME_AUDIO_ENCODING,
-          sample_rate: REALTIME_AUDIO_SAMPLE_RATE_HZ
-        },
-        target_streaming_delay_ms: delayMs
-      }
-    };
+    const msg = buildRealtimeSessionUpdate(
+      this.settings,
+      (_c = (_b = this.opts) == null ? void 0 : _b.context) != null ? _c : EMPTY_REQUEST_CONTEXT,
+      delayMs
+    );
     this.ws.send(JSON.stringify(msg));
   }
   sendAudio(pcmBytes) {
@@ -2985,29 +3118,6 @@ async function listVoices(apiKey, httpRequest, baseUrl) {
     return [];
   }
 }
-var CONTEXT_BIAS_MAX_TERMS = 100;
-var CONTEXT_BIAS_MAX_TERM_LENGTH = 40;
-function stripTermPunctuation(term) {
-  return /\..*\.$/.test(term) ? term : term.replace(/[.;:!?]+$/, "");
-}
-function buildContextBias(terms) {
-  if (!terms || terms.length === 0) return [];
-  const seen = /* @__PURE__ */ new Set();
-  const result = [];
-  for (const raw of terms) {
-    const term = stripTermPunctuation(
-      raw.trim().replace(/\s+/g, "_").replace(/,/g, "")
-    );
-    if (!term) continue;
-    if (term.length > CONTEXT_BIAS_MAX_TERM_LENGTH) continue;
-    if (!/\p{L}/u.test(term)) continue;
-    if (seen.has(term)) continue;
-    seen.add(term);
-    result.push(term);
-    if (result.length >= CONTEXT_BIAS_MAX_TERMS) break;
-  }
-  return result;
-}
 async function payloadBytes(audio) {
   const maybeBlob = audio;
   if (typeof maybeBlob.arrayBuffer === "function") {
@@ -3056,7 +3166,7 @@ Content-Disposition: form-data; name="language"\r
 ${settings.language}\r
 `;
   }
-  const bias = buildContextBias(context.vocabularyTerms);
+  const bias = buildContextBias(context.vocabularyTerms, settings.batchModel);
   for (const term of bias) {
     extraFields += `--${boundary}\r
 Content-Disposition: form-data; name="context_bias"\r
@@ -3743,7 +3853,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
     });
     if (isRealtime && !this.plugin.settings.dualDelay) {
       new import_obsidian.Setting(containerEl).setName("Streaming delay").setDesc(
-        "Delay in ms for realtime mode. Lower = faster but less accurate."
+        "Delay in ms for realtime mode. Lower = faster but less accurate. Voxtral 3 only accepts these values."
       ).addDropdown((drop) => {
         const options = {
           "240": "240 ms (fastest)",
@@ -3751,7 +3861,6 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
           "640": "640 ms",
           "800": "800 ms",
           "1200": "1200 ms",
-          "1600": "1600 ms",
           "2400": "2400 ms (most accurate)"
         };
         for (const [value, label] of Object.entries(options)) {
@@ -5306,9 +5415,10 @@ function selectedGroups(groups, kept) {
 // src/term-preflight-modal.ts
 var KEYBOARD_OPEN_CLASS = "voxtral-terms-keyboard-open";
 var TermPreflightModal = class extends import_obsidian5.Modal {
-  constructor(app, fileName, groups, resolveResult, defaultFolder) {
+  constructor(app, fileName, groups, resolveResult, defaultFolder, batchModel) {
     super(app);
     this.defaultFolder = defaultFolder;
+    this.batchModel = batchModel;
     this.resolved = false;
     this.typedText = "";
     this.rememberTyped = false;
@@ -5328,7 +5438,7 @@ var TermPreflightModal = class extends import_obsidian5.Modal {
   }
   refreshCounter() {
     if (!this.countEl) return;
-    const wire = buildContextBias(this.chosenTerms()).length;
+    const wire = buildContextBias(this.chosenTerms(), this.batchModel).length;
     this.countEl.setText(
       `${wire} of at most ${CONTEXT_BIAS_MAX_TERMS} terms will be sent as context bias.`
     );
@@ -5506,9 +5616,9 @@ var TermPreflightModal = class extends import_obsidian5.Modal {
     }
   }
 };
-function chooseTermsForRecording(app, fileName, groups, defaultFolder) {
+function chooseTermsForRecording(app, fileName, groups, defaultFolder, batchModel) {
   return new Promise((resolve) => {
-    new TermPreflightModal(app, fileName, groups, resolve, defaultFolder).open();
+    new TermPreflightModal(app, fileName, groups, resolve, defaultFolder, batchModel).open();
   });
 }
 
@@ -6722,8 +6832,8 @@ function openTranscriptReviewModal(app, params) {
 }
 
 // src/file-transcription-service.ts
-function describeBias(prefix, ctx) {
-  const bias = buildContextBias(ctx.vocabularyTerms);
+function describeBias(prefix, ctx, batchModel) {
+  const bias = buildContextBias(ctx.vocabularyTerms, batchModel);
   return `${prefix} ${bias.length} context-bias term(s)`;
 }
 var _FileTranscriptionService = class _FileTranscriptionService {
@@ -6976,7 +7086,7 @@ var _FileTranscriptionService = class _FileTranscriptionService {
       }
       this.updateStatusBar("processing");
       if (ctx.vocabularyTerms.length) {
-        await this.logStep(describeBias("vault vocabulary: sending", ctx));
+        await this.logStep(describeBias("vault vocabulary: sending", ctx, settings.batchModel));
       }
       if (needsChunking) {
         try {
@@ -9743,11 +9853,12 @@ function doneTextRemainder(doneText, alreadyRaw) {
   return doneText.slice(cutIndex);
 }
 var _RealtimeSession = class _RealtimeSession {
-  constructor(settings, tracker, callbacks, httpRequest) {
+  constructor(settings, tracker, callbacks, httpRequest, context = EMPTY_REQUEST_CONTEXT) {
     this.settings = settings;
     this.tracker = tracker;
     this.callbacks = callbacks;
     this.httpRequest = httpRequest;
+    this.context = context;
     this.kind = "realtime";
     this.transcriber = null;
     this.pendingText = "";
@@ -9822,7 +9933,7 @@ var _RealtimeSession = class _RealtimeSession {
   }
   /** Connect the WebSocket and start receiving transcription. */
   async start(editor) {
-    var _a, _b;
+    var _a, _b, _c, _d;
     this.pendingText = "";
     this.prevRaw = "";
     this.turnDelta = 0;
@@ -9835,6 +9946,10 @@ var _RealtimeSession = class _RealtimeSession {
     this.lastInsertEnd = null;
     this.tokenManager = createTokenManager(this.settings, this.httpRequest);
     (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: session starting");
+    (_d = (_c = this.callbacks).logLifecycle) == null ? void 0 : _d.call(
+      _c,
+      `realtime: ${describeRealtimeSessionHints(this.settings, this.context)}`
+    );
     await this.connectWebSocket(editor);
   }
   /** Insert committed dictation text (table-aware; see TableInsertTracker). */
@@ -9963,7 +10078,10 @@ var _RealtimeSession = class _RealtimeSession {
         }
       },
       void 0,
-      this.tokenManager ? { tokenManager: this.tokenManager } : void 0
+      {
+        ...this.tokenManager ? { tokenManager: this.tokenManager } : {},
+        context: this.context
+      }
     );
     this.transcriber = transcriber;
     await transcriber.connect();
@@ -10160,11 +10278,12 @@ var RealtimeSession = _RealtimeSession;
 
 // ../shared/src/dual-delay-session.ts
 var _DualDelaySession = class _DualDelaySession {
-  constructor(settings, tracker, callbacks, httpRequest) {
+  constructor(settings, tracker, callbacks, httpRequest, context = EMPTY_REQUEST_CONTEXT) {
     this.settings = settings;
     this.tracker = tracker;
     this.callbacks = callbacks;
     this.httpRequest = httpRequest;
+    this.context = context;
     this.kind = "dual-delay";
     this.fastTranscriber = null;
     this.slowTranscriber = null;
@@ -10245,6 +10364,7 @@ var _DualDelaySession = class _DualDelaySession {
   }
   /** Connect both WebSocket streams and initialize state. */
   async start(editor) {
+    var _a, _b;
     this.setState("connecting" /* Connecting */);
     this.fastText = "";
     this.slowText = "";
@@ -10266,6 +10386,10 @@ var _DualDelaySession = class _DualDelaySession {
       this.remainderTimer = null;
     }
     this.tokenManager = createTokenManager(this.settings, this.httpRequest);
+    (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(
+      _a,
+      `dual-delay: ${describeRealtimeSessionHints(this.settings, this.context)}`
+    );
     await this.connectWebSockets(editor);
     this.setState("streaming" /* Streaming */);
   }
@@ -10366,9 +10490,16 @@ var _DualDelaySession = class _DualDelaySession {
     this.setState("idle" /* Idle */);
   }
   // ── WebSocket lifecycle ──
-  /** RealtimeTranscriber's 4th-arg opts, or undefined without a token manager. */
+  /**
+   * RealtimeTranscriber's 4th-arg opts: the shared token manager (when there
+   * is one) and the session's request context. The fast and the slow stream
+   * both read this, so they always declare the same language and terms.
+   */
   get transcriberOpts() {
-    return this.tokenManager ? { tokenManager: this.tokenManager } : void 0;
+    return {
+      ...this.tokenManager ? { tokenManager: this.tokenManager } : {},
+      context: this.context
+    };
   }
   /**
    * Build the fast-stream transcriber (immediate text feedback).
@@ -11309,7 +11440,8 @@ var RecordingController = class {
           settings,
           this.deps.tracker,
           callbacks,
-          this.deps.httpRequest
+          this.deps.httpRequest,
+          context
         );
       case "batch":
         return new BatchDictationSession(
@@ -11324,7 +11456,8 @@ var RecordingController = class {
           settings,
           this.deps.tracker,
           callbacks,
-          this.deps.httpRequest
+          this.deps.httpRequest,
+          context
         );
     }
   }
@@ -12692,7 +12825,8 @@ ${getLogText()}
       this.app,
       audio.name,
       groups,
-      noteFile === null ? (_a = options.outputFolder) != null ? _a : "" : null
+      noteFile === null ? (_a = options.outputFolder) != null ? _a : "" : null,
+      this.settings.batchModel
     );
     if (choice.outputFolder !== null) {
       options.outputFolder = choice.outputFolder;

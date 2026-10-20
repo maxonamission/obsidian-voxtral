@@ -4,6 +4,35 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.18.0] - 2026-10-20
+
+Mistral released Voxtral 3. This release moves the plugin onto it and uses two
+things it makes possible.
+
+- **Dictation now uses your vocabulary and your language.** Live dictation used
+  to send only the audio, so the names and terms from your vault and your custom
+  vocabulary only helped when you transcribed a file. With a Voxtral 3 realtime
+  model they now go along with dictation too, together with the language you set,
+  so names come out spelled the way you write them. If you use a local server or
+  an older realtime model, nothing changes for you. One visible difference: with
+  the default language, dictation is now told it is Dutch instead of guessing the
+  language each time.
+- **Names of several words keep their spaces.** A vocabulary term such as a
+  company name used to be sent with underscores between the words, which the
+  older models required, and the underscores could end up in the transcript.
+  Voxtral 3 accepts the spaces, so with a Voxtral 3 model the term is sent the way
+  you wrote it.
+- **The default models are now the Voxtral 3 ones**: `voxtral-mini-transcribe-3`
+  for files and `voxtral-mini-transcribe-realtime-3` for dictation. If you were
+  on the old defaults, you are moved over automatically. A model you picked
+  yourself stays as it is.
+- **The 1600 ms streaming delay is gone.** Voxtral 3 does not accept it, and
+  dictation would not start with it. If you had chosen it, it becomes 1200 ms.
+- **A clearer message when a request is too long for the model.** The audio and
+  the vocabulary terms share the space the model can take in. When a request goes
+  over it, the message now says that the vocabulary is the likely cause, so you
+  know to try again with fewer terms.
+
 ## [1.17.2] - 2026-09-23
 
 - **The debug crash log now says when the plugin had to find its place again.**

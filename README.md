@@ -40,7 +40,7 @@ We built this for people who think out loud: researchers, consultants, anyone wh
 - **Inline correction instructions** — say "for the correction: ..." and the corrector follows your instructions
 - **Self-correction recognition** — "no not X but Y" is handled automatically
 - **Mishearing correction** — common speech recognition errors are fixed automatically per language
-- **Vault vocabulary (optional, off by default)** — send term names from the active note's own vault context (headings, links, aliases, and tags — never note contents) along with your dictated text, so a misheard or misspelled vault term is corrected toward its exact spelling; those same terms are also sent to the transcription API itself as context bias, so names and jargon are more likely to be spelled correctly from the start — optimized for English, with other languages experimental
+- **Vault vocabulary (optional, off by default)** — send term names from the active note's own vault context (headings, links, aliases, and tags — never note contents) along with your dictated text, so a misheard or misspelled vault term is corrected toward its exact spelling; those same terms are also sent to the transcription API itself as context bias, in live dictation (with a Voxtral 3 realtime model) as well as in file transcription, so names and jargon are more likely to be spelled correctly from the start — optimized for English, with other languages experimental
 - **Custom vocabulary** — a global list of your own terms (names, jargon, abbreviations) in the settings, separated by commas or new lines; unlike vault vocabulary above, these are always sent along with corrections and as transcription context bias, even when vault vocabulary is off — the trade-off being that these terms are shared with the API on every call
 
 ### File transcription
@@ -311,7 +311,7 @@ Settings are grouped into eight collapsible sections in Settings → Voxtral Tra
 | Auto-correction | Standard | Off / Light (spelling, capitalization, punctuation only) / Standard (also fixes clearly garbled words) |
 | Noise suppression | Off | Browser-level noise suppression, echo cancellation, and auto gain control |
 | Dual-delay mode (experimental) | Off | Realtime only: two parallel streams (fast preview + slow accuracy); uses 2x API bandwidth |
-| Streaming delay | 480 ms | Latency vs. accuracy trade-off for realtime mode; hidden when dual-delay is on |
+| Streaming delay | 480 ms | Latency vs. accuracy trade-off for realtime mode (240, 480, 640, 800, 1200 or 2400 ms; Voxtral 3 accepts nothing else); hidden when dual-delay is on |
 
 ### File transcription
 
@@ -355,8 +355,8 @@ Settings are grouped into eight collapsible sections in Settings → Voxtral Tra
 
 | Setting | Default | Description |
 |---|---|---|
-| Realtime model | `voxtral-mini-transcribe-realtime-2602` | Model for real-time streaming transcription |
-| Batch model | `voxtral-mini-latest` | Model for batch transcription |
+| Realtime model | `voxtral-mini-transcribe-realtime-3` | Model for real-time streaming transcription |
+| Batch model | `voxtral-mini-transcribe-3` | Model for batch transcription. Voxtral 3 models receive multi-word context-bias terms with spaces; any other model id gets the older underscore form |
 | Correction model | `mistral-small-latest` | Model for text correction |
 | Vault vocabulary | Off | Send vault term names (headings, link texts, titles, aliases, tags) as correction and transcription context |
 | Custom vocabulary | Empty | Your own terms (names, jargon, abbreviations), always sent regardless of vault vocabulary |
