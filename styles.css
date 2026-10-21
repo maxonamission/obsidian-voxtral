@@ -122,6 +122,12 @@
 	vertical-align: top;
 }
 
+.voxtral-help-lang-note {
+	margin-top: 8px;
+	color: var(--text-muted);
+	font-size: 0.85em;
+}
+
 .voxtral-help-label {
 	font-weight: 500;
 	white-space: nowrap;

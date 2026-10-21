@@ -4,6 +4,31 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [1.19.0] - 2026-10-21
+
+- **Dictate in any language Voxtral 3 knows.** Until now the Language setting
+  offered the 13 languages that have voice commands, and nothing else, although
+  Voxtral understands far more. It now offers every language Mistral has
+  confirmed: 48 for transcribing files and 36 for live dictation, Polish, Swedish,
+  Turkish and Ukrainian among them. In a language without its own voice commands,
+  the commands are English, and the help panel says so.
+- **Detect automatically.** A new first choice in the Language setting: Voxtral
+  works out the language itself, and the voice commands are English.
+- **Choose your voice command language separately.** A new setting, *Voice
+  command language*, right under Language. Left on "Same as transcription
+  language", nothing changes. Pick one of the 13 command languages and its
+  commands apply whatever you dictate in: Spanish commands while dictating
+  Catalan, for example, or Dutch commands while dictating English. English
+  commands keep working alongside, as before.
+- **Live dictation in a language not confirmed for it still works.** Mistral has
+  not published its full list, so for a language not yet confirmed for live use
+  (Swedish or Ukrainian, for example) the plugin lets Voxtral detect the
+  language itself instead of naming it. With a strong accent that detection can
+  pick a neighbouring language; file transcription names the language and is not
+  affected.
+- **Per-note language.** `voxtral-language` in a note's front matter accepts the
+  same language codes, and `auto`.
+
 ## [1.18.0] - 2026-10-20
 
 Mistral released Voxtral 3. This release moves the plugin onto it and uses two

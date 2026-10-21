@@ -37,6 +37,8 @@ var DEFAULT_SETTINGS = {
   apiBaseUrl: "https://api.mistral.ai",
   realtimeProtocol: "auto",
   language: "nl",
+  voiceCommandLanguage: "same",
+  // VOICE_COMMAND_LANGUAGE_SAME; types.ts stays a leaf (import-graph test)
   realtimeModel: "voxtral-mini-transcribe-realtime-3",
   batchModel: "voxtral-mini-transcribe-3",
   correctModel: "mistral-small-latest",
@@ -1435,9 +1437,195 @@ function getMishearings(lang) {
   return (_a = MISHEARINGS[lang]) != null ? _a : [];
 }
 
+// ../shared/src/transcription-languages.ts
+var AUTO_LANGUAGE = "auto";
+var VOICE_COMMAND_LANGUAGE_SAME = "same";
+var FLEURS_BATCH = [
+  "ar",
+  "bn",
+  "bg",
+  "ca",
+  "zh",
+  "cs",
+  "da",
+  "nl",
+  "en",
+  "et",
+  "fi",
+  "fr",
+  "de",
+  "el",
+  "gu",
+  "hi",
+  "hu",
+  "is",
+  "id",
+  "it",
+  "ja",
+  "kn",
+  "ko",
+  "lv",
+  "lt",
+  "mk",
+  "ms",
+  "ml",
+  "mr",
+  "no",
+  "fa",
+  "pl",
+  "pt",
+  "ro",
+  "ru",
+  "sk",
+  "sl",
+  "es",
+  "sv",
+  "tl",
+  "te",
+  "th",
+  "tr",
+  "uk",
+  "vi"
+];
+var EU_EXTRA_BATCH = ["hr", "ga", "mt"];
+var FLEURS_REALTIME = [
+  "ar",
+  "bn",
+  "bg",
+  "ca",
+  "cs",
+  "nl",
+  "en",
+  "et",
+  "fi",
+  "fr",
+  "de",
+  "el",
+  "gu",
+  "hi",
+  "id",
+  "it",
+  "ja",
+  "kn",
+  "ko",
+  "lv",
+  "mk",
+  "ms",
+  "ml",
+  "mr",
+  "no",
+  "fa",
+  "pl",
+  "pt",
+  "ro",
+  "ru",
+  "sk",
+  "es",
+  "tl",
+  "te",
+  "tr"
+];
+var BATCH_CODES = /* @__PURE__ */ new Set([
+  ...FLEURS_BATCH,
+  ...EU_EXTRA_BATCH,
+  ...SUPPORTED_LANGUAGES
+]);
+var REALTIME_CODES = /* @__PURE__ */ new Set([
+  ...FLEURS_REALTIME,
+  ...SUPPORTED_LANGUAGES
+]);
+var LANGUAGE_ROWS = [
+  ["ar", "Arabic", "\u0627\u0644\u0639\u0631\u0628\u064A\u0629"],
+  ["bn", "Bengali", "\u09AC\u09BE\u0982\u09B2\u09BE"],
+  ["bg", "Bulgarian", "\u0411\u044A\u043B\u0433\u0430\u0440\u0441\u043A\u0438"],
+  ["ca", "Catalan", "Catal\xE0"],
+  ["zh", "Chinese", "\u4E2D\u6587"],
+  ["hr", "Croatian", "Hrvatski"],
+  ["cs", "Czech", "\u010Ce\u0161tina"],
+  ["da", "Danish", "Dansk"],
+  ["nl", "Dutch", "Nederlands"],
+  ["en", "English", "English"],
+  ["et", "Estonian", "Eesti"],
+  ["tl", "Filipino", "Filipino"],
+  ["fi", "Finnish", "Suomi"],
+  ["fr", "French", "Fran\xE7ais"],
+  ["de", "German", "Deutsch"],
+  ["el", "Greek", "\u0395\u03BB\u03BB\u03B7\u03BD\u03B9\u03BA\u03AC"],
+  ["gu", "Gujarati", "\u0A97\u0AC1\u0A9C\u0AB0\u0ABE\u0AA4\u0AC0"],
+  ["hi", "Hindi", "\u0939\u093F\u0928\u094D\u0926\u0940"],
+  ["hu", "Hungarian", "Magyar"],
+  ["is", "Icelandic", "\xCDslenska"],
+  ["id", "Indonesian", "Bahasa Indonesia"],
+  ["ga", "Irish", "Gaeilge"],
+  ["it", "Italian", "Italiano"],
+  ["ja", "Japanese", "\u65E5\u672C\u8A9E"],
+  ["kn", "Kannada", "\u0C95\u0CA8\u0CCD\u0CA8\u0CA1"],
+  ["ko", "Korean", "\uD55C\uAD6D\uC5B4"],
+  ["lv", "Latvian", "Latvie\u0161u"],
+  ["lt", "Lithuanian", "Lietuvi\u0173"],
+  ["mk", "Macedonian", "\u041C\u0430\u043A\u0435\u0434\u043E\u043D\u0441\u043A\u0438"],
+  ["ms", "Malay", "Bahasa Melayu"],
+  ["ml", "Malayalam", "\u0D2E\u0D32\u0D2F\u0D3E\u0D33\u0D02"],
+  ["mt", "Maltese", "Malti"],
+  ["mr", "Marathi", "\u092E\u0930\u093E\u0920\u0940"],
+  ["no", "Norwegian", "Norsk"],
+  ["fa", "Persian", "\u0641\u0627\u0631\u0633\u06CC"],
+  ["pl", "Polish", "Polski"],
+  ["pt", "Portuguese", "Portugu\xEAs"],
+  ["ro", "Romanian", "Rom\xE2n\u0103"],
+  ["ru", "Russian", "\u0420\u0443\u0441\u0441\u043A\u0438\u0439"],
+  ["sk", "Slovak", "Sloven\u010Dina"],
+  ["sl", "Slovenian", "Sloven\u0161\u010Dina"],
+  ["es", "Spanish", "Espa\xF1ol"],
+  ["sv", "Swedish", "Svenska"],
+  ["te", "Telugu", "\u0C24\u0C46\u0C32\u0C41\u0C17\u0C41"],
+  ["th", "Thai", "\u0E44\u0E17\u0E22"],
+  ["tr", "Turkish", "T\xFCrk\xE7e"],
+  ["uk", "Ukrainian", "\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430"],
+  ["vi", "Vietnamese", "Ti\u1EBFng Vi\u1EC7t"]
+];
+var TRANSCRIPTION_LANGUAGES = LANGUAGE_ROWS.map(
+  ([code, name, endonym]) => ({
+    code,
+    name,
+    endonym,
+    batch: BATCH_CODES.has(code),
+    realtime: REALTIME_CODES.has(code)
+  })
+);
+var BY_CODE = new Map(
+  TRANSCRIPTION_LANGUAGES.map((l) => [l.code, l])
+);
+function isTranscriptionLanguage(code) {
+  return typeof code === "string" && BY_CODE.has(code);
+}
+function transcriptionLanguageForBatch(settingsLanguage, model) {
+  var _a;
+  if (!isTranscriptionLanguage(settingsLanguage)) return void 0;
+  if (!((_a = BY_CODE.get(settingsLanguage)) == null ? void 0 : _a.batch)) return void 0;
+  if (model !== void 0 && !isVoxtral3Model(model) && !isCommandLanguage(settingsLanguage)) {
+    return void 0;
+  }
+  return settingsLanguage;
+}
+function transcriptionLanguageForRealtime(settingsLanguage) {
+  var _a;
+  if (!isTranscriptionLanguage(settingsLanguage)) return void 0;
+  return ((_a = BY_CODE.get(settingsLanguage)) == null ? void 0 : _a.realtime) ? settingsLanguage : void 0;
+}
+function isCommandLanguage(code) {
+  return SUPPORTED_LANGUAGES.includes(code);
+}
+function commandLanguage(settingsLanguage, voiceCommandLanguage) {
+  if (typeof voiceCommandLanguage === "string" && isCommandLanguage(voiceCommandLanguage)) {
+    return voiceCommandLanguage;
+  }
+  return typeof settingsLanguage === "string" && isCommandLanguage(settingsLanguage) ? settingsLanguage : "en";
+}
+
 // src/resolve-language.ts
 function isSupportedLanguage(value) {
-  return SUPPORTED_LANGUAGES.includes(value);
+  return value === AUTO_LANGUAGE || isTranscriptionLanguage(value);
 }
 function describeValue(value) {
   var _a;
@@ -2320,9 +2508,6 @@ function resolveRealtimeProtocol(settings) {
     return "mistral";
   }
 }
-function isRealtimeLanguageCode(value) {
-  return typeof value === "string" && /^[a-z]{2}$/.test(value);
-}
 function supportsRealtimeSessionHints(settings) {
   return resolveRealtimeProtocol(settings) === "mistral" && isVoxtral3Model(settings.realtimeModel);
 }
@@ -2331,14 +2516,21 @@ function resolveRealtimeSessionHints(settings, context) {
   const hints = {
     contextBias: buildContextBias(context.vocabularyTerms, settings.realtimeModel)
   };
-  if (isRealtimeLanguageCode(settings.language)) hints.language = settings.language;
+  const language = transcriptionLanguageForRealtime(settings.language);
+  if (language) hints.language = language;
   return hints;
 }
+function describeHintLanguage(configured, sent) {
+  if (sent) return sent;
+  if (typeof configured !== "string" || configured === "" || configured === AUTO_LANGUAGE) {
+    return "auto";
+  }
+  return `auto (${configured.slice(0, 16)} not known for realtime)`;
+}
 function describeRealtimeSessionHints(settings, context) {
-  var _a;
   const hints = resolveRealtimeSessionHints(settings, context);
   if (!hints) return "language and vocabulary hints not sent (route or model without support)";
-  return `hints language=${(_a = hints.language) != null ? _a : "auto"}, vocabulary terms=${hints.contextBias.length}`;
+  return `hints language=${describeHintLanguage(settings.language, hints.language)}, vocabulary terms=${hints.contextBias.length}`;
 }
 function buildRealtimeSessionUpdate(settings, context, delayMs) {
   const session = {
@@ -3159,11 +3351,12 @@ Content-Disposition: form-data; name="timestamp_granularities"\r
 segment\r
 `;
   }
-  if (settings.language) {
+  const language = transcriptionLanguageForBatch(settings.language, settings.batchModel);
+  if (language) {
     extraFields += `--${boundary}\r
 Content-Disposition: form-data; name="language"\r
 \r
-${settings.language}\r
+${language}\r
 `;
   }
   const bias = buildContextBias(context.vocabularyTerms, settings.batchModel);
@@ -3269,7 +3462,10 @@ function base64ToArrayBuffer(b64) {
 }
 function buildCustomCommandGuard2(settings) {
   var _a;
-  return buildCustomCommandGuard((_a = settings.customCommands) != null ? _a : [], settings.language);
+  return buildCustomCommandGuard(
+    (_a = settings.customCommands) != null ? _a : [],
+    commandLanguage(settings.language, settings.voiceCommandLanguage)
+  );
 }
 function buildVocabularyGuard2(context) {
   return buildVocabularyGuard(context.vocabularyTerms);
@@ -3398,6 +3594,27 @@ function connectionAttention(settings) {
 }
 
 // src/settings-tab.ts
+function languageMenuOptions() {
+  const sorted = [...TRANSCRIPTION_LANGUAGES].sort((a, b) => a.name.localeCompare(b.name, "en"));
+  const options = [[AUTO_LANGUAGE, "Detect automatically"]];
+  for (const lang of sorted) {
+    const cmd = commandLanguage(lang.code);
+    if (cmd === lang.code) options.push([lang.code, `${LANGUAGE_NAMES[cmd]} (${lang.code})`]);
+  }
+  for (const lang of sorted) {
+    if (commandLanguage(lang.code) !== lang.code) {
+      options.push([lang.code, `${lang.endonym} (${lang.code}), voice commands in English`]);
+    }
+  }
+  return options;
+}
+function voiceCommandLanguageOptions() {
+  const commandLanguages = SUPPORTED_LANGUAGES;
+  return [
+    [VOICE_COMMAND_LANGUAGE_SAME, "Same as transcription language"],
+    ...languageMenuOptions().filter(([value]) => commandLanguages.includes(value))
+  ];
+}
 var LOCAL_SERVER_CHECK_TIMEOUT_MS = 3e3;
 var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
@@ -3808,13 +4025,30 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         });
       });
     }
-    new import_obsidian.Setting(containerEl).setName("Language").setDesc("Language for transcription and voice commands").addDropdown((dropdown) => {
-      for (const code of SUPPORTED_LANGUAGES) {
-        dropdown.addOption(code, `${LANGUAGE_NAMES[code]} (${code})`);
+    new import_obsidian.Setting(containerEl).setName("Language").setDesc(
+      "The language you speak. Voice commands exist in 13 languages; for the other languages, and when detecting automatically, they are in English unless you pick a voice command language below. Live dictation detects the language itself when Voxtral is not known to support yours there."
+    ).addDropdown((dropdown) => {
+      for (const [value, label] of languageMenuOptions()) {
+        dropdown.addOption(value, label);
       }
-      dropdown.setValue(this.plugin.settings.language);
+      const stored = this.plugin.settings.language;
+      dropdown.setValue(isTranscriptionLanguage(stored) ? stored : AUTO_LANGUAGE);
       dropdown.onChange(async (value) => {
         this.plugin.settings.language = value;
+        await this.plugin.saveSettings();
+      });
+    });
+    new import_obsidian.Setting(containerEl).setName("Voice command language").setDesc(
+      "Which language your voice commands are in. English commands always work as well."
+    ).addDropdown((dropdown) => {
+      for (const [value, label] of voiceCommandLanguageOptions()) {
+        dropdown.addOption(value, label);
+      }
+      const stored = this.plugin.settings.voiceCommandLanguage;
+      const known = SUPPORTED_LANGUAGES.includes(stored);
+      dropdown.setValue(known ? stored : VOICE_COMMAND_LANGUAGE_SAME);
+      dropdown.onChange(async (value) => {
+        this.plugin.settings.voiceCommandLanguage = value;
         await this.plugin.saveSettings();
       });
     });
@@ -4305,7 +4539,10 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
   renderCustomCommands(containerEl) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
     const commands = this.plugin.settings.customCommands;
-    const lang = this.plugin.settings.language;
+    const lang = commandLanguage(
+      this.plugin.settings.language,
+      this.plugin.settings.voiceCommandLanguage
+    );
     for (let i = 0; i < commands.length; i++) {
       const cmd = commands[i];
       const triggers = (_b = (_a = cmd.triggers[lang]) != null ? _a : cmd.triggers["en"]) != null ? _b : [];
@@ -4372,7 +4609,10 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
   openCommandEditor(cmd, isNew) {
     const { plugin } = this;
     const redisplay = () => this.render();
-    const lang = this.plugin.settings.language;
+    const lang = commandLanguage(
+      this.plugin.settings.language,
+      this.plugin.settings.voiceCommandLanguage
+    );
     let removeVVListener;
     const editorModal = new class extends import_obsidian.Modal {
       onOpen() {
@@ -4830,6 +5070,19 @@ function getStrings(lang) {
   var _a;
   return (_a = UI_STRINGS[lang]) != null ? _a : UI_STRINGS.en;
 }
+function commandLanguageNote(lang, voiceCommandLanguage) {
+  var _a;
+  if (typeof voiceCommandLanguage === "string" && isCommandLanguageCode(voiceCommandLanguage)) {
+    if (voiceCommandLanguage === lang) return null;
+    const name = (_a = TRANSCRIPTION_LANGUAGES.find((l) => l.code === voiceCommandLanguage)) == null ? void 0 : _a.name;
+    return `Voice commands are in ${name != null ? name : voiceCommandLanguage} (Voice command language setting).`;
+  }
+  if (commandLanguage(lang) === lang) return null;
+  return isTranscriptionLanguage(lang) ? "Voice commands for this language are in English." : "Voice commands are in English while the language is detected automatically.";
+}
+function isCommandLanguageCode(code) {
+  return SUPPORTED_LANGUAGES.includes(code);
+}
 var AUTO_OPEN_STRINGS = {
   en: { heading: "Help panel in the way?", label: "Don't open it automatically when recording starts", helper: "You can turn it back on in settings." },
   nl: { heading: "Hulppaneel in de weg?", label: "Niet automatisch openen bij het starten van een opname", helper: "Je kunt dit altijd weer aanzetten in de instellingen." },
@@ -4887,15 +5140,15 @@ var VoxtralHelpView = class extends import_obsidian2.ItemView {
     const host = this.host;
     const control = host ? { enabled: host.getAutoOpen(), onChange: (enabled) => host.setAutoOpen(enabled) } : void 0;
     const lang = (_b = (_a = this.lang) != null ? _a : host == null ? void 0 : host.getLanguage()) != null ? _b : "en";
-    renderHelpContent(container, this.commands, lang, control);
+    renderHelpContent(container, this.commands, lang, host == null ? void 0 : host.getVoiceCommandLanguage(), control);
   }
   async onClose() {
     this.contentEl.empty();
   }
 };
-function renderHelpContent(container, engine, lang, control) {
+function renderHelpContent(container, engine, lang, voiceCommandLanguage, control) {
   container.addClass("voxtral-help-view");
-  const strings = getStrings(lang);
+  const strings = getStrings(commandLanguage(lang, voiceCommandLanguage));
   container.createEl("h3", { text: strings.title });
   const commands = engine.getCommandList();
   const table = container.createEl("table", {
@@ -4917,6 +5170,10 @@ function renderHelpContent(container, engine, lang, control) {
       cls: "voxtral-help-patterns"
     });
   }
+  const languageNote = commandLanguageNote(lang, voiceCommandLanguage);
+  if (languageNote) {
+    container.createEl("p", { text: languageNote, cls: "voxtral-help-lang-note" });
+  }
   container.createEl("h4", { text: strings.tips });
   const tips = container.createEl("ul", { cls: "voxtral-help-tips" });
   for (const tip of strings.tipItems) {
@@ -4928,7 +5185,7 @@ function renderHelpContent(container, engine, lang, control) {
     privacyList.createEl("li", { text: item });
   }
   if (control) {
-    const auto = getAutoOpenStrings(lang);
+    const auto = getAutoOpenStrings(commandLanguage(lang, voiceCommandLanguage));
     const box = container.createDiv({ cls: "voxtral-help-autoopen" });
     box.createEl("h4", { text: auto.heading });
     const label = box.createEl("label", { cls: "voxtral-help-autoopen-label" });
@@ -9073,24 +9330,35 @@ function getBuiltInCommandList(lang) {
 
 // ../shared/src/command-engine.ts
 var CommandEngine = class {
-  /** @param lang — initial matching language (the old global's default). */
-  constructor(lang = "nl") {
+  /**
+   * @param lang — initial matching language (the old global's default).
+   * @param voiceCommandLanguage — the "Voice command language" setting; a
+   *   chosen command language wins over `lang` (VX_E3_S4).
+   */
+  constructor(lang = "nl", voiceCommandLanguage) {
     this.activeSlot = null;
     this.pendingUndo = null;
     this.customDefs = [];
     this.customTriggers = /* @__PURE__ */ new Map();
     this.customLabels = /* @__PURE__ */ new Map();
     this.preMatchHook = null;
-    this.lang = lang;
+    this.lang = commandLanguage(lang, voiceCommandLanguage);
   }
   // ── Language ──
-  /** The language command matching, mishearings and labels resolve against. */
+  /** The command language matching, mishearings and labels resolve against. */
   getLanguage() {
     return this.lang;
   }
-  /** Update the active language for command matching. */
-  setLanguage(lang) {
-    this.lang = lang;
+  /**
+   * Update the active language for command matching. Takes the `language`
+   * setting as it is: a transcription language without a command file, or
+   * "auto", becomes English (VX_E3_S4, `commandLanguage`). A command
+   * language chosen in `voiceCommandLanguage` wins over `lang`, also over a
+   * per-note language: callers pass the persisted setting on every call, so
+   * the choice cannot be lost between two calls.
+   */
+  setLanguage(lang, voiceCommandLanguage) {
+    this.lang = commandLanguage(lang, voiceCommandLanguage);
   }
   // ── Slots ──
   /** Get the active slot info, or null when no slot is open. */
@@ -12268,7 +12536,7 @@ var VoxtralPlugin = class extends import_obsidian11.Plugin {
         ...this.settings.customCommands
       ];
     }
-    this.commands.setLanguage(this.settings.language);
+    this.commands.setLanguage(this.settings.language, this.settings.voiceCommandLanguage);
     this.commands.loadCustomCommands(this.settings.customCommands);
     this.setupTemplates();
     if (apiKeyMigrated) {
@@ -12281,7 +12549,7 @@ var VoxtralPlugin = class extends import_obsidian11.Plugin {
   }
   async saveSettings() {
     await this.saveData(stripApiKeyValue(this.settings));
-    this.commands.setLanguage(this.settings.language);
+    this.commands.setLanguage(this.settings.language, this.settings.voiceCommandLanguage);
     this.commands.loadCustomCommands(this.settings.customCommands);
     this.setupTemplates();
     this.refreshHelpView();
@@ -12291,7 +12559,8 @@ var VoxtralPlugin = class extends import_obsidian11.Plugin {
   setupTemplates() {
     this.templates.scan(this.app, this.settings.templatesFolder);
     this.commands.setPreMatchHook((editor, normalizedText, rawText) => {
-      const lang = this.recordingSettings.language;
+      const rs = this.recordingSettings;
+      const lang = commandLanguage(rs.language, rs.voiceCommandLanguage);
       const tmplMatch = this.templates.match(normalizedText, lang);
       if (tmplMatch) {
         if (tmplMatch.textBefore) {
@@ -12406,7 +12675,7 @@ var VoxtralPlugin = class extends import_obsidian11.Plugin {
         `Unknown voxtral-language '${resolved.invalidValue}' \u2014 using ${this.settings.language}`
       );
     }
-    this.commands.setLanguage(this.activeLanguage);
+    this.commands.setLanguage(this.activeLanguage, this.settings.voiceCommandLanguage);
     this.refreshHelpView(this.activeLanguage);
     this.sessionStyleInstruction = this.resolveEffectiveStyleForFile(view.file);
     this.sessionVocabularyTerms = this.resolveEffectiveVocabulary(view.file);
@@ -12462,7 +12731,7 @@ var VoxtralPlugin = class extends import_obsidian11.Plugin {
    * fails to start.
    */
   restoreGlobalLanguage() {
-    this.commands.setLanguage(this.settings.language);
+    this.commands.setLanguage(this.settings.language, this.settings.voiceCommandLanguage);
     this.refreshHelpView();
     this.activeLanguage = null;
     this.sessionVocabularyTerms = [];
@@ -12991,6 +13260,10 @@ ${text}`);
     var _a;
     return (_a = this.activeLanguage) != null ? _a : this.settings.language;
   }
+  /** HelpPanelHost: the "Voice command language" setting; never shadowed by a note. */
+  getVoiceCommandLanguage() {
+    return this.settings.voiceCommandLanguage;
+  }
   /** HelpPanelHost: current auto-open value for the active platform. */
   getAutoOpen() {
     return import_obsidian11.Platform.isMobile ? this.settings.autoOpenHelpMobile : this.settings.autoOpenHelpDesktop;
@@ -13044,7 +13317,11 @@ ${text}`);
    */
   showCommandFeedback(commandId) {
     if (!this.settings.commandFeedback) return;
-    const label = getLabel(commandId, this.recordingSettings.language);
+    const rs = this.recordingSettings;
+    const label = getLabel(
+      commandId,
+      commandLanguage(rs.language, rs.voiceCommandLanguage)
+    );
     if (import_obsidian11.Platform.isMobile) {
       new import_obsidian11.Notice(`\u2192 ${label}`, 1500);
       return;

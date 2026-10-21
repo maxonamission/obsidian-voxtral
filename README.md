@@ -4,7 +4,9 @@
 
 Your thinking moves faster than your typing, and dictation tools hand you a wall of text to clean up afterwards. Voxtral Transcribe lets you talk, type and structure in one flow, so the note is done when you stop talking: dictate straight into your notes, add headings, lists, to-dos and tables by voice, and grab the keyboard mid-sentence whenever you want. The mic waits while you type and picks back up when you stop. Already have a recording (a lecture, a meeting, a voice memo)? Right-click it in your vault and the plugin transcribes it into a note you can search, link and build on.
 
-We built this for people who think out loud: researchers, consultants, anyone whose best ideas arrive mid-sentence. It runs on [Mistral's Voxtral](https://mistral.ai/), a speech model built for transcription from the ground up, with an automatic correction layer on top, on desktop and on your phone. Voice commands come localized in 13 languages, and the engine itself understands even more.
+We built this for people who think out loud: researchers, consultants, anyone whose best ideas arrive mid-sentence. It runs on [Mistral's Voxtral](https://mistral.ai/), a speech model built for transcription from the ground up, with an automatic correction layer on top, on desktop and on your phone. Voice commands come localized in 13 languages, and you can dictate in every language Voxtral 3 supports, or let it detect the language.
+
+**Your names and terms, spelled right while you talk.** Give the plugin your vocabulary (colleagues, clients, places, project jargon, from your vault, a note's front matter or your own list) and Voxtral uses it as you dictate, live, not only when it transcribes a recording afterwards. Names land in your note the way you write them, the first time, so there is nothing to fix later. See [Per-note vocabulary and the global custom vocabulary list](#per-note-vocabulary-and-the-global-custom-vocabulary-list).
 
 ### Get going in under a minute
 
@@ -16,7 +18,7 @@ We built this for people who think out loud: researchers, consultants, anyone wh
 
 ## Why Voxtral Transcribe?
 
-**Talk, type and structure — in one flow.** Dictation tools give you a wall of text to clean up later. Here, structure happens while you speak: headings, lists, to-dos and tables by voice, self-corrections ("no, not X but Y") understood, and the keyboard always one grab away — the mic simply waits its turn. With voice commands localized in 13 languages — and transcription in even more.
+**Talk, type and structure — in one flow.** Dictation tools give you a wall of text to clean up later. Here, structure happens while you speak: headings, lists, to-dos and tables by voice, self-corrections ("no, not X but Y") understood, and the keyboard always one grab away — the mic simply waits its turn. With voice commands localized in 13 languages, and transcription in every language Voxtral 3 supports.
 
 **Quality that gives you your time back.** Every misheard word is a correction you make later; every structure you add afterwards is a second editing pass. We deliberately run the best transcription model available for this job — purpose-built for speech, strong on background noise, accents and jargon, streaming-first so live text feels live, and multilingual by design rather than English-first — topped with an automatic correction layer. When you stop talking, your note is done. Your time goes to thinking, not to cleaning up. On your desktop and on your phone.
 
@@ -26,9 +28,11 @@ We built this for people who think out loud: researchers, consultants, anyone wh
 
 ### Dictation
 
+- **Your vocabulary in live dictation** — your custom vocabulary, a note's `voxtral-vocabulary` and (optionally) the vault terms around the note go along with live dictation as well as with recordings, so names and jargon come out spelled right while you talk (with a Voxtral 3 realtime model; terms of several words keep their spaces)
 - **Real-time streaming** (desktop + mobile) — text appears as you speak; on mobile this runs via Mistral's ephemeral client tokens ([how it works](#mobile))
 - **Batch mode with tap-to-send** (desktop + mobile) — send audio chunks while you keep talking; also the automatic fallback if a real-time token mint ever fails
-- **Voice commands** — headings, bullet points, to-do items, numbered lists and more by voice, localized to all 13 supported languages (Dutch, English, French, German, Spanish, Portuguese, Italian, Russian, Chinese, Hindi, Arabic, Japanese, Korean); a help panel shows the trigger phrases for your active language
+- **Voice commands** — headings, bullet points, to-do items, numbered lists and more by voice, localized to 13 languages (Dutch, English, French, German, Spanish, Portuguese, Italian, Russian, Chinese, Hindi, Arabic, Japanese, Korean; in every other language the voice commands are English); a help panel shows the trigger phrases for your active language
+- **Transcription in more languages**: pick any language Voxtral 3 supports, or **Detect automatically**. See [Languages](#languages)
 - **Per-note language override** — set `voxtral-language` in a note's frontmatter to dictate that note in a different language
 - **Per-note style preference** — set `voxtral-style` in a note's frontmatter to nudge the tone of corrections (e.g. casual for a journal, terse for meeting notes)
 - **Per-note vocabulary** — set `voxtral-vocabulary` in a note's frontmatter to spell out names and jargon for that note
@@ -100,7 +104,16 @@ Turn on **Speaker labels (diarization)** in settings to label who said what (off
 
 ### Voice commands
 
-Voice commands are recognized at the end of a sentence and automatically adapt to the selected language: equivalent phrases exist in all 13 supported languages. Open the help panel for the exact phrases in your active language: run **Show voice help panel** from the command palette, or click the microphone icon in the status bar (desktop); on mobile, swipe from the right to reach it. See [Command reference](#command-reference) below for the full list, grouped by category, with English example phrases.
+Voice commands are recognized at the end of a sentence and automatically adapt to the selected language: equivalent phrases exist in 13 languages (see [Languages](#languages)); in other languages the voice commands are English. Open the help panel for the exact phrases in your active language: run **Show voice help panel** from the command palette, or click the microphone icon in the status bar (desktop); on mobile, swipe from the right to reach it. See [Command reference](#command-reference) below for the full list, grouped by category, with English example phrases.
+
+### Languages
+
+The **Language** setting is the language you speak. It decides what Voxtral is told to transcribe. The voice commands follow from it separately:
+
+- **Transcription**: Voxtral 3 supports 50 languages for files and 45 live. Mistral does not publish the full list, so the setting offers the languages it has confirmed: 48 for file transcription and 36 for live dictation (Polish and Turkish, for example, are confirmed for both; Swedish and Ukrainian so far only for files). You can still dictate live in a language that is not confirmed for it: the plugin then sends no language and Voxtral detects it itself, and the debug log says so.
+- **Voice commands**: Dutch, English, French, German, Spanish, Portuguese, Italian, Russian, Chinese, Hindi, Arabic, Japanese and Korean have localized voice commands, a localized help panel and fixes for misheard words. In every other language the voice commands are English, and the help panel says so.
+- **Detect automatically**: no language is sent, in file transcription and in live dictation, and the voice commands are English (unless you chose a **Voice command language**).
+- **Voice command language**: by default the commands follow the language you speak. Choose one of the 13 command languages instead to say your commands in that language whatever you dictate in, for example Catalan with Spanish commands, or English with Dutch ones. Your choice also applies to notes with a `voxtral-language`, and English commands keep working next to it.
 
 ### Per-note language override
 
@@ -112,7 +125,7 @@ voxtral-language: en
 ---
 ```
 
-Supported codes: `nl`, `en`, `fr`, `de`, `es`, `pt`, `it`, `ru`, `zh`, `hi`, `ar`, `ja`, `ko` (the same 13 languages as the Language setting).
+Supported codes: the language codes in the Language setting, such as `nl`, `en`, `pl` or `uk`, and `auto` to detect the language automatically (the voice commands are then English, unless you chose a **Voice command language**).
 
 - The override is resolved once, when you start recording — it applies to transcription, voice-command matching, and the help panel for the whole session. Editing the frontmatter mid-recording has no effect until the next recording.
 - Removing the key (or leaving it out) falls back to your global Language setting.
@@ -212,7 +225,7 @@ Instead of Mistral's cloud, **Local server mode** (Settings → Connection, desk
 
 ### Voice commands
 
-The tables below show English trigger phrases; the same commands exist, with localized phrases, in all 13 supported languages. Open the help panel (**Show voice help panel**, or the microphone icon in the status bar on desktop) for the exact phrases in your active language.
+The tables below show English trigger phrases; the same commands exist, with localized phrases, in the 13 command languages. Open the help panel (**Show voice help panel**, or the microphone icon in the status bar on desktop) for the exact phrases in your active language.
 
 **Structure & punctuation**
 
@@ -307,7 +320,8 @@ Settings are grouped into eight collapsible sections in Settings → Voxtral Tra
 | Typing cooldown | 800 ms | How long after you stop typing before the mic unmutes again |
 | On focus loss | Pause immediately | What happens to an active recording when you switch apps |
 | Pause delay (seconds) | 30 | Delay before pausing, shown only when "On focus loss" is set to "Pause after delay" |
-| Language | Nederlands (`nl`) | Language for transcription and voice commands; override per note, see [Per-note language override](#per-note-language-override) |
+| Language | Nederlands (`nl`) | The language you speak, or Detect automatically. Voice commands exist in 13 languages and are English in the others; see [Languages](#languages). Override per note, see [Per-note language override](#per-note-language-override) |
+| Voice command language | Same as transcription language | The language of your voice commands, one of the 13 command languages. English commands always work as well; see [Languages](#languages) |
 | Auto-correction | Standard | Off / Light (spelling, capitalization, punctuation only) / Standard (also fixes clearly garbled words) |
 | Noise suppression | Off | Browser-level noise suppression, echo cancellation, and auto gain control |
 | Dual-delay mode (experimental) | Off | Realtime only: two parallel streams (fast preview + slow accuracy); uses 2x API bandwidth |
