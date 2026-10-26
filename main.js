@@ -39,6 +39,7 @@ var DEFAULT_SETTINGS = {
   language: "nl",
   voiceCommandLanguage: "same",
   // VOICE_COMMAND_LANGUAGE_SAME; types.ts stays a leaf (import-graph test)
+  inlinePunctuation: false,
   realtimeModel: "voxtral-mini-transcribe-realtime-3",
   batchModel: "voxtral-mini-transcribe-3",
   correctModel: "mistral-small-latest",
@@ -53,6 +54,7 @@ var DEFAULT_SETTINGS = {
   microphoneDeviceId: "",
   focusBehavior: "pause",
   focusPauseDelaySec: 30,
+  keepScreenOnWhileRecording: true,
   dismissMobileBatchNotice: false,
   enterToSend: false,
   typingCooldownMs: 800,
@@ -523,6 +525,21 @@ var nl_default = {
     codeBlockOpen: "Codeblok openen ```",
     codeBlockClose: "Codeblok sluiten ```"
   },
+  inlinePunctuation: {
+    openQuote: ["aanhalingsteken openen", "aanhalingstekens openen", "open aanhalingsteken", "begin citaat"],
+    closeQuote: ["aanhalingsteken sluiten", "aanhalingstekens sluiten", "sluit aanhalingsteken", "einde citaat"],
+    semicolon: ["puntkomma"],
+    dash: ["gedachtestreepje", "gedachtenstreepje", "lang streepje"],
+    ellipsis: ["puntje puntje puntje", "drie puntjes", "beletselteken"]
+  },
+  inlineLabels: {
+    group: "Leestekens (overal in een zin)",
+    openQuote: "Aanhalingsteken openen",
+    closeQuote: "Aanhalingsteken sluiten",
+    semicolon: "Puntkomma",
+    dash: "Gedachtestreepje",
+    ellipsis: "Beletselteken"
+  },
   mishearings: [
     { pattern: "\\bniveau\\b", flags: "g", replacement: "nieuwe" },
     { pattern: "\\bniva\\b", flags: "g", replacement: "nieuwe" },
@@ -609,6 +626,21 @@ var en_default = {
     tagClose: "Close tag",
     codeBlockOpen: "Open code block ```",
     codeBlockClose: "Close code block ```"
+  },
+  inlinePunctuation: {
+    openQuote: ["open quote", "open quotes", "start quote"],
+    closeQuote: ["close quote", "close quotes", "end quote", "unquote"],
+    semicolon: ["semicolon", "semi colon"],
+    dash: ["em dash", "m dash", "long dash"],
+    ellipsis: ["ellipsis", "dot dot dot"]
+  },
+  inlineLabels: {
+    group: "Punctuation (anywhere in a sentence)",
+    openQuote: "Open quote",
+    closeQuote: "Close quote",
+    semicolon: "Semicolon",
+    dash: "Dash",
+    ellipsis: "Ellipsis"
   },
   mishearings: [],
   phonetics: [
@@ -1399,6 +1431,13 @@ var SUPPORTED_LANGUAGES = [
 var LANGUAGE_NAMES = Object.fromEntries(
   SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].name])
 );
+var INLINE_PUNCTUATION_IDS = [
+  "openQuote",
+  "closeQuote",
+  "semicolon",
+  "dash",
+  "ellipsis"
+];
 var PATTERNS = Object.fromEntries(
   SUPPORTED_LANGUAGES.map((code) => [code, ALL_LANGS[code].patterns])
 );
@@ -1435,6 +1474,16 @@ function getLabel(commandId, lang) {
 function getMishearings(lang) {
   var _a;
   return (_a = MISHEARINGS[lang]) != null ? _a : [];
+}
+function getInlineTriggers(id, lang) {
+  var _a, _b, _c, _d, _e;
+  const own = (_c = (_b = (_a = ALL_LANGS[lang]) == null ? void 0 : _a.inlinePunctuation) == null ? void 0 : _b[id]) != null ? _c : [];
+  const en = lang === "en" ? [] : (_e = (_d = ALL_LANGS.en.inlinePunctuation) == null ? void 0 : _d[id]) != null ? _e : [];
+  return [.../* @__PURE__ */ new Set([...own, ...en])];
+}
+function getInlineLabel(id, lang) {
+  var _a, _b, _c, _d, _e;
+  return (_e = (_d = (_b = (_a = ALL_LANGS[lang]) == null ? void 0 : _a.inlineLabels) == null ? void 0 : _b[id]) != null ? _d : (_c = ALL_LANGS.en.inlineLabels) == null ? void 0 : _c[id]) != null ? _e : id;
 }
 
 // ../shared/src/transcription-languages.ts
@@ -1809,6 +1858,10 @@ var AudioRecorder = class {
     this.mediaRecorder = null;
     this.chunks = [];
     this.lastFlushTime = 0;
+    // True between flushChunk()'s stop() and the fresh MediaRecorder it swaps
+    // in: the recorder is "inactive" on purpose then, which ensureAlive() must
+    // not mistake for a dead one.
+    this.flushInFlight = false;
     this.onPcmChunk = null;
     /** The label of the currently active microphone */
     this.activeMicLabel = "";
@@ -1945,6 +1998,7 @@ var AudioRecorder = class {
         return;
       }
       const stalledRecorder = this.mediaRecorder;
+      this.flushInFlight = true;
       const timeout = window.setTimeout(() => {
         vlog.warn("Voxtral: flushChunk timed out after 5s");
         stalledRecorder.onstop = null;
@@ -1952,6 +2006,7 @@ var AudioRecorder = class {
         const blob = this.takeChunksAsBlob();
         this.recordFlushTiming();
         this.restartMediaRecorder();
+        this.flushInFlight = false;
         resolve(blob);
       }, 5e3);
       stalledRecorder.onstop = () => {
@@ -1959,6 +2014,7 @@ var AudioRecorder = class {
         this.recordFlushTiming();
         const blob = this.takeChunksAsBlob();
         this.restartMediaRecorder();
+        this.flushInFlight = false;
         resolve(blob);
       };
       stalledRecorder.stop();
@@ -1974,6 +2030,13 @@ var AudioRecorder = class {
   async stop() {
     return new Promise((resolve) => {
       if (!this.mediaRecorder || this.mediaRecorder.state === "inactive") {
+        if (this.chunks.length > 0) {
+          this.recordFlushTiming();
+          const blob = this.takeChunksAsBlob();
+          this.cleanup();
+          resolve(blob);
+          return;
+        }
         this.cleanup();
         resolve(new Blob([]));
         return;
@@ -2020,6 +2083,7 @@ var AudioRecorder = class {
       this.stream = null;
     }
     this.mediaRecorder = null;
+    this.flushInFlight = false;
     this.chunks = [];
     this.activeMicLabel = "";
     this.fallbackUsed = false;
@@ -2034,6 +2098,11 @@ var AudioRecorder = class {
   pause() {
     var _a, _b;
     if (((_a = this.mediaRecorder) == null ? void 0 : _a.state) === "recording") {
+      try {
+        this.mediaRecorder.requestData();
+      } catch (e) {
+        vlog.warn("Voxtral: requestData before pause failed:", e);
+      }
       this.mediaRecorder.pause();
     }
     (_b = this.stream) == null ? void 0 : _b.getAudioTracks().forEach((t) => t.enabled = false);
@@ -2044,6 +2113,44 @@ var AudioRecorder = class {
     if (((_b = this.mediaRecorder) == null ? void 0 : _b.state) === "paused") {
       this.mediaRecorder.resume();
     }
+  }
+  /**
+   * Whether the capture pipeline is still alive (VX_E22_S12). After the
+   * device was locked or the app was in the background the OS may have ended
+   * the microphone track, closed the AudioContext or interrupted it (Safari's
+   * non-standard "interrupted" state). A merely suspended or interrupted
+   * context gets one `resume()` first, since that is the normal way back.
+   * Resolves `false` when the pipeline has to be rebuilt (stop + start).
+   */
+  async ensureAlive() {
+    const stream = this.stream;
+    const context = this.audioContext;
+    if (!stream || !context) return false;
+    const tracks = stream.getAudioTracks();
+    if (tracks.length === 0 || tracks.some((t) => t.readyState === "ended")) {
+      return false;
+    }
+    if (this.mediaRecorder) {
+      return this.mediaRecorder.state !== "inactive" || this.flushInFlight;
+    }
+    const stateOf = () => context.state;
+    if (stateOf() === "closed") return false;
+    if (stateOf() !== "running") {
+      let timer;
+      const timeout = new Promise((resolve) => {
+        timer = window.setTimeout(resolve, 1500);
+      });
+      try {
+        await Promise.race([context.resume().catch(() => void 0), timeout]);
+      } finally {
+        window.clearTimeout(timer);
+      }
+      if (stateOf() !== "running") {
+        vlog.warn(`Voxtral: AudioContext is ${stateOf()} and did not resume`);
+        return false;
+      }
+    }
+    return true;
   }
   /** Silence the mic input without pausing the recorder */
   mute() {
@@ -2231,7 +2338,6 @@ function buildContextBias(terms, model) {
 
 // ../shared/src/realtime-token.ts
 var SAFETY_MARGIN_MS = 1e4;
-var PREFETCH_MARGIN_MS = 25e3;
 var RealtimeTokenError = class extends Error {
   constructor(message) {
     super(message);
@@ -2239,51 +2345,115 @@ var RealtimeTokenError = class extends Error {
   }
 };
 var RealtimeTokenManager = class {
-  constructor(settings, httpRequest) {
+  /**
+   * `log` receives lifecycle lines (the sessions pass their `logLifecycle`).
+   * It is only ever called with fixed phrases and a lifetime in seconds —
+   * never with a token, the API key or a raw error from the HTTP layer.
+   */
+  constructor(settings, httpRequest, log) {
     this.settings = settings;
     this.httpRequest = httpRequest;
-    this.cached = null;
-    // Dedupes concurrent mint requests (e.g. dual-delay's two near-simultaneous
-    // connects) onto a single in-flight POST.
-    this.minting = null;
+    this.log = log;
+    // Minted, still-unused tokens (VX_E22_S12). Only prefetch() fills it; a
+    // token leaves it the moment getToken() hands it out.
+    this.spare = [];
+    // Mints that have not landed yet. getToken() joins an UNCLAIMED one (a
+    // prefetch that is still running) instead of firing a second POST, but
+    // never a claimed one: its token already belongs to someone else.
+    this.inFlight = [];
   }
   /**
-   * Return a token valid for at least SAFETY_MARGIN_MS, minting one if the
-   * cache is empty, expiring soon, or scoped to a different model than the
-   * current settings. May throw RealtimeTokenError.
+   * Return a token nobody has used or been given before, valid for at least
+   * SAFETY_MARGIN_MS: a pooled spare when there is one, else the result of
+   * a prefetch that is still in flight, else a fresh mint. May throw
+   * RealtimeTokenError.
+   *
+   * This is also where a token counts as consumed. The earliest moment is
+   * the right one: once the token sits in a WebSocket subprotocol header we
+   * cannot tell whether the server burned it (a pre-open `onerror` carries
+   * no reason), and handing it to a second connection is what made every
+   * reconnect fail. A token that is never presented (stop() during the
+   * mint) is wasted — one cheap POST, and the price of a hand-out that is
+   * also a race-free reservation for the two dual-delay streams.
    */
   async getToken() {
     const model = this.settings.realtimeModel;
-    if (this.cached && this.cached.model === model && this.hasMargin(this.cached, SAFETY_MARGIN_MS)) {
-      return this.cached.token;
+    const spare = this.takeSpare(model);
+    if (spare) return spare.token;
+    const pending = this.inFlight.find((m) => !m.claimed && m.model === model);
+    if (pending) {
+      pending.claimed = true;
+      return (await pending.promise).token;
     }
-    return this.mintShared(model);
+    return (await this.startMint(model, true).promise).token;
   }
   /**
-   * Fire-and-forget: mint the next token in the background once the cached
-   * one is within PREFETCH_MARGIN_MS of expiry, so a silent reconnect never
-   * blocks on the network. Errors are swallowed — the next getToken() call
-   * retries the mint and surfaces any failure there instead.
+   * Fire-and-forget: mint a token for the NEXT connection. The transcriber
+   * calls this once per successful handshake, i.e. once per token that
+   * handshake used up, so the pool stays one-in-one-out — also for the two
+   * streams of a dual-delay session. A silent reconnect then never waits on
+   * the network. Errors are swallowed (and logged): the next getToken()
+   * mints for itself and surfaces any failure there.
    */
   prefetch() {
-    const model = this.settings.realtimeModel;
-    if (this.minting) return;
-    if (this.cached && this.cached.model === model && this.hasMargin(this.cached, PREFETCH_MARGIN_MS)) {
-      return;
+    const entry = this.startMint(this.settings.realtimeModel, false);
+    entry.promise.catch((e) => {
+      var _a, _b;
+      if (entry.claimed) return;
+      const status = e instanceof RealtimeTokenError ? (_a = /HTTP \d{3}/.exec(e.message)) == null ? void 0 : _a[0] : void 0;
+      (_b = this.log) == null ? void 0 : _b.call(this, `realtime: token prefetch failed${status ? ` (${status})` : ""}`);
+    });
+  }
+  /**
+   * The server refused a token before the connection opened. That token is
+   * already out of the pool (getToken() consumes), so what is left to do is
+   * distrust the rest: a refusal that is not about single use — a skewed
+   * device clock that makes a pooled token look valid, a revoked key —
+   * would hit the pooled spares just the same. Drop them so the next
+   * attempt mints a fresh token instead of burning another.
+   */
+  invalidate() {
+    var _a;
+    this.spare = [];
+    (_a = this.log) == null ? void 0 : _a.call(this, "realtime: connection failed before opening, spare tokens dropped");
+  }
+  takeSpare(model) {
+    this.pruneSpare(model);
+    if (this.spare.length === 0) return null;
+    let best = 0;
+    for (let i = 1; i < this.spare.length; i++) {
+      if (this.spare[i].expiresAtMs > this.spare[best].expiresAtMs) best = i;
     }
-    this.mintShared(model).catch(() => {
-    });
+    return this.spare.splice(best, 1)[0];
   }
-  hasMargin(cached, marginMs) {
-    return cached.expiresAtMs - Date.now() > marginMs;
+  /** Drop spares that expired, nearly expired, or were minted for another model. */
+  pruneSpare(model) {
+    this.spare = this.spare.filter(
+      (t) => t.model === model && t.expiresAtMs - Date.now() > SAFETY_MARGIN_MS
+    );
   }
-  mintShared(model) {
-    if (this.minting) return this.minting;
-    const promise = this.mint(model).finally(() => {
-      this.minting = null;
-    });
-    this.minting = promise;
-    return promise;
+  startMint(model, claimed) {
+    const entry = { model, claimed, promise: void 0 };
+    entry.promise = this.mint(model).then(
+      (minted) => {
+        var _a;
+        this.inFlight = this.inFlight.filter((m) => m !== entry);
+        if (entry.claimed) {
+          const secs = Math.max(0, Math.round((minted.expiresAtMs - Date.now()) / 1e3));
+          (_a = this.log) == null ? void 0 : _a.call(this, `realtime: token minted (valid ${secs} s)`);
+        } else {
+          this.pruneSpare(model);
+          this.spare.push(minted);
+        }
+        return minted;
+      },
+      (e) => {
+        this.inFlight = this.inFlight.filter((m) => m !== entry);
+        throw e;
+      }
+    );
+    this.inFlight.push(entry);
+    return entry;
   }
   async mint(model) {
     var _a;
@@ -2317,8 +2487,7 @@ var RealtimeTokenManager = class {
         "Realtime token request failed: malformed client_secret.expires_at in response"
       );
     }
-    this.cached = { token, expiresAtMs, model };
-    return token;
+    return { token, expiresAtMs, model };
   }
 };
 
@@ -2435,6 +2604,10 @@ async function runReconnectLoop(opts) {
   var _a, _b, _c;
   const sleep = (_a = opts.sleep) != null ? _a : ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   for (; ; ) {
+    if (opts.waitUntilReachable) {
+      await opts.waitUntilReachable();
+      if (!opts.isActive()) return;
+    }
     if (!opts.prepare()) return;
     try {
       await opts.connect();
@@ -2492,8 +2665,8 @@ var DoneSignal = class {
     return this.pending !== null;
   }
 };
-function createTokenManager(settings, httpRequest) {
-  return httpRequest ? new RealtimeTokenManager(settings, httpRequest) : null;
+function createTokenManager(settings, httpRequest, log) {
+  return httpRequest ? new RealtimeTokenManager(settings, httpRequest, log) : null;
 }
 
 // ../shared/src/realtime-session-update.ts
@@ -2965,7 +3138,14 @@ var RealtimeTranscriber = class {
     }
     const url = this.realtimeUrl();
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url, ["realtime", token]);
+      let socket;
+      try {
+        socket = new WebSocket(url, ["realtime", token]);
+      } catch (e) {
+        tokenManager.invalidate();
+        reject(new Error("WebSocket connection failed"));
+        return;
+      }
       let opened = false;
       let failedBeforeOpen = false;
       const timeout = setTimeout(() => {
@@ -2999,6 +3179,7 @@ var RealtimeTranscriber = class {
         if (!opened) {
           failedBeforeOpen = true;
           clearTimeout(timeout);
+          tokenManager.invalidate();
           reject(new Error("WebSocket connection failed"));
         } else {
           vlog.error("Voxtral: WS (token) error");
@@ -3679,6 +3860,7 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         tier: 2,
         render: (body) => {
           this.renderCommandFeedback(body);
+          this.renderInlinePunctuation(body);
           this.renderTemplates(body);
           new import_obsidian.Setting(body).setName("Custom voice commands").setHeading();
           this.renderCustomCommands(body);
@@ -4025,6 +4207,14 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
         });
       });
     }
+    new import_obsidian.Setting(containerEl).setName("Keep screen on while recording").setDesc(
+      "Keeps the screen from locking while you record. Pressing the power button or switching apps still pauses the recording; the phone's system does that, not the plugin. The plugin tries to resume when you come back. Applies from the next recording."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.keepScreenOnWhileRecording).onChange(async (value) => {
+        this.plugin.settings.keepScreenOnWhileRecording = value;
+        await this.plugin.saveSettings();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("Language").setDesc(
       "The language you speak. Voice commands exist in 13 languages; for the other languages, and when detecting automatically, they are in English unless you pick a voice command language below. Live dictation detects the language itself when Voxtral is not known to support yours there."
     ).addDropdown((dropdown) => {
@@ -4293,6 +4483,16 @@ var VoxtralSettingTab = class extends import_obsidian.PluginSettingTab {
     ).addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.commandFeedback).onChange(async (value) => {
         this.plugin.settings.commandFeedback = value;
+        await this.plugin.saveSettings();
+      })
+    );
+  }
+  renderInlinePunctuation(containerEl) {
+    new import_obsidian.Setting(containerEl).setName("Punctuation mid-sentence (experimental)").setDesc(
+      'Say "open quote", "close quote", "semicolon", "em dash" or "dot dot dot" anywhere in a sentence to insert the mark. Experimental and off by default: an ordinary phrase such as "an open quote" can be replaced too.'
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.inlinePunctuation).onChange(async (value) => {
+        this.plugin.settings.inlinePunctuation = value;
         await this.plugin.saveSettings();
       })
     );
@@ -5159,7 +5359,17 @@ function renderHelpContent(container, engine, lang, voiceCommandLanguage, contro
   headerRow.createEl("th", { text: strings.command });
   headerRow.createEl("th", { text: strings.say });
   const tbody = table.createEl("tbody");
+  let currentGroup;
   for (const cmd of commands) {
+    if (cmd.group !== void 0 && cmd.group !== currentGroup) {
+      const headingRow = tbody.createEl("tr");
+      headingRow.createEl("th", {
+        text: cmd.group,
+        cls: "voxtral-help-group",
+        attr: { colspan: "2" }
+      });
+    }
+    currentGroup = cmd.group;
     const row = tbody.createEl("tr");
     row.createEl("td", {
       text: cmd.label,
@@ -8635,6 +8845,285 @@ function normalizeCommand(text) {
   return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/-/g, " ").replace(/[.,!?;:'"()[\]{}]/g, "").toLowerCase().trim();
 }
 
+// ../shared/src/text-context.ts
+var CLOSING_QUOTES = '\u201D\u201C\xBB\u300D\u300F"\u2019';
+var OPENING_QUOTE_AT_END = /[“„«「『]$/;
+var TRAILING_CLOSING_QUOTES = new RegExp(`(?:[\\u00a0\\u202f]?[${CLOSING_QUOTES}])+$`);
+function isGermanClosingQuote(trimmed) {
+  if (!trimmed.endsWith("\u201C")) return false;
+  const body = trimmed.slice(0, -1);
+  return body.lastIndexOf("\u201E") > body.lastIndexOf("\u201C");
+}
+function sentenceSegments(text) {
+  return text.match(
+    new RegExp(
+      `[^.!?]*[.!?]+(?:[\\u00a0\\u202f]?[${CLOSING_QUOTES}])*\\s*`,
+      "g"
+    )
+  );
+}
+function detectContext(lineBefore) {
+  if (!lineBefore) return "new-line";
+  const trimmed = lineBefore.trimEnd();
+  if (!trimmed) return "new-line";
+  if (/^>+\s/.test(lineBefore)) {
+    const afterMarker = lineBefore.replace(/^>+\s(?:\[!.*?\]\s*)?/, "");
+    if (!afterMarker.trim()) return "comment";
+  }
+  if (/^(?:[-*]\s|[-*]\s\[.\]\s|#{1,6}\s|\d+[.)]\s)/.test(lineBefore)) {
+    const afterMarker = lineBefore.replace(
+      /^(?:[-*]\s(?:\[.\]\s)?|#{1,6}\s|\d+[.)]\s)/,
+      ""
+    );
+    if (!afterMarker.trim()) return "list-or-heading";
+  }
+  if (OPENING_QUOTE_AT_END.test(trimmed) && !isGermanClosingQuote(trimmed)) return "sentence-start";
+  const sentenceEnd = trimmed.replace(TRAILING_CLOSING_QUOTES, "");
+  const lastChar = sentenceEnd[sentenceEnd.length - 1];
+  if (lastChar === "." || lastChar === "!" || lastChar === "?") {
+    return "sentence-start";
+  }
+  return "mid-sentence";
+}
+function shouldStripTrailingPunctuation(context) {
+  return context === "mid-sentence" || context === "list-or-heading";
+}
+function shouldLowercase(context) {
+  return context === "mid-sentence";
+}
+function lowercaseFirstLetter(text) {
+  const match = text.match(
+    /^(\s*)([A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝŸ])/
+  );
+  if (match) {
+    return match[1] + match[2].toLowerCase() + text.slice(match[1].length + 1);
+  }
+  return text;
+}
+function stripTrailingPunctuation(text) {
+  return text.replace(/[.!?]+\s*$/, "");
+}
+function isTableLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("|")) return true;
+  if (/^:?-{2,}:?(\s*\|\s*:?-{2,}:?)+$/.test(trimmed)) return true;
+  return false;
+}
+
+// ../shared/src/inline-punctuation.ts
+var NBSP = "\xA0";
+var NNBSP = "\u202F";
+var EN_MARKS = {
+  open: "\u201C",
+  close: "\u201D",
+  semicolon: ";",
+  dash: "\u2014",
+  dashSpaced: false,
+  ellipsis: "\u2026",
+  tight: false
+};
+var MARKS = {
+  en: EN_MARKS,
+  pt: EN_MARKS,
+  hi: EN_MARKS,
+  ko: EN_MARKS,
+  nl: { ...EN_MARKS, dash: "\u2013", dashSpaced: true },
+  de: { ...EN_MARKS, open: "\u201E", close: "\u201C", dash: "\u2013", dashSpaced: true },
+  fr: {
+    ...EN_MARKS,
+    open: `\xAB${NBSP}`,
+    close: `${NBSP}\xBB`,
+    semicolon: `${NNBSP};`,
+    dash: "\u2013",
+    dashSpaced: true
+  },
+  es: { ...EN_MARKS, open: "\xAB", close: "\xBB", dash: "\u2013", dashSpaced: true },
+  it: { ...EN_MARKS, open: "\xAB", close: "\xBB", dash: "\u2013", dashSpaced: true },
+  ru: { ...EN_MARKS, open: "\xAB", close: "\xBB", dash: "\u2013", dashSpaced: true },
+  ar: { ...EN_MARKS, open: "\xAB", close: "\xBB", dash: "\u2013", dashSpaced: true },
+  ja: { ...EN_MARKS, open: "\u300C", close: "\u300D", semicolon: "\uFF1B", dash: "\u2014\u2014", tight: true },
+  zh: { ...EN_MARKS, semicolon: "\uFF1B", dash: "\u2014\u2014", ellipsis: "\u2026\u2026", tight: true }
+};
+function marksFor(textLang) {
+  var _a;
+  const code = (textLang || "").toLowerCase().split(/[-_]/)[0];
+  return (_a = MARKS[code]) != null ? _a : EN_MARKS;
+}
+function markString(id, marks) {
+  switch (id) {
+    case "openQuote":
+      return marks.open;
+    case "closeQuote":
+      return marks.close;
+    case "semicolon":
+      return marks.semicolon;
+    case "dash":
+      return marks.dash;
+    case "ellipsis":
+      return marks.ellipsis;
+  }
+}
+var WORD_GAP = "[\\s,\\-\\u2010-\\u2015]+";
+function escapeRegExp(word) {
+  return word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+var compiledCache = /* @__PURE__ */ new Map();
+function compiledTriggers(commandLang) {
+  const cached = compiledCache.get(commandLang);
+  if (cached) return cached;
+  const list = [];
+  for (const id of INLINE_PUNCTUATION_IDS) {
+    for (const phrase of getInlineTriggers(id, commandLang)) {
+      const words = phrase.trim().split(/\s+/).map(escapeRegExp);
+      list.push({
+        id,
+        normalized: normalizeCommand(phrase),
+        re: new RegExp(
+          `(^|[^\\p{L}\\p{N}])(${words.join(WORD_GAP)})(?![\\p{L}\\p{N}]|['\u2019]\\p{L})`,
+          "giu"
+        )
+      });
+    }
+  }
+  list.sort((a, b) => b.normalized.length - a.normalized.length);
+  compiledCache.set(commandLang, list);
+  return list;
+}
+function findInlineMatches(text, opts) {
+  var _a;
+  const found = [];
+  for (const trigger of compiledTriggers(opts.commandLang)) {
+    if ((_a = opts.excludeTriggers) == null ? void 0 : _a.has(trigger.normalized)) continue;
+    trigger.re.lastIndex = 0;
+    let m;
+    while ((m = trigger.re.exec(text)) !== null) {
+      found.push({
+        id: trigger.id,
+        start: m.index + m[1].length,
+        end: m.index + m[0].length
+      });
+    }
+  }
+  found.sort((a, b) => a.start - b.start || b.end - a.end);
+  const result = [];
+  let lastEnd = 0;
+  for (const match of found) {
+    if (match.start < lastEnd) continue;
+    result.push(match);
+    lastEnd = match.end;
+  }
+  return result;
+}
+var STRIP_BEFORE = /[ \t  ,;:]+$/;
+var STRIP_BEFORE_DOT = /[ \t  ,;:.]+$/;
+var STRIP_AFTER = /^[ \t  ,.;:]+/;
+function stripBeforeFor(id) {
+  return id === "semicolon" || id === "ellipsis" ? STRIP_BEFORE_DOT : STRIP_BEFORE;
+}
+var STARTS_WITH_PUNCTUATION = /^[.,;:!?)\]}"”’»」』…—–；。、]/;
+var NO_SPACE_BEFORE_OPENING = /[\s(\[{“„«‘‚「『—]$/;
+function spaceAfter(id, marks) {
+  if (marks.tight) return false;
+  if (id === "openQuote") return false;
+  if (id === "dash") return marks.dashSpaced;
+  return true;
+}
+function spaceBefore(id, marks, written) {
+  if (marks.tight) return "";
+  const wantsSpace = id === "openQuote" || id === "dash" && marks.dashSpaced;
+  if (!wantsSpace) return "";
+  return written !== "" && !NO_SPACE_BEFORE_OPENING.test(written) ? " " : "";
+}
+function applyInlinePunctuation(text, opts) {
+  const matches = findInlineMatches(text, opts);
+  if (matches.length === 0) return text;
+  const marks = marksFor(opts.textLang);
+  let out = "";
+  let pos = 0;
+  let previous = null;
+  for (let i = 0; i <= matches.length; i++) {
+    const match = matches[i];
+    let chunk = text.slice(pos, match ? match.start : text.length);
+    if (previous) chunk = chunk.replace(STRIP_AFTER, "");
+    if (match) chunk = chunk.replace(stripBeforeFor(match.id), "");
+    if (chunk) {
+      if (previous && spaceAfter(previous, marks) && !STARTS_WITH_PUNCTUATION.test(chunk) && !/^\s/.test(chunk)) {
+        out += " ";
+      }
+      out += chunk;
+      previous = null;
+    }
+    if (match) {
+      out += spaceBefore(match.id, marks, out) + markString(match.id, marks);
+      previous = match.id;
+      pos = match.end;
+    }
+  }
+  return out;
+}
+function avoidSplitInsideTrigger(text, split, opts) {
+  const spans = findInlineMatches(text, opts).map((m) => {
+    const stripped = text.slice(0, m.start).replace(stripBeforeFor(m.id), "");
+    const trailing = /^[ \t  ,.;:]*/.exec(text.slice(m.end));
+    return { from: stripped.length, to: m.end + (trailing ? trailing[0].length : 0) };
+  });
+  let at = split;
+  let moved = true;
+  while (moved) {
+    moved = false;
+    for (const span of spans) {
+      if (span.from < at && at <= span.to) {
+        at = span.from;
+        moved = true;
+      }
+    }
+  }
+  return at > 0 ? at : null;
+}
+var attachLeftCache = /* @__PURE__ */ new Map();
+function startsWithLeftAttachingMark(text, textLang) {
+  const marks = marksFor(textLang);
+  const key = `${marks.close}|${marks.semicolon}|${marks.ellipsis}|${marks.dash}|${marks.dashSpaced}`;
+  let re = attachLeftCache.get(key);
+  if (!re) {
+    const alternatives = [marks.close, marks.semicolon, marks.ellipsis, "\uFF1B"].map(
+      (mark) => escapeRegExp(mark.replace(/^[\u00a0\u202f]+/, ""))
+    );
+    if (!marks.dashSpaced) alternatives.push(escapeRegExp(marks.dash));
+    re = new RegExp(`^(?:[${NBSP}${NNBSP}]?(?:${alternatives.join("|")})|[,.:!?;])`);
+    attachLeftCache.set(key, re);
+  }
+  return re.test(text);
+}
+function leftAttachTrailer(text, textLang) {
+  const marks = marksFor(textLang);
+  const lead = text.replace(/^[\u00a0\u202f]+/, "");
+  const starts = (mark) => {
+    const bare = mark.replace(/^[\u00a0\u202f]+/, "").trim();
+    return bare.length > 0 && lead.startsWith(bare);
+  };
+  if (starts(marks.ellipsis) || starts(marks.semicolon) || lead.startsWith(";") || lead.startsWith("\uFF1B")) {
+    return /[,.;:]*[ \t]*$/;
+  }
+  if (starts(marks.close)) return /[,;:]*[ \t]*$/;
+  return /[ \t]*$/;
+}
+function endsWithRightAttachingMark(charBefore, textLang) {
+  const marks = marksFor(textLang);
+  const open = marks.open.trim();
+  if (charBefore === open.slice(-1)) return true;
+  return !marks.dashSpaced && charBefore === marks.dash.slice(-1);
+}
+function getInlineHelpEntries(commandLang) {
+  const group = getInlineLabel("group", commandLang);
+  return INLINE_PUNCTUATION_IDS.map((id) => ({
+    label: getInlineLabel(id, commandLang),
+    patterns: getInlineTriggers(id, commandLang),
+    group
+  }));
+}
+
 // ../shared/src/phonetics.ts
 var ALL_LANGS2 = {
   nl: nl_default,
@@ -8713,54 +9202,6 @@ function trySplitCompound(text, knownWords) {
   return text;
 }
 
-// ../shared/src/text-context.ts
-function detectContext(lineBefore) {
-  if (!lineBefore) return "new-line";
-  const trimmed = lineBefore.trimEnd();
-  if (!trimmed) return "new-line";
-  if (/^>+\s/.test(lineBefore)) {
-    const afterMarker = lineBefore.replace(/^>+\s(?:\[!.*?\]\s*)?/, "");
-    if (!afterMarker.trim()) return "comment";
-  }
-  if (/^(?:[-*]\s|[-*]\s\[.\]\s|#{1,6}\s|\d+[.)]\s)/.test(lineBefore)) {
-    const afterMarker = lineBefore.replace(
-      /^(?:[-*]\s(?:\[.\]\s)?|#{1,6}\s|\d+[.)]\s)/,
-      ""
-    );
-    if (!afterMarker.trim()) return "list-or-heading";
-  }
-  const lastChar = trimmed[trimmed.length - 1];
-  if (lastChar === "." || lastChar === "!" || lastChar === "?") {
-    return "sentence-start";
-  }
-  return "mid-sentence";
-}
-function shouldStripTrailingPunctuation(context) {
-  return context === "mid-sentence" || context === "list-or-heading";
-}
-function shouldLowercase(context) {
-  return context === "mid-sentence";
-}
-function lowercaseFirstLetter(text) {
-  const match = text.match(
-    /^(\s*)([A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝŸ])/
-  );
-  if (match) {
-    return match[1] + match[2].toLowerCase() + text.slice(match[1].length + 1);
-  }
-  return text;
-}
-function stripTrailingPunctuation(text) {
-  return text.replace(/[.!?]+\s*$/, "");
-}
-function isTableLine(line) {
-  const trimmed = line.trim();
-  if (!trimmed) return false;
-  if (trimmed.startsWith("|")) return true;
-  if (/^:?-{2,}:?(\s*\|\s*:?-{2,}:?)+$/.test(trimmed)) return true;
-  return false;
-}
-
 // ../shared/src/voice-commands.ts
 function closeSlot(editor, host) {
   const activeSlot = host.getActiveSlot();
@@ -8801,19 +9242,27 @@ function fixMishearings(text, lang) {
   }
   return text;
 }
+function detectInsertionContext(editor) {
+  const cursor = editor.getCursor();
+  if (cursor.ch === 0) return "new-line";
+  const lineBefore = editor.getRange({ line: cursor.line, ch: 0 }, cursor);
+  return detectContext(lineBefore);
+}
 function insertAtCursor(editor, host, text, posOverride, continuation) {
+  var _a, _b, _c, _d;
   const slotActive = host.getActiveSlot() !== null;
   const cursor = posOverride != null ? posOverride : editor.getCursor();
   const context = cursor.ch === 0 ? "new-line" : detectContext(editor.getRange({ line: cursor.line, ch: 0 }, cursor));
   if (cursor.ch === 0) {
     text = text.replace(/^ +/, "");
   }
-  if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !slotActive) {
+  const insertFrom = leftAttachStart(editor, host, text, cursor, context, slotActive);
+  if (insertFrom === cursor && cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !slotActive && !((_b = (_a = host.attachesLeft) == null ? void 0 : _a.call(host, text)) != null ? _b : false)) {
     const charBefore = editor.getRange(
       { line: cursor.line, ch: cursor.ch - 1 },
       cursor
     );
-    if (charBefore && /\S/.test(charBefore)) {
+    if (charBefore && /\S/.test(charBefore) && !((_d = (_c = host.attachesRight) == null ? void 0 : _c.call(host, charBefore)) != null ? _d : false)) {
       text = " " + text;
     }
   }
@@ -8834,12 +9283,26 @@ function insertAtCursor(editor, host, text, posOverride, continuation) {
       text = text + " ";
     }
   }
-  editor.replaceRange(text, cursor);
+  if (insertFrom === cursor) {
+    editor.replaceRange(text, cursor);
+  } else {
+    editor.replaceRange(text, insertFrom, cursor);
+  }
   const lines = text.split("\n");
   const lastLine = lines[lines.length - 1];
-  const newLine = cursor.line + lines.length - 1;
-  const newCh = lines.length === 1 ? cursor.ch + lastLine.length : lastLine.length;
+  const newLine = insertFrom.line + lines.length - 1;
+  const newCh = lines.length === 1 ? insertFrom.ch + lastLine.length : lastLine.length;
   editor.setCursor({ line: newLine, ch: newCh });
+}
+function leftAttachStart(editor, host, text, cursor, context, slotActive) {
+  var _a, _b, _c, _d;
+  if (cursor.ch === 0 || slotActive || context === "list-or-heading" || context === "comment" || !((_b = (_a = host.attachesLeft) == null ? void 0 : _a.call(host, text)) != null ? _b : false)) {
+    return cursor;
+  }
+  const before = editor.getRange({ line: cursor.line, ch: 0 }, cursor);
+  const trailer = ((_d = (_c = host.leftAttachTrailer) == null ? void 0 : _c.call(host, text)) != null ? _d : /[ \t]+$/).exec(before);
+  if (!trailer || trailer[0].length === 0 || trailer[0].length === before.length) return cursor;
+  return { line: cursor.line, ch: cursor.ch - trailer[0].length };
 }
 function deleteLastParagraph(editor) {
   const cursor = editor.getCursor();
@@ -9336,6 +9799,7 @@ var CommandEngine = class {
    *   chosen command language wins over `lang` (VX_E3_S4).
    */
   constructor(lang = "nl", voiceCommandLanguage) {
+    this.inlinePunctuation = false;
     this.activeSlot = null;
     this.pendingUndo = null;
     this.customDefs = [];
@@ -9343,6 +9807,7 @@ var CommandEngine = class {
     this.customLabels = /* @__PURE__ */ new Map();
     this.preMatchHook = null;
     this.lang = commandLanguage(lang, voiceCommandLanguage);
+    this.textLang = lang;
   }
   // ── Language ──
   /** The command language matching, mishearings and labels resolve against. */
@@ -9359,6 +9824,7 @@ var CommandEngine = class {
    */
   setLanguage(lang, voiceCommandLanguage) {
     this.lang = commandLanguage(lang, voiceCommandLanguage);
+    this.textLang = lang;
   }
   // ── Slots ──
   /** Get the active slot info, or null when no slot is open. */
@@ -9400,6 +9866,54 @@ var CommandEngine = class {
     this.customDefs = compiled.defs;
     this.customTriggers = compiled.triggers;
     this.customLabels = compiled.labels;
+  }
+  // ── Inline punctuation (VX_E8_S5) ──
+  /**
+   * Turn the "punctuation mid-sentence" setting on or off. Off: the words
+   * stay in the text, no space rule changes and the help panel hides the group.
+   */
+  setInlinePunctuation(enabled) {
+    this.inlinePunctuation = enabled;
+  }
+  /**
+   * Triggers of custom commands (active command language, English as
+   * fallback, like the matcher), normalized. An inline trigger that is also
+   * one of these is skipped so a user's own command keeps working.
+   */
+  inlineOptions() {
+    var _a, _b;
+    const exclude = /* @__PURE__ */ new Set();
+    for (const byLang of this.customTriggers.values()) {
+      for (const phrase of (_b = (_a = byLang.get(this.lang)) != null ? _a : byLang.get("en")) != null ? _b : []) {
+        exclude.add(normalizeCommand(phrase));
+      }
+    }
+    return { commandLang: this.lang, textLang: this.textLang, excludeTriggers: exclude };
+  }
+  /**
+   * Replace the inline punctuation triggers in `text` ("open quote",
+   * "semicolon", "em dash", "dot dot dot", ...) by the marks of the
+   * transcription language. Returns the text unchanged when the setting is
+   * off. Sessions that segment text themselves (dual-delay) call this too.
+   */
+  applyInlinePunctuation(text) {
+    return this.inlinePunctuation ? applyInlinePunctuation(text, this.inlineOptions()) : text;
+  }
+  /**
+   * Move a partial-flush split point so it never falls inside an inline
+   * trigger (or the pause artefacts around it). `null`: nothing left to commit.
+   */
+  adjustFlushSplit(text, split) {
+    return this.inlinePunctuation ? avoidSplitInsideTrigger(text, split, this.inlineOptions()) : split;
+  }
+  attachesLeft(text) {
+    return this.inlinePunctuation && startsWithLeftAttachingMark(text, this.textLang);
+  }
+  leftAttachTrailer(text) {
+    return leftAttachTrailer(text, this.textLang);
+  }
+  attachesRight(charBefore) {
+    return this.inlinePunctuation && endsWithRightAttachingMark(charBefore, this.textLang);
   }
   // ── Matching ──
   /** Built-in commands plus the loaded custom ones, in matching order. */
@@ -9481,7 +9995,8 @@ var CommandEngine = class {
    */
   processText(editor, text, posOverride, onCommand, continuation) {
     let stopRequested = false;
-    const segments = text.match(/[^.!?]+[.!?]+\s*/g);
+    text = this.applyInlinePunctuation(text);
+    const segments = sentenceSegments(text);
     if (!segments) {
       return this.processSegment(editor, text, posOverride, onCommand, continuation);
     }
@@ -9546,7 +10061,8 @@ var CommandEngine = class {
       label: resolveCustomLabel(this.customLabels, c.id, this.lang),
       patterns: getPatternsForAnyCommand(c.id, this.lang, this.customTriggers)
     }));
-    return [...getBuiltInCommandList(this.lang), ...custom];
+    const inline = this.inlinePunctuation ? getInlineHelpEntries(this.lang) : [];
+    return [...getBuiltInCommandList(this.lang), ...custom, ...inline];
   }
 };
 
@@ -9746,31 +10262,50 @@ var DictationTracker = class _DictationTracker {
     if (cursor.ch === 0) {
       text = text.replace(/^ +/, "");
     }
-    if (cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !this.commands.isSlotActive()) {
+    const slotActive = this.commands.isSlotActive();
+    const insertFrom = leftAttachStart(
+      editor,
+      this.commands,
+      text,
+      cursor,
+      detectInsertionContext(editor),
+      slotActive
+    );
+    if (insertFrom === cursor && cursor.ch > 0 && text.length > 0 && !/^[\s\n]/.test(text) && !slotActive && !this.commands.attachesLeft(text)) {
       const charBefore = editor.getRange(
         { line: cursor.line, ch: cursor.ch - 1 },
         cursor
       );
-      if (charBefore && /\S/.test(charBefore)) {
+      if (charBefore && /\S/.test(charBefore) && !this.commands.attachesRight(charBefore)) {
         text = " " + text;
       }
     }
-    const offsetBefore = editor.posToOffset(cursor);
-    editor.replaceRange(text, cursor);
+    const offsetBefore = editor.posToOffset(insertFrom);
+    const cursorOffset = editor.posToOffset(cursor);
+    const removed = cursorOffset - offsetBefore;
+    if (insertFrom === cursor) {
+      editor.replaceRange(text, cursor);
+    } else {
+      editor.replaceRange(text, insertFrom, cursor);
+    }
     const lines = text.split("\n");
     const lastLine = lines[lines.length - 1];
-    const newLine = cursor.line + lines.length - 1;
-    const newCh = lines.length === 1 ? cursor.ch + lastLine.length : lastLine.length;
+    const newLine = insertFrom.line + lines.length - 1;
+    const newCh = lines.length === 1 ? insertFrom.ch + lastLine.length : lastLine.length;
     editor.setCursor({ line: newLine, ch: newCh });
     const offsetAfter = editor.posToOffset(editor.getCursor());
-    const delta = offsetAfter - offsetBefore;
-    if (delta > 0) {
+    const inserted = offsetAfter - offsetBefore;
+    const net = inserted - removed;
+    if (inserted > 0) {
       for (const range of this.dictatedRanges) {
-        if (range.from >= offsetBefore) {
-          range.from += delta;
-          range.to += delta;
+        if (range.from >= cursorOffset) {
+          range.from += net;
+          range.to += net;
+        } else if (range.to > cursorOffset) {
+          range.to += net;
         } else if (range.to > offsetBefore) {
-          range.to += delta;
+          range.to = offsetBefore;
+          if (range.from > offsetBefore) range.from = offsetBefore;
         }
       }
       this.dictatedRanges.push({ from: offsetBefore, to: offsetAfter });
@@ -10132,6 +10667,10 @@ var _RealtimeSession = class _RealtimeSession {
     this.pendingText = "";
     this.prevRaw = "";
     this.turnDelta = 0;
+    // When the current connection reported session.created, until its first
+    // text arrives (VX_E22_S12 diagnostics): "connected but silent" after a
+    // screen lock is otherwise invisible in the crash log. Never the text.
+    this.awaitingFirstTextSince = null;
     // The editor this session dictates into, recorded by start(). stop() and
     // every commit use it rather than asking the host what is active now, so
     // switching notes mid-session cannot land text in another note (audit
@@ -10212,7 +10751,14 @@ var _RealtimeSession = class _RealtimeSession {
     this.audio.reset();
     this.tableInserter.reset();
     this.lastInsertEnd = null;
-    this.tokenManager = createTokenManager(this.settings, this.httpRequest);
+    this.tokenManager = createTokenManager(
+      this.settings,
+      this.httpRequest,
+      (msg) => {
+        var _a2, _b2;
+        return (_b2 = (_a2 = this.callbacks).logLifecycle) == null ? void 0 : _b2.call(_a2, msg);
+      }
+    );
     (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: session starting");
     (_d = (_c = this.callbacks).logLifecycle) == null ? void 0 : _d.call(
       _c,
@@ -10321,6 +10867,7 @@ var _RealtimeSession = class _RealtimeSession {
           if (!isCurrent()) return;
           vlog.debug("Voxtral: Realtime session created");
           (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, "realtime: session created");
+          this.awaitingFirstTextSince = Date.now();
           this.watchdog.arm();
         },
         onDelta: (text) => {
@@ -10400,6 +10947,7 @@ var _RealtimeSession = class _RealtimeSession {
         await this.connectWebSocket(editor);
       },
       isActive: () => !this.stopped && this.callbacks.isRecording(),
+      waitUntilReachable: this.callbacks.waitUntilReachable,
       onSuccess: () => vlog.debug("Voxtral: Session reconnected"),
       onFailure: (e, failures, max) => {
         var _a, _b;
@@ -10435,10 +10983,16 @@ var _RealtimeSession = class _RealtimeSession {
   }
   // ── Delta / Done text processing ──
   handleDelta(editor, text) {
+    var _a, _b;
     const delta = parseDelta(this.prevRaw, text);
     this.prevRaw = delta.prevRaw;
     const newText = delta.text;
     if (!newText) return;
+    if (this.awaitingFirstTextSince !== null) {
+      const secs = ((Date.now() - this.awaitingFirstTextSince) / 1e3).toFixed(1);
+      this.awaitingFirstTextSince = null;
+      (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(_a, `realtime: first text on this connection after ${secs} s`);
+    }
     this.pendingText += newText;
     this.turnDelta += newText.length;
     const sentenceEnd = /[.!?]\s*$/;
@@ -10474,6 +11028,10 @@ var _RealtimeSession = class _RealtimeSession {
    * at or before limit (split point after the space). See VX_E22_S9.
    */
   findPartialFlushSplit(limit) {
+    const split = this.findBoundary(limit);
+    return split === null ? null : this.commands.adjustFlushSplit(this.pendingText, split);
+  }
+  findBoundary(limit) {
     const commaIndex = this.pendingText.lastIndexOf(", ", limit - 2);
     if (commaIndex !== -1) {
       return commaIndex + 2;
@@ -10653,7 +11211,14 @@ var _DualDelaySession = class _DualDelaySession {
       clearTimeout(this.remainderTimer);
       this.remainderTimer = null;
     }
-    this.tokenManager = createTokenManager(this.settings, this.httpRequest);
+    this.tokenManager = createTokenManager(
+      this.settings,
+      this.httpRequest,
+      (msg) => {
+        var _a2, _b2;
+        return (_b2 = (_a2 = this.callbacks).logLifecycle) == null ? void 0 : _b2.call(_a2, msg);
+      }
+    );
     (_b = (_a = this.callbacks).logLifecycle) == null ? void 0 : _b.call(
       _a,
       `dual-delay: ${describeRealtimeSessionHints(this.settings, this.context)}`
@@ -10909,6 +11474,7 @@ var _DualDelaySession = class _DualDelaySession {
         }
       },
       isActive: () => !this.stopped && this.callbacks.isRecording(),
+      waitUntilReachable: this.callbacks.waitUntilReachable,
       onSuccess: () => {
         if (!this.stopped) this.setState("streaming" /* Streaming */);
       },
@@ -10948,7 +11514,10 @@ var _DualDelaySession = class _DualDelaySession {
       editor.replaceRange("", from, to);
       editor.setCursor(from);
       this.displayLen = 0;
-      this.tracker.trackInsertAtCursor(editor, this.slowText);
+      this.tracker.trackInsertAtCursor(
+        editor,
+        this.commands.applyInlinePunctuation(this.slowText)
+      );
       this.insertOffset = editor.posToOffset(
         editor.getCursor()
       );
@@ -11067,7 +11636,7 @@ var _DualDelaySession = class _DualDelaySession {
    * Checks completed sentences in slowText for voice commands.
    */
   processSlowCommands(editor) {
-    var _a, _b;
+    var _a, _b, _c;
     if (!this.slowText) return;
     if (this.commandJustRan && /^[\s.!?,;:]*$/.test(this.slowText)) {
       this.commandJustRan = false;
@@ -11088,9 +11657,7 @@ var _DualDelaySession = class _DualDelaySession {
       return;
     }
     this.commandJustRan = false;
-    const segments = this.slowText.match(
-      /[^.!?]+[.!?]+\s*/g
-    );
+    const segments = sentenceSegments(this.slowText);
     const segmentText = segments ? segments.join("") : "";
     const remainder = this.slowText.substring(segmentText.length);
     if (!segments && remainder.trim()) {
@@ -11117,7 +11684,11 @@ var _DualDelaySession = class _DualDelaySession {
     editor.replaceRange("", from, to);
     editor.setCursor(from);
     this.displayLen = 0;
-    for (const segment of segments) {
+    const processed = this.commands.applyInlinePunctuation(segmentText);
+    const processedSegments = (_a = sentenceSegments(processed)) != null ? _a : [];
+    const processedTail = processed.slice(processedSegments.join("").length);
+    if (processedTail.trim()) processedSegments.push(processedTail);
+    for (const segment of processedSegments) {
       const match = this.commands.matchCommand(segment);
       if (match) {
         if (match.textBefore) {
@@ -11134,7 +11705,7 @@ var _DualDelaySession = class _DualDelaySession {
           );
         }
         this.commands.executeCommand(editor, match.command);
-        (_b = (_a = this.callbacks).onCommandExecuted) == null ? void 0 : _b.call(_a, match.command.id);
+        (_c = (_b = this.callbacks).onCommandExecuted) == null ? void 0 : _c.call(_b, match.command.id);
         this.commandJustRan = true;
         if (match.command.id === "stopRecording") {
           setTimeout(
@@ -11165,7 +11736,7 @@ var _DualDelaySession = class _DualDelaySession {
   executeRemainderCommand(editor) {
     var _a, _b;
     if (!this.slowText) return;
-    const segments = this.slowText.match(/[^.!?]+[.!?]+\s*/g);
+    const segments = sentenceSegments(this.slowText);
     if (segments) {
       this.processSlowCommands(editor);
       return;
@@ -11392,6 +11963,17 @@ var RecordingController = class {
     // The in-flight start(), so a stop() during `starting` can await it
     // instead of racing it (audit §4 B2).
     this.startPromise = null;
+    // Whether THIS session holds the screen on: the setting as it was when
+    // the recording started. Changing the setting mid-recording takes effect
+    // from the next recording, which keeps acquire and release symmetric.
+    this.keepScreenOn = false;
+    // The in-flight liveness check/rebuild, so a visibility flicker never runs
+    // two rebuilds and stop() can wait for one instead of racing it.
+    this.revivePromise = null;
+    // Batch audio recorded before a rebuild that has not been transcribed
+    // yet: sent right after a successful rebuild, or folded into the final
+    // stop when the rebuild failed. Never dropped.
+    this.salvaged = null;
   }
   /**
    * The host's command engine (VX_E31_S10, audit §2.2 A4). Reached through
@@ -11511,6 +12093,9 @@ var RecordingController = class {
         this.deps.addSendButton();
       }
       this.currentState = "recording";
+      this.salvaged = null;
+      this.keepScreenOn = this.deps.getSettings().keepScreenOnWhileRecording;
+      this.holdScreenOn();
       this.deps.updateStatusBar("recording");
       this.deps.onStarted(this.effectiveMode);
     } catch (e) {
@@ -11539,11 +12124,15 @@ var RecordingController = class {
         }
       }
     }
+    if (this.revivePromise) {
+      await this.revivePromise.catch(() => void 0);
+    }
     if (this.currentState !== "recording" && this.currentState !== "paused") {
       vlog.debug(`Voxtral: stop ignored \u2014 recording is ${this.currentState}`);
       return;
     }
     this.currentState = "stopping";
+    this.releaseScreenOn();
     this.typingMuted = false;
     this.clearTypingResumeTimer();
     this.clearFocusPauseTimer();
@@ -11576,19 +12165,153 @@ var RecordingController = class {
     this.deps.updateStatusBar("paused");
     vlog.debug("Voxtral: Recording paused (app backgrounded)");
   }
-  /** Resume a paused session (focus regained). */
-  resume() {
+  /**
+   * Resume a paused session (focus regained). Asynchronous since
+   * VX_E22_S12: first it checks whether the microphone survived whatever
+   * paused us (a hard lock can end the track or close the AudioContext), and
+   * rebuilds it if not.
+   */
+  async resume() {
     if (this.currentState !== "paused") return;
-    this.currentState = "recording";
-    this.deps.recorder.resume();
-    this.deps.updateStatusBar("recording");
-    this.deps.notify("Recording resumed");
-    vlog.debug("Voxtral: Recording resumed (app foregrounded)");
+    await this.returnToForeground();
+  }
+  /**
+   * The app is visible again while a recording is live (paused, or still
+   * recording because focus loss is set to keep going): verify the capture
+   * pipeline, rebuild it when the OS took it away, and carry on.
+   */
+  async returnToForeground() {
+    if (this.revivePromise) return;
+    const wasPaused = this.currentState === "paused";
+    const result = await this.ensureRecorderAlive();
+    this.log(`back in the foreground (${wasPaused ? "paused" : "recording"}), microphone ${result.outcome}`);
+    if (!this.isRecording()) return;
+    if (result.outcome === "failed") {
+      this.log(`could not reopen the microphone, stopping: ${String(result.error)}`);
+      this.deps.notify(
+        "Could not resume recording after the device was locked. Recording stopped; the text dictated so far is kept.",
+        8e3
+      );
+      await this.stop();
+      return;
+    }
+    if (wasPaused) {
+      if (this.currentState !== "paused") return;
+      if (this.deps.isHidden()) {
+        if (result.outcome === "rebuilt") this.deps.recorder.pause();
+        return;
+      }
+      this.currentState = "recording";
+      if (result.outcome === "alive") this.deps.recorder.resume();
+      this.deps.updateStatusBar("recording");
+    }
+    if (result.outcome === "rebuilt") {
+      if (this.typingMuted) this.deps.recorder.mute();
+      this.deps.notify("Recording resumed after the device was locked");
+      vlog.debug("Voxtral: Recording rebuilt after returning to the foreground");
+    } else if (wasPaused) {
+      this.deps.notify("Recording resumed");
+      vlog.debug("Voxtral: Recording resumed (app foregrounded)");
+    }
+    this.sendSalvaged();
+  }
+  /** Deduplicated liveness check + rebuild; see `reviveRecorder()`. */
+  ensureRecorderAlive() {
+    if (!this.revivePromise) {
+      const pending = this.reviveRecorder().finally(() => {
+        if (this.revivePromise === pending) this.revivePromise = null;
+      });
+      this.revivePromise = pending;
+    }
+    return this.revivePromise;
+  }
+  async reviveRecorder() {
+    let alive = false;
+    try {
+      alive = await this.deps.recorder.ensureAlive();
+    } catch (e) {
+      this.log(`liveness check failed, treating the recorder as dead: ${String(e)}`);
+    }
+    if (alive) return { outcome: "alive" };
+    this.log("microphone or audio context did not survive, reopening");
+    return this.rebuildRecorder();
+  }
+  /**
+   * Tear down the dead capture pipeline and open a fresh one with the same
+   * start logic as a new recording. The transcription session stays as it is
+   * (the realtime one buffers audio while its socket reconnects). In batch
+   * mode the old recorder's audio is salvaged first.
+   */
+  async rebuildRecorder() {
+    try {
+      const blob = await this.deps.recorder.stop();
+      if (this.effectiveMode === "batch" && blob.size > 0) {
+        this.salvaged = {
+          blob,
+          durationSec: this.deps.recorder.lastChunkDurationSec
+        };
+        this.log(`kept ${blob.size} bytes of audio recorded before the lock`);
+      }
+    } catch (e) {
+      this.log(`teardown of the dead recorder failed: ${String(e)}`);
+    }
+    try {
+      await this.startRecorder();
+    } catch (e) {
+      return { outcome: "failed", error: e };
+    }
+    this.log("microphone reopened");
+    return { outcome: "rebuilt" };
+  }
+  /**
+   * Batch: hand audio salvaged by a rebuild to the session as an ordinary
+   * chunk. A different recorder's blob cannot be joined to the next one (each
+   * MediaRecorder writes its own container header), so it is transcribed on
+   * its own, like a tap-to-send.
+   */
+  sendSalvaged() {
+    const salvaged = this.salvaged;
+    const session = this.session;
+    if (!salvaged || !session || !isChunkedSession(session)) return;
+    this.salvaged = null;
+    void session.sendChunk(salvaged.blob, salvaged.durationSec).catch((e) => {
+      vlog.error("Voxtral: sending salvaged audio failed", e);
+      this.deps.notify(`Chunk failed: ${String(e)}`);
+    });
   }
   /** Release any pending timer (plugin unload). */
   dispose() {
     this.clearTypingResumeTimer();
     this.clearFocusPauseTimer();
+    this.releaseScreenOn();
+  }
+  // ── Screen wake lock (VX_E22_S12) ──
+  /** Request the lock when this session wants it; never throws. */
+  holdScreenOn() {
+    const wakeLock = this.deps.wakeLock;
+    if (!this.keepScreenOn || !wakeLock) return;
+    this.fireAndLog("request", () => wakeLock.acquire());
+  }
+  releaseScreenOn() {
+    const wakeLock = this.deps.wakeLock;
+    const held = this.keepScreenOn;
+    this.keepScreenOn = false;
+    if (!held || !wakeLock) return;
+    this.fireAndLog("release", () => wakeLock.release());
+  }
+  /** A lock problem is a log line, never an error for the recording. */
+  fireAndLog(what, op) {
+    try {
+      op().catch((e) => {
+        this.log(`wake lock ${what} failed: ${String(e)}`);
+      });
+    } catch (e) {
+      this.log(`wake lock ${what} failed: ${String(e)}`);
+    }
+  }
+  log(message) {
+    var _a, _b;
+    (_b = (_a = this.deps).logLifecycle) == null ? void 0 : _b.call(_a, `recording: ${message}`);
   }
   // ── Session lifecycle ──
   async startRealtime(editor) {
@@ -11600,15 +12323,7 @@ var RecordingController = class {
         this.deps.getSettings().dualDelay ? "dual-delay" : "realtime"
       );
       await this.session.start(editor);
-      const deviceId = this.deps.getSettings().microphoneDeviceId || void 0;
-      await this.deps.recorder.start(
-        deviceId,
-        (pcmData) => {
-          var _a2;
-          return (_a2 = this.session) == null ? void 0 : _a2.sendAudio(pcmData);
-        },
-        this.deps.getSettings().noiseSuppression
-      );
+      await this.startRecorder();
     } catch (e) {
       try {
         await ((_a = this.session) == null ? void 0 : _a.stop());
@@ -11647,22 +12362,41 @@ var RecordingController = class {
   async startBatch(editor) {
     this.session = this.makeSession("batch");
     await this.session.start(editor);
-    const deviceId = this.deps.getSettings().microphoneDeviceId || void 0;
-    await this.deps.recorder.start(
-      deviceId,
-      void 0,
-      this.deps.getSettings().noiseSuppression
-    );
+    await this.startRecorder();
     if (this.deps.recorder.fallbackUsed) {
       this.deps.notify("Selected mic unavailable \u2014 using default");
     }
   }
+  /**
+   * Open the microphone for the current mode: realtime streams PCM into the
+   * session, batch records blobs (no PCM callback). Shared by both start
+   * paths and by the rebuild after a lock (VX_E22_S12), so a rebuilt
+   * recorder is configured exactly like the one it replaces.
+   */
+  startRecorder() {
+    const settings = this.deps.getSettings();
+    const deviceId = settings.microphoneDeviceId || void 0;
+    const onPcm = this.effectiveMode === "realtime" ? (pcmData) => {
+      var _a;
+      return (_a = this.session) == null ? void 0 : _a.sendAudio(pcmData);
+    } : void 0;
+    return this.deps.recorder.start(deviceId, onPcm, settings.noiseSuppression);
+  }
   async stopBatch() {
     const session = this.session;
     this.session = null;
-    const blob = await this.deps.recorder.stop();
+    let blob = await this.deps.recorder.stop();
+    let durationSec = this.deps.recorder.lastChunkDurationSec;
+    const salvaged = this.salvaged;
+    this.salvaged = null;
+    if (salvaged && blob.size === 0) {
+      blob = salvaged.blob;
+      durationSec = salvaged.durationSec;
+    } else if (salvaged && session && isChunkedSession(session)) {
+      await session.sendChunk(salvaged.blob, salvaged.durationSec);
+    }
     if (session && isChunkedSession(session)) {
-      await session.stop(blob, this.deps.recorder.lastChunkDurationSec);
+      await session.stop(blob, durationSec);
     } else {
       await (session == null ? void 0 : session.stop());
     }
@@ -11736,6 +12470,7 @@ var RecordingController = class {
     const behavior = this.deps.getSettings().focusBehavior;
     if (this.deps.isHidden()) {
       this.clearFocusPauseTimer();
+      this.log(`app hidden, focus behavior ${behavior}`);
       if (behavior === "keep-recording") {
         vlog.debug("Voxtral: App backgrounded, recording continues");
       } else if (behavior === "pause-after-delay") {
@@ -11752,9 +12487,8 @@ var RecordingController = class {
       }
     } else {
       this.clearFocusPauseTimer();
-      if (this.currentState === "paused") {
-        this.resume();
-      }
+      this.holdScreenOn();
+      void this.returnToForeground();
     }
   }
   clearFocusPauseTimer() {
@@ -11840,6 +12574,121 @@ var RecordingController = class {
       this.deps.clearTimer(this.typingResumeTimer);
       this.typingResumeTimer = null;
     }
+  }
+};
+
+// src/screen-wake-lock.ts
+function describeError(e) {
+  if (e instanceof Error) return `${e.name}: ${e.message}`;
+  if (typeof e === "object" && e !== null && "name" in e && typeof e.name === "string") {
+    return e.name;
+  }
+  return String(e);
+}
+var ScreenWakeLock = class {
+  constructor(deps) {
+    this.deps = deps;
+    this.sentinel = null;
+    // The request in flight, shared by concurrent acquire() calls.
+    this.pending = null;
+    // Whether the owner still wants the lock. A release() while a request is
+    // in flight flips this, and the sentinel that arrives is handed back.
+    this.wanted = false;
+  }
+  /** Whether a sentinel is currently held (and not yet released by the system). */
+  get isHeld() {
+    return this.sentinel !== null && !this.sentinel.released;
+  }
+  /**
+   * Hold the lock: a no-op while one is held or being requested. Resolves
+   * with whether the lock is held afterwards.
+   */
+  acquire() {
+    this.wanted = true;
+    if (this.isHeld) return Promise.resolve(true);
+    if (this.pending) return this.pending;
+    const pending = this.request().finally(() => {
+      if (this.pending === pending) this.pending = null;
+    });
+    this.pending = pending;
+    return pending;
+  }
+  /** Let go of the lock (and of any request still in flight). */
+  async release() {
+    this.wanted = false;
+    const sentinel = this.sentinel;
+    this.sentinel = null;
+    if (!sentinel || sentinel.released) return;
+    await this.releaseSentinel(sentinel, "wake lock: released");
+  }
+  async request() {
+    var _a;
+    const wakeLock = (_a = this.deps.getNavigator()) == null ? void 0 : _a.wakeLock;
+    if (!wakeLock) {
+      this.deps.log("wake lock: not supported on this device, recording without it");
+      return false;
+    }
+    let sentinel;
+    try {
+      sentinel = await wakeLock.request("screen");
+    } catch (e) {
+      this.deps.log(`wake lock: request refused (${describeError(e)}), recording without it`);
+      return false;
+    }
+    if (!this.wanted) {
+      await this.releaseSentinel(sentinel, "wake lock: released (stopped while requesting)");
+      return false;
+    }
+    this.sentinel = sentinel;
+    sentinel.addEventListener("release", () => {
+      if (this.sentinel === sentinel) {
+        this.sentinel = null;
+        this.deps.log("wake lock: released by the system");
+      }
+    });
+    this.deps.log("wake lock: acquired");
+    return true;
+  }
+  async releaseSentinel(sentinel, logLine) {
+    try {
+      await sentinel.release();
+      this.deps.log(logLine);
+    } catch (e) {
+      this.deps.log(`wake lock: release failed (${describeError(e)})`);
+    }
+  }
+};
+
+// src/reachability.ts
+var ReachabilityGate = class {
+  constructor(deps) {
+    this.deps = deps;
+    this.waiters = [];
+  }
+  /** Whether a connection attempt can succeed right now. */
+  isReachable() {
+    return !this.deps.isHidden() && this.deps.isOnline();
+  }
+  /**
+   * Resolves once the app is visible and online. Never rejects. Concurrent
+   * callers (the two streams of dual-delay) share one wait and one log line.
+   */
+  wait() {
+    if (this.isReachable()) return Promise.resolve();
+    if (this.waiters.length === 0) {
+      this.deps.log(
+        this.deps.isHidden() ? "realtime: app in the background \u2014 reconnect waits until it is back" : "realtime: device offline \u2014 reconnect waits for the network"
+      );
+    }
+    return new Promise((resolve) => this.waiters.push(resolve));
+  }
+  /** Call on `visibilitychange` and `online`: releases the waiters when reachable. */
+  notify() {
+    if (this.waiters.length === 0 || !this.isReachable()) return;
+    this.deps.log("realtime: back in the foreground and online \u2014 reconnecting");
+    const waiters = this.waiters;
+    this.waiters = [];
+    for (const resolve of waiters) resolve();
   }
 };
 
@@ -11939,6 +12788,18 @@ var STATUS_BAR_STATES = {
 var VoxtralPlugin = class extends import_obsidian11.Plugin {
   constructor() {
     super(...arguments);
+    // Holds realtime reconnects while the app is hidden or offline (VX_E22_S12).
+    // Mobile only: there a hidden app has no network. On desktop a minimized
+    // window keeps both network and microphone ("keep recording" must keep
+    // transcribing), and Electron can report navigator.onLine = false while
+    // the API is reachable, which would hold the reconnect for good.
+    this.reachability = new ReachabilityGate({
+      isHidden: () => import_obsidian11.Platform.isMobile && activeDocument.hidden,
+      isOnline: () => !import_obsidian11.Platform.isMobile || typeof navigator === "undefined" || navigator.onLine !== false,
+      log: (msg) => {
+        void this.fileTranscriptionService.logRealtime(msg);
+      }
+    });
     /**
      * The plugin's single command engine (VX_E31_S10, audit §2.2 A4). Created
      * here rather than as module state in `voice-commands.ts`, and handed to
@@ -12120,7 +12981,8 @@ var VoxtralPlugin = class extends import_obsidian11.Plugin {
       onCommandExecuted: (commandId) => this.handleCommandExecuted(commandId),
       logLifecycle: (msg) => {
         void this.fileTranscriptionService.logRealtime(msg);
-      }
+      },
+      waitUntilReachable: () => this.reachability.wait()
     };
   }
   async onload() {
@@ -12166,6 +13028,17 @@ var VoxtralPlugin = class extends import_obsidian11.Plugin {
         new import_obsidian11.Notice("Recording stopped");
       },
       isHidden: () => activeDocument.hidden,
+      // Keep the screen on while recording (VX_E22_S12). Lines go to the
+      // same on-disk crash log as the session lifecycle.
+      wakeLock: new ScreenWakeLock({
+        getNavigator: () => typeof navigator === "undefined" ? void 0 : navigator,
+        log: (msg) => {
+          void this.fileTranscriptionService.logRealtime(msg);
+        }
+      }),
+      logLifecycle: (msg) => {
+        void this.fileTranscriptionService.logRealtime(msg);
+      },
       setTimer: (callback, ms) => window.setTimeout(callback, ms),
       clearTimer: (handle) => {
         window.clearTimeout(handle);
@@ -12450,6 +13323,10 @@ var VoxtralPlugin = class extends import_obsidian11.Plugin {
     this.addSettingTab(new VoxtralSettingTab(this.app, this));
     this.registerDomEvent(activeDocument, "visibilitychange", () => {
       this.recording.handleVisibilityChange();
+      this.reachability.notify();
+    });
+    this.registerDomEvent(activeWindow, "online", () => {
+      this.reachability.notify();
     });
     this.registerDomEvent(
       activeDocument,
@@ -12538,6 +13415,7 @@ var VoxtralPlugin = class extends import_obsidian11.Plugin {
     }
     this.commands.setLanguage(this.settings.language, this.settings.voiceCommandLanguage);
     this.commands.loadCustomCommands(this.settings.customCommands);
+    this.commands.setInlinePunctuation(this.settings.inlinePunctuation);
     this.setupTemplates();
     if (apiKeyMigrated) {
       await this.saveSettings();
@@ -12551,6 +13429,7 @@ var VoxtralPlugin = class extends import_obsidian11.Plugin {
     await this.saveData(stripApiKeyValue(this.settings));
     this.commands.setLanguage(this.settings.language, this.settings.voiceCommandLanguage);
     this.commands.loadCustomCommands(this.settings.customCommands);
+    this.commands.setInlinePunctuation(this.settings.inlinePunctuation);
     this.setupTemplates();
     this.refreshHelpView();
   }

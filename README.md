@@ -52,7 +52,7 @@ We built this for people who think out loud: researchers, consultants, anyone wh
 - **Transcribe existing audio files** (desktop + mobile) — right-click any audio file → "Transcribe audio file"; choose where the text lands (active note or a new linked note), or run "Transcribe the audio embed on the current line" to transcribe a `![[recording]]` embed — it finds the nearest or only audio embed in the note even if your cursor isn't right on it, and works in reading view too
 - **Long recordings, handled** — files over the single-request limit are split and transcribed in parts automatically, each part appearing as it finishes (with a Cancel button); part length is configurable
 - **Readable layout** — transcripts are broken into paragraphs rather than one long block
-- **Speaker labels (optional)** — turn on diarization to label who said what (`**Speaker 1:** …`)
+- **Speaker labels (optional)** — turn on diarization to label who said what (`**Speaker 1:** …`); this is for transcribing files, live dictation does not tell speakers apart
 - **Terms for this recording** — before a file is transcribed, a dialog shows the names and jargon that will be sent as context bias, grouped by where they came from: your custom vocabulary, the note's `voxtral-vocabulary` frontmatter, name-like words from the file name, and the note's headings and links. Switch off what does not belong, add terms that only apply to this recording, and the chosen list is remembered for the next recording on that note — see [Per-note vocabulary](#per-note-vocabulary-and-the-global-custom-vocabulary-list). Automatic watch-folder transcriptions never show it
 - **Quality heads-up** — an optional pre-flight check warns about likely problems (very short, silent, or low-bitrate audio) before spending an API call
 - **Watch folder (optional, off by default)** — point it at a vault folder (e.g. a phone auto-sync folder) and a new audio file there is offered for transcription with a notice, or transcribed automatically if you switch the mode — automatic sends every new recording in the folder to the API without asking, so each one costs an API call
@@ -104,7 +104,26 @@ Turn on **Speaker labels (diarization)** in settings to label who said what (off
 
 ### Voice commands
 
-Voice commands are recognized at the end of a sentence and automatically adapt to the selected language: equivalent phrases exist in 13 languages (see [Languages](#languages)); in other languages the voice commands are English. Open the help panel for the exact phrases in your active language: run **Show voice help panel** from the command palette, or click the microphone icon in the status bar (desktop); on mobile, swipe from the right to reach it. See [Command reference](#command-reference) below for the full list, grouped by category, with English example phrases.
+Voice commands are recognized at the end of a sentence (the experimental punctuation marks in [Punctuation in the middle of a sentence](#punctuation-in-the-middle-of-a-sentence-experimental) are the exception: they work anywhere) and automatically adapt to the selected language: equivalent phrases exist in 13 languages (see [Languages](#languages)); in other languages the voice commands are English. Open the help panel for the exact phrases in your active language: run **Show voice help panel** from the command palette, or click the microphone icon in the status bar (desktop); on mobile, swipe from the right to reach it. See [Command reference](#command-reference) below for the full list, grouped by category, with English example phrases.
+
+### Punctuation in the middle of a sentence (experimental)
+
+**Experimental and off by default.** Switch it on with *Punctuation mid-sentence (experimental)* under Settings → Voice commands. Five punctuation marks can be dictated anywhere in a sentence, not only at its end, which suits dialogue and fiction: *she said open quote I'm leaving close quote and left* becomes `she said “I'm leaving” and left`.
+
+| Say | Inserts |
+|---|---|
+| "open quote", "open quotes", "start quote" | An opening quotation mark |
+| "close quote", "close quotes", "end quote", "unquote" | A closing quotation mark |
+| "semicolon", "semi colon" | `;` |
+| "em dash", "m dash", "long dash" | A dash |
+| "ellipsis", "dot dot dot" | `…` |
+
+Dutch has its own phrases ("aanhalingsteken openen", "aanhalingsteken sluiten", "puntkomma", "gedachtestreepje", "beletselteken", and a few more; the help panel lists them), and the English phrases work in every command language. A trigger is matched as whole words, case-insensitively, and may contain a hyphen or comma ("em-dash", "dot, dot, dot"). A lone "dash" or "quote" is not a trigger, so "a dash of salt" stays as it is. Question and exclamation marks are left to Voxtral, which sets them from your intonation.
+
+- **The mark follows the language you dictate in**, not the command language: curly quotes `“ ”` and an unspaced `—` in English, `“ ”` and a spaced `–` in Dutch, `„ “` in German, `« »` with no-break spaces in French, `「 」` in Japanese. Spanish, Italian, Russian and Arabic use `« »`; Chinese uses `“ ”`, `——` and `……`. With automatic detection, or a language that has no entry of its own, the English marks are used.
+- **Spacing is handled for you.** Voxtral often writes a comma or period around a spoken command because of the pause; those are removed (`she said, open quote, hello` gives `she said “hello`). A closing quote, semicolon or ellipsis sticks to the word before it, an opening quote to the word after it, and a period or question mark before "close quote" stays inside the quote. Capitalization is kept as Voxtral wrote it.
+- **Your own commands win.** If a custom voice command uses one of these phrases as its trigger, the custom command keeps working and the phrase is not replaced.
+- **Why experimental.** The triggers are chosen to be rare in ordinary text, but they are not impossible: "an open quote" becomes a quotation mark too, and "use a semicolon here" becomes "use a; here". And when auto-correction runs before the marks are inserted (file transcription, correction after you stop), the model may already have rewritten the spoken words. Feedback is welcome in the [forum thread](https://forum.obsidian.md/t/112674).
 
 ### Languages
 
@@ -164,7 +183,7 @@ voxtral-vocabulary:
 
 - Resolved the same way and at the same moment as `voxtral-language`/`voxtral-style` — once, from the output-target note, and held for that recording session or file transcription.
 - There's also a global **Custom vocabulary** setting (Settings → Voxtral Transcribe) for terms you always want available, regardless of which note you're in — your own name, recurring jargon, project codenames. Same always-on rule applies, and the same privacy trade-off: these terms are shared with the API on every call.
-- Order when combined with the vault vocabulary's automatic collection: this note's `voxtral-vocabulary` terms first, then the global custom terms, then collected vault terms — deduped and capped like the rest of the vocabulary list.
+- Order when combined with the vault vocabulary's automatic collection: this note's `voxtral-vocabulary` terms first, then the global custom terms, then collected vault terms, deduped and capped: **up to 50 terms go along with a dictation, and up to 100 with a file transcription** (the "Terms for this recording" dialog shows which). With a long list, such as hundreds of contacts, only the first terms in that order are used. So keep the global list for the names and terms you use all the time, and put the names a note needs (the attendees of a meeting, for example) in its `voxtral-vocabulary`; those come first.
 
 ### Text correction
 
@@ -179,6 +198,13 @@ When switching apps on mobile, you can configure what happens to an active recor
 - **Pause immediately** (default) — pauses and resumes when you return
 - **Pause after delay** — keeps recording for a configurable time (10s–5min), then pauses
 - **Keep recording** — continues recording in the background
+
+#### Screen lock on mobile
+
+- **The screen stays on while you record.** With *Keep screen on while recording* (on by default) the plugin asks the phone not to lock the screen on its own, so putting the phone down for a moment does not end your dictation. The phone can still refuse (for example in battery saver mode), and older iOS versions do not offer this at all; the recording then simply runs without it. The setting is read when a recording starts.
+- **The power button and app switches are up to the phone.** Pressing the power button or switching apps makes iOS freeze the app and Android block background microphone use for apps like Obsidian. A plugin cannot change that, so the recording pauses or stops capturing audio at that moment.
+- **The plugin resumes when you come back.** It checks that the microphone survived the lock and, if not, opens it again and carries on in the same recording, with a short notice. In batch mode, audio recorded before the lock is kept and transcribed. If the microphone cannot be reopened, the recording stops with a message, and the text you already dictated stays in your note.
+- **Live dictation reconnects when you are back, not before.** A locked phone gives Obsidian no network, so while the app is in the background (or the phone is offline) the plugin waits instead of trying to reconnect, however long the lock lasts. Back in the app, it reconnects and the dictation continues.
 
 ### Listen back (experimental)
 
@@ -237,6 +263,16 @@ The tables below show English trigger phrases; the same commands exist, with loc
 | Heading 2 | "heading two", "heading 2" | `## ` |
 | Heading 3 | "heading three", "heading 3" | `### ` |
 | Colon | "colon" | Inserts `:` |
+
+**Punctuation anywhere in a sentence** (experimental, off by default; see [Punctuation in the middle of a sentence](#punctuation-in-the-middle-of-a-sentence-experimental))
+
+| Voice command | Example phrases | Result |
+|---|---|---|
+| Open quote | "open quote", "start quote" | Opening quotation mark of the language you dictate in (`“` in English) |
+| Close quote | "close quote", "end quote", "unquote" | Closing quotation mark (`”` in English) |
+| Semicolon | "semicolon", "semi colon" | `;` |
+| Dash | "em dash", "long dash" | `—` in English, ` – ` in Dutch |
+| Ellipsis | "ellipsis", "dot dot dot" | `…` |
 
 **Lists and tasks**
 
@@ -320,6 +356,7 @@ Settings are grouped into eight collapsible sections in Settings → Voxtral Tra
 | Typing cooldown | 800 ms | How long after you stop typing before the mic unmutes again |
 | On focus loss | Pause immediately | What happens to an active recording when you switch apps |
 | Pause delay (seconds) | 30 | Delay before pausing, shown only when "On focus loss" is set to "Pause after delay" |
+| Keep screen on while recording | On | Asks the phone not to lock the screen while you record. The power button and app switches still pause the recording; the plugin resumes when you return. Applies from the next recording |
 | Language | Nederlands (`nl`) | The language you speak, or Detect automatically. Voice commands exist in 13 languages and are English in the others; see [Languages](#languages). Override per note, see [Per-note language override](#per-note-language-override) |
 | Voice command language | Same as transcription language | The language of your voice commands, one of the 13 command languages. English commands always work as well; see [Languages](#languages) |
 | Auto-correction | Standard | Off / Light (spelling, capitalization, punctuation only) / Standard (also fixes clearly garbled words) |
@@ -353,6 +390,7 @@ Settings are grouped into eight collapsible sections in Settings → Voxtral Tra
 | Setting | Default | Description |
 |---|---|---|
 | Show voice command feedback | On | Briefly shows which command just ran (status-bar flash on desktop, a notice on mobile) |
+| Punctuation mid-sentence (experimental) | Off | Recognizes "open quote", "close quote", "semicolon", "em dash" and "dot dot dot" (and the Dutch phrases) anywhere in a sentence and inserts the mark |
 | Templates folder | Empty (off) | Vault path scanned for template notes, insertable by saying "template {name}" |
 | Custom voice commands | N/A | Add, edit, and delete your own trigger phrases for inserting text or opening a slot; also where built-in commands (table, callouts) can be reset to their defaults |
 
@@ -398,7 +436,7 @@ Settings are grouped into eight collapsible sections in Settings → Voxtral Tra
 
 What the plugin accesses and why. The Obsidian review page lists some of these without context.
 
-- **Network** — Your audio is sent to `api.mistral.ai` (Mistral, an EU company) for transcription — and, if Auto-correct is on, dictated text for correction. That is the only place your content leaves your device. A custom **API base URL** can point this elsewhere — e.g. `http://localhost:8000` for a self-hosted/local model — so nothing leaves your machine. `buymeacoffee.com` is a support link only, opened in your browser when you click it in Settings; no data is sent.
+- **Network** — Your audio is sent to `api.mistral.ai` (Mistral, an EU company) for transcription — and, if Auto-correct is on, dictated text for correction. Your vocabulary terms go along with those requests, so names you add to the vocabulary are shared with Mistral too. That is the only place your content leaves your device. A custom **API base URL** can point this elsewhere — e.g. `http://localhost:8000` for a self-hosted/local model — so nothing leaves your machine. `buymeacoffee.com` is a support link only, opened in your browser when you click it in Settings; no data is sent.
 - **Audio encoding** — Captured audio is base64-encoded (`btoa()`) to include it in the API request. This is transport encoding, not obfuscation.
 - **Vault access** — The plugin reads and writes the **active note** to insert transcribed text and to run "Correct dictated text" on what you dictated. If you enable Templates, it reads template files from the folder you configure. It does not scan or upload your vault.
 - **Clipboard** — Not used. The plugin neither reads nor writes the clipboard. ("Export logs" writes a new note in your vault, not the clipboard.)

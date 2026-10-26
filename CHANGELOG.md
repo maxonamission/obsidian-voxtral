@@ -4,6 +4,40 @@ All notable user-facing changes to the **Voxtral Transcribe** Obsidian plugin.
 The format is based on [Keep a Changelog](https://keepachangelog.com/); this
 plugin follows [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [1.20.0] - 2026-10-25
+
+- **Dictation survives a locked phone.** A new setting, *Keep screen on while
+  recording* (on by default), keeps the screen from locking by itself while you
+  dictate. The phone may refuse (battery saver), and iOS before 18.4 does not
+  offer it; the recording then simply runs without it.
+- **Back after the power button or an app switch, the recording carries on.**
+  The phone still cuts the microphone at that moment, and no plugin can change
+  that. When you return, the plugin checks the microphone and opens it again if
+  needed, in the same recording, with a short notice. In batch mode the audio
+  from before the lock is kept and transcribed.
+- **Live dictation reconnects when you are back, not before.** A locked phone
+  gives Obsidian no network, so the plugin used to spend all its reconnect
+  attempts in the first seconds of the lock and then stop the recording. It now
+  waits, however long the lock lasts, and reconnects when you return. On mobile
+  every reconnect also gets a fresh connection token: reusing the old one made
+  each reconnect fail.
+- **Punctuation anywhere in a sentence (experimental, off by default).** Say "open quote", "close quote",
+  "semicolon", "em dash" or "dot dot dot" in the middle of a sentence and the mark
+  is inserted: *she said open quote I'm leaving close quote and left* becomes
+  `she said “I'm leaving” and left`. Dutch has its own phrases ("aanhalingsteken
+  openen", "puntkomma", "gedachtestreepje", "beletselteken", and more); the English
+  ones work in every command language. The marks follow the language you dictate
+  in (`“ ”` in English, `„ “` in German, `« »` in French, `「 」` in Japanese), the
+  comma or period Voxtral puts around a spoken command is removed, and a lone
+  "dash" or "quote" stays text. A custom command with the same trigger keeps
+  priority. Switch it on with *Punctuation mid-sentence (experimental)* under
+  Voice commands; the help panel then lists the phrases in their own group. It is
+  experimental because an ordinary phrase such as "an open quote" is replaced
+  too, and because auto-correction on the file route may rewrite the spoken words
+  before they are replaced.
+
 ## [1.19.0] - 2026-10-21
 
 - **Dictate in any language Voxtral 3 knows.** Until now the Language setting

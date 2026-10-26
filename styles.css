@@ -116,6 +116,11 @@
 	font-weight: 600;
 }
 
+.voxtral-help-table th.voxtral-help-group {
+	padding-top: 14px;
+	color: var(--text-muted);
+}
+
 .voxtral-help-table td {
 	border-bottom: 1px solid var(--background-modifier-border);
 	padding: 5px 8px;
