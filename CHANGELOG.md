@@ -6,6 +6,15 @@ plugin follows [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-11-07
+
+- **Longer vocabulary lists with Voxtral 3.** Up to 1000 terms now go along with a
+  file transcription and up to 500 with live dictation (before: 100 and 50). Older
+  models take up to 100 (the API's own limit) and 50 live, and the correction step
+  uses the first 100 terms, as many as it ever received before. If a long file sent in
+  one piece does not fit the model's context window with the full list, the plugin
+  tries once more with the first 100 terms.
+
 ## [1.20.0] - 2026-10-25
 
 - **Dictation survives a locked phone.** A new setting, *Keep screen on while

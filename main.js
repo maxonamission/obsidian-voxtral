@@ -107,8 +107,9 @@ function buildCustomCommandGuard(commands, lang) {
   const escaped = unique.map((m) => `"${m}"`).join(", ");
   return "\n\nCUSTOM COMMAND OUTPUT \u2014 DO NOT REMOVE:\nThe user has voice commands that insert specific text markers. These markers MUST be preserved exactly as-is: " + escaped + "\nNever strip, rewrite, or 'correct' these markers.";
 }
+var VOCAB_GUARD_MAX_TERMS = 100;
 function buildVocabularyGuard(terms) {
-  const unique = [...new Set(terms.map((t) => t.trim()).filter(Boolean))];
+  const unique = [...new Set(terms.map((t) => t.trim()).filter(Boolean))].slice(0, VOCAB_GUARD_MAX_TERMS);
   if (unique.length === 0) return "";
   return "\n\nKNOWN VAULT TERMS:\nThe following are names/terms from the user's knowledge base (note titles, aliases, tags). If the transcript contains a close phonetic or misspelled match, prefer this exact spelling: " + unique.join(", ") + ".\nOnly apply this when there is a clear phonetic or spelling match \u2014 do not force unrelated words to match these terms.";
 }
@@ -2269,10 +2270,11 @@ function withTimeout(promise, timeoutMs, label) {
     });
   });
 }
+var CONTEXT_WINDOW_ERROR_TEXT = "exceeds the model's context window";
 function sanitizeApiError(status, rawBody) {
   var _a;
   if (status === 400 && rawBody.includes("invalid_request_prompt_too_long")) {
-    return "HTTP 400: The request exceeds the model's context window, which the audio and the vocabulary terms share. The vocabulary is a likely cause: try again with fewer terms.";
+    return `HTTP 400: The request ${CONTEXT_WINDOW_ERROR_TEXT}, which the audio and the vocabulary terms share. The vocabulary is a likely cause: try again with fewer terms.`;
   }
   try {
     const parsed = JSON.parse(rawBody);
@@ -2310,7 +2312,26 @@ function sanitizeApiError(status, rawBody) {
 }
 
 // ../shared/src/context-bias.ts
-var CONTEXT_BIAS_MAX_TERMS = 100;
+var CONTEXT_BIAS_MAX_TERMS_V3_FILE = 1e3;
+var CONTEXT_BIAS_MAX_TERMS_V3_REALTIME = 500;
+var CONTEXT_BIAS_MAX_TERMS_LEGACY_FILE = 100;
+var CONTEXT_BIAS_MAX_TERMS_LEGACY_REALTIME = 50;
+function contextBiasMaxTerms(model, route) {
+  if (isVoxtral3Model(model)) {
+    return route === "realtime" ? CONTEXT_BIAS_MAX_TERMS_V3_REALTIME : CONTEXT_BIAS_MAX_TERMS_V3_FILE;
+  }
+  return route === "realtime" ? CONTEXT_BIAS_MAX_TERMS_LEGACY_REALTIME : CONTEXT_BIAS_MAX_TERMS_LEGACY_FILE;
+}
+var CONTEXT_WINDOW_TOKENS = 65536;
+var CONTEXT_BIAS_TOKENS_PER_TERM = 8;
+var AUDIO_TOKENS_PER_SECOND = 13;
+var CONTEXT_WINDOW_MARGIN_TOKENS = 4e3;
+function fitContextBiasToWindow(terms, audioSeconds) {
+  const seconds = Number.isFinite(audioSeconds) && audioSeconds > 0 ? audioSeconds : 0;
+  const budget = CONTEXT_WINDOW_TOKENS - CONTEXT_WINDOW_MARGIN_TOKENS - Math.ceil(seconds * AUDIO_TOKENS_PER_SECOND);
+  const maxTerms = Math.max(0, Math.floor(budget / CONTEXT_BIAS_TOKENS_PER_TERM));
+  return terms.length <= maxTerms ? terms : terms.slice(0, maxTerms);
+}
 var CONTEXT_BIAS_MAX_TERM_LENGTH = 40;
 function stripTermPunctuation(term) {
   return /\..*\.$/.test(term) ? term : term.replace(/[.;:!?]+$/, "");
@@ -2318,8 +2339,9 @@ function stripTermPunctuation(term) {
 function trimEdgeCommas(term) {
   return term.replace(/^[\s,]+|[\s,]+$/g, "");
 }
-function buildContextBias(terms, model) {
+function buildContextBias(terms, model, route = "file") {
   if (!terms || terms.length === 0) return [];
+  const maxTerms = contextBiasMaxTerms(model, route);
   const v3 = isVoxtral3Model(model);
   const seen = /* @__PURE__ */ new Set();
   const result = [];
@@ -2331,7 +2353,7 @@ function buildContextBias(terms, model) {
     if (seen.has(term)) continue;
     seen.add(term);
     result.push(term);
-    if (result.length >= CONTEXT_BIAS_MAX_TERMS) break;
+    if (result.length >= maxTerms) break;
   }
   return result;
 }
@@ -2687,7 +2709,7 @@ function supportsRealtimeSessionHints(settings) {
 function resolveRealtimeSessionHints(settings, context) {
   if (!supportsRealtimeSessionHints(settings)) return null;
   const hints = {
-    contextBias: buildContextBias(context.vocabularyTerms, settings.realtimeModel)
+    contextBias: buildContextBias(context.vocabularyTerms, settings.realtimeModel, "realtime")
   };
   const language = transcriptionLanguageForRealtime(settings.language);
   if (language) hints.language = language;
@@ -5546,6 +5568,7 @@ function isInsideFolder(path, folder) {
 // src/vault-vocabulary.ts
 var import_obsidian4 = require("obsidian");
 var MAX_TERMS = 50;
+var MAX_COMBINED_TERMS = CONTEXT_BIAS_MAX_TERMS_V3_REALTIME;
 var MAX_CHARS = 1500;
 var MIN_TERM_LENGTH = 3;
 function isLikelyCommonWord(term) {
@@ -5648,7 +5671,7 @@ function combineVocabulary(explicit, customRaw, collected) {
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(term);
-    if (result.length >= MAX_TERMS) break;
+    if (result.length >= MAX_COMBINED_TERMS) break;
   }
   return result;
 }
@@ -5753,7 +5776,7 @@ function extractFilenameTerms(basename) {
   }
   return result;
 }
-function assembleTerms(groups, extra = [], cap = CONTEXT_BIAS_MAX_TERMS) {
+function assembleTerms(groups, extra = [], cap = contextBiasMaxTerms(void 0, "file")) {
   const ordered = [...extra];
   for (const source of TERM_SOURCE_ORDER) {
     for (const group of groups) {
@@ -5829,8 +5852,8 @@ function collectTermGroups(opts) {
   if (settings.vaultVocabulary && noteFile) add("neighborhood", collectVaultVocabulary(app, noteFile));
   return groups;
 }
-function defaultTermSelection(groups) {
-  return assembleTerms(groups);
+function defaultTermSelection(groups, batchModel) {
+  return assembleTerms(groups, [], contextBiasMaxTerms(batchModel, "file"));
 }
 function noteVocabularyTerms(chosen, customBefore) {
   const already = new Set(customBefore.map((t) => t.toLowerCase()));
@@ -5901,13 +5924,17 @@ var TermPreflightModal = class extends import_obsidian5.Modal {
     this.folderPath = defaultFolder != null ? defaultFolder : "";
   }
   chosenTerms() {
-    return assembleTerms(selectedGroups(this.termGroups, this.keptByGroup), parseTypedTerms(this.typedText));
+    return assembleTerms(
+      selectedGroups(this.termGroups, this.keptByGroup),
+      parseTypedTerms(this.typedText),
+      contextBiasMaxTerms(this.batchModel, "file")
+    );
   }
   refreshCounter() {
     if (!this.countEl) return;
     const wire = buildContextBias(this.chosenTerms(), this.batchModel).length;
     this.countEl.setText(
-      `${wire} of at most ${CONTEXT_BIAS_MAX_TERMS} terms will be sent as context bias.`
+      `${wire} of at most ${contextBiasMaxTerms(this.batchModel, "file")} terms will be sent as context bias.`
     );
   }
   onOpen() {
@@ -7303,6 +7330,28 @@ function describeBias(prefix, ctx, batchModel) {
   const bias = buildContextBias(ctx.vocabularyTerms, batchModel);
   return `${prefix} ${bias.length} context-bias term(s)`;
 }
+function fitRequestContextToWindow(ctx, batchModel, audioSeconds) {
+  const bias = buildContextBias(ctx.vocabularyTerms, batchModel);
+  if (!isVoxtral3Model(batchModel)) return { context: ctx, before: bias.length, after: bias.length };
+  const fitted = fitContextBiasToWindow(bias, audioSeconds);
+  if (fitted.length === bias.length) return { context: ctx, before: bias.length, after: bias.length };
+  return { context: { ...ctx, vocabularyTerms: fitted }, before: bias.length, after: fitted.length };
+}
+function isContextWindowError(error) {
+  return error instanceof Error && error.message.includes(CONTEXT_WINDOW_ERROR_TEXT);
+}
+async function withContextWindowRetry(ctx, run, log) {
+  try {
+    return await run(ctx);
+  } catch (e) {
+    const cap = CONTEXT_BIAS_MAX_TERMS_LEGACY_FILE;
+    if (!isContextWindowError(e) || ctx.vocabularyTerms.length <= cap) throw e;
+    await log(
+      `single-call: refused for the context window with ${ctx.vocabularyTerms.length} term(s), retrying with ${cap}`
+    );
+    return run({ ...ctx, vocabularyTerms: ctx.vocabularyTerms.slice(0, cap) });
+  }
+}
 var _FileTranscriptionService = class _FileTranscriptionService {
   constructor(deps) {
     this.deps = deps;
@@ -7576,11 +7625,15 @@ var _FileTranscriptionService = class _FileTranscriptionService {
       let chunks = [];
       if (settings.fileTranscriptDiarize) {
         await this.logStep("single-call: sending diarized request");
-        const result = await this.transcribeDiarized(
-          payload,
-          settings,
+        const result = await withContextWindowRetry(
           ctx,
-          () => this.logStep("single-call: multipart body built, uploading")
+          (c) => this.transcribeDiarized(
+            payload,
+            settings,
+            c,
+            () => this.logStep("single-call: multipart body built, uploading")
+          ),
+          (m) => this.logStep(m)
         );
         await this.logStep(
           `single-call: response text=${result.text.length} chars, ${result.segments.length} segments`
@@ -7605,13 +7658,17 @@ ${fallback}` }];
         await this.logStep(`single-call: built ${chunks.length} review chunk(s)`);
       } else {
         await this.logStep("single-call: sending request");
-        let text2 = (await transcribeBatch(
-          payload,
-          settings,
-          this.httpRequest,
-          false,
+        let text2 = (await withContextWindowRetry(
           ctx,
-          () => this.logStep("single-call: multipart body built, uploading")
+          (c) => transcribeBatch(
+            payload,
+            settings,
+            this.httpRequest,
+            false,
+            c,
+            () => this.logStep("single-call: multipart body built, uploading")
+          ),
+          (m) => this.logStep(m)
         )).trim();
         await this.logStep(`single-call: response text=${text2.length} chars`);
         if (text2 && settings.fileTranscriptCorrect) {
@@ -7951,9 +8008,15 @@ ${fallback}` }];
         await this.logStep(
           `${label(span)}: ${(partBytes.byteLength / (1024 * 1024)).toFixed(1)} MB (${mimeType}), ${Math.round(span.endSec - span.startSec)}s; sending (diarize=${diarize})`
         );
+        const fit = fitRequestContextToWindow(ctx, settings.batchModel, span.endSec - span.startSec);
+        if (fit.after < fit.before) {
+          await this.logStep(
+            `${label(span)}: context-bias list shortened from ${fit.before} to ${fit.after} term(s) to fit the context window`
+          );
+        }
         let result = null;
         try {
-          result = await requestPart(span, payload, ctx);
+          result = await requestPart(span, payload, fit.context);
           await this.logStep(
             `${label(span)}: response text=${result.text.length} chars, ${result.segments.length} segments`
           );
@@ -13962,7 +14025,7 @@ ${getLogText()}
     };
     if (mode === "auto" || !this.settings.fileTranscriptTermPreflight) {
       return {
-        context: { vocabularyTerms: defaultTermSelection(groups), styleInstruction },
+        context: { vocabularyTerms: defaultTermSelection(groups, this.settings.batchModel), styleInstruction },
         options
       };
     }
