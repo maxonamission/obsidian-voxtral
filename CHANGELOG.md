@@ -6,6 +6,15 @@ plugin follows [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.21.1] - 2026-11-08
+
+- **A stronger microphone check after a lock.** After a long lock the microphone could
+  look fine on return yet deliver no audio, so nothing was transcribed until you
+  stopped. When you come back, the plugin now also checks that audio is actually
+  coming in and, if not, reopens the microphone in the same recording. After a very
+  long lock (an hour or more) the phone may close Obsidian altogether; then start a
+  new recording.
+
 ## [1.21.0] - 2026-11-07
 
 - **Longer vocabulary lists with Voxtral 3.** Up to 1000 terms now go along with a

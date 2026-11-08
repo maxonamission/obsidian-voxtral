@@ -1849,7 +1849,7 @@ function buildAudioConstraints(noiseSuppression, deviceId) {
   if (deviceId) constraints.deviceId = { exact: deviceId };
   return constraints;
 }
-var AudioRecorder = class {
+var _AudioRecorder = class _AudioRecorder {
   constructor() {
     this.stream = null;
     this.audioContext = null;
@@ -1870,6 +1870,21 @@ var AudioRecorder = class {
     this.fallbackUsed = false;
     /** Duration in seconds of the last flushed/stopped chunk */
     this.lastChunkDurationSec = 0;
+    /**
+     * Whether the capture pipeline is still alive (VX_E22_S12). After the
+     * device was locked or the app was in the background the OS may have ended
+     * the microphone track, closed the AudioContext or interrupted it (Safari's
+     * non-standard "interrupted" state). A merely suspended or interrupted
+     * context gets one `resume()` first, since that is the normal way back.
+     * Resolves `false` when the pipeline has to be rebuilt (stop + start).
+     */
+    /**
+     * Resolvers waiting for the next worklet message (VX_E22_S13). The worklet
+     * posts every render quantum (128 frames, ~8 ms), also while the track is
+     * disabled by a pause: it then sends zeros. Silence from the worklet itself
+     * means the audio graph stopped, whatever the track and context report.
+     */
+    this.pcmWaiters = [];
   }
   /**
    * Enumerate available audio input devices.
@@ -1931,6 +1946,7 @@ var AudioRecorder = class {
         );
         this.workletNode.port.onmessage = (e) => {
           var _a;
+          this.notifyPcmWaiters();
           (_a = this.onPcmChunk) == null ? void 0 : _a.call(this, e.data);
         };
         this.sourceNode.connect(this.workletNode);
@@ -2116,13 +2132,44 @@ var AudioRecorder = class {
     }
   }
   /**
-   * Whether the capture pipeline is still alive (VX_E22_S12). After the
-   * device was locked or the app was in the background the OS may have ended
-   * the microphone track, closed the AudioContext or interrupted it (Safari's
-   * non-standard "interrupted" state). A merely suspended or interrupted
-   * context gets one `resume()` first, since that is the normal way back.
-   * Resolves `false` when the pipeline has to be rebuilt (stop + start).
+   * One-line state of the capture pipeline for the crash log (VX_E22_S13):
+   * track state, whether the OS muted it (`muted`, which `ensureAlive` does
+   * not treat as dead), the typing mute (`enabled`), the AudioContext and the
+   * batch MediaRecorder. No audio, no device names.
    */
+  describeCapture() {
+    var _a;
+    const track = (_a = this.stream) == null ? void 0 : _a.getAudioTracks()[0];
+    const trackPart = track ? `track ${track.readyState}, muted ${track.muted ? "yes" : "no"}, enabled ${track.enabled ? "yes" : "no"}` : "no track";
+    const contextPart = `context ${this.audioContext ? String(this.audioContext.state) : "none"}`;
+    const recorderPart = this.mediaRecorder ? `, recorder ${this.mediaRecorder.state}` : "";
+    return `${trackPart}, ${contextPart}${recorderPart}`;
+  }
+  notifyPcmWaiters() {
+    if (this.pcmWaiters.length === 0) return;
+    const waiters = this.pcmWaiters;
+    this.pcmWaiters = [];
+    for (const resolve of waiters) resolve();
+  }
+  /** Resolves true when the worklet posts within `timeoutMs`, false otherwise. */
+  waitForPcm(timeoutMs) {
+    return new Promise((resolve) => {
+      let done = false;
+      const timer = window.setTimeout(() => {
+        if (done) return;
+        done = true;
+        this.pcmWaiters = this.pcmWaiters.filter((w) => w !== onPcm);
+        resolve(false);
+      }, timeoutMs);
+      const onPcm = () => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer);
+        resolve(true);
+      };
+      this.pcmWaiters.push(onPcm);
+    });
+  }
   async ensureAlive() {
     const stream = this.stream;
     const context = this.audioContext;
@@ -2151,6 +2198,10 @@ var AudioRecorder = class {
         return false;
       }
     }
+    if (this.workletNode && !await this.waitForPcm(_AudioRecorder.PCM_HEARTBEAT_TIMEOUT_MS)) {
+      vlog.warn("Voxtral: no audio from the worklet after returning; treating the pipeline as dead");
+      return false;
+    }
     return true;
   }
   /** Silence the mic input without pausing the recorder */
@@ -2176,6 +2227,9 @@ var AudioRecorder = class {
     return "audio/webm";
   }
 };
+/** How long `ensureAlive` waits for the worklet (posts every ~8 ms when alive). */
+_AudioRecorder.PCM_HEARTBEAT_TIMEOUT_MS = 1500;
+var AudioRecorder = _AudioRecorder;
 
 // ../shared/src/tts.ts
 var TTS_MODEL = "voxtral-mini-tts-2603";
@@ -12033,6 +12087,8 @@ var RecordingController = class {
     // The in-flight liveness check/rebuild, so a visibility flicker never runs
     // two rebuilds and stop() can wait for one instead of racing it.
     this.revivePromise = null;
+    // Set on a return to the foreground until the first realtime audio arrives (VX_E22_S13).
+    this.awaitingAudioSince = null;
     // Batch audio recorded before a rebuild that has not been transcribed
     // yet: sent right after a successful rebuild, or folded into the final
     // stop when the rebuild failed. Never dropped.
@@ -12244,10 +12300,14 @@ var RecordingController = class {
    * pipeline, rebuild it when the OS took it away, and carry on.
    */
   async returnToForeground() {
+    var _a, _b;
     if (this.revivePromise) return;
     const wasPaused = this.currentState === "paused";
     const result = await this.ensureRecorderAlive();
-    this.log(`back in the foreground (${wasPaused ? "paused" : "recording"}), microphone ${result.outcome}`);
+    const capture = (_b = (_a = this.deps.recorder).describeCapture) == null ? void 0 : _b.call(_a);
+    this.log(
+      `back in the foreground (${wasPaused ? "paused" : "recording"}), microphone ${result.outcome}` + (capture ? ` (${capture})` : "")
+    );
     if (!this.isRecording()) return;
     if (result.outcome === "failed") {
       this.log(`could not reopen the microphone, stopping: ${String(result.error)}`);
@@ -12276,6 +12336,7 @@ var RecordingController = class {
       this.deps.notify("Recording resumed");
       vlog.debug("Voxtral: Recording resumed (app foregrounded)");
     }
+    this.awaitingAudioSince = Date.now();
     this.sendSalvaged();
   }
   /** Deduplicated liveness check + rebuild; see `reviveRecorder()`. */
@@ -12296,7 +12357,7 @@ var RecordingController = class {
       this.log(`liveness check failed, treating the recorder as dead: ${String(e)}`);
     }
     if (alive) return { outcome: "alive" };
-    this.log("microphone or audio context did not survive, reopening");
+    this.log("microphone, audio context or audio stream did not survive, reopening");
     return this.rebuildRecorder();
   }
   /**
@@ -12372,6 +12433,20 @@ var RecordingController = class {
       this.log(`wake lock ${what} failed: ${String(e)}`);
     }
   }
+  /**
+   * The first realtime audio after a return to the foreground (VX_E22_S13):
+   * how long it took and whether it was all zeros. Logged once per return;
+   * only these two facts, never the audio.
+   */
+  logFirstAudio(pcmData) {
+    const since = this.awaitingAudioSince;
+    if (since === null) return;
+    this.awaitingAudioSince = null;
+    const secs = ((Date.now() - since) / 1e3).toFixed(1);
+    const samples = new Int16Array(pcmData, 0, Math.floor(pcmData.byteLength / 2));
+    const silent = samples.every((s) => s === 0);
+    this.log(`first audio after returning: ${secs} s, ${silent ? "silent (all zeros)" : "has sound"}`);
+  }
   log(message) {
     var _a, _b;
     (_b = (_a = this.deps).logLifecycle) == null ? void 0 : _b.call(_a, `recording: ${message}`);
@@ -12441,7 +12516,8 @@ var RecordingController = class {
     const deviceId = settings.microphoneDeviceId || void 0;
     const onPcm = this.effectiveMode === "realtime" ? (pcmData) => {
       var _a;
-      return (_a = this.session) == null ? void 0 : _a.sendAudio(pcmData);
+      if (this.awaitingAudioSince !== null) this.logFirstAudio(pcmData);
+      (_a = this.session) == null ? void 0 : _a.sendAudio(pcmData);
     } : void 0;
     return this.deps.recorder.start(deviceId, onPcm, settings.noiseSuppression);
   }
